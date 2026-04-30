@@ -1,0 +1,232 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model User {
+  id        String   @id @default(uuid())
+  createdAt DateTime @default(now())
+
+  email    String? @unique
+  username String? @unique
+  isAdmin  Boolean @default(false)
+
+  company   Company? @relation(fields: [companyId], references: [id])
+  companyId String?
+  role      String   @default("client")
+  fullName  String?
+}
+
+model Company {
+  id        String   @id @default(uuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  name         String
+  legalName    String?
+  email        String?
+  phone        String?
+  address      String?
+  city         String?
+  province     String  @default("QC")
+  postalCode   String?
+  country      String  @default("Canada")
+  website      String?
+  neq          String?
+  taxNumberGst String?
+  taxNumberQst String?
+  currency     String  @default("CAD")
+  locale       String  @default("fr-CA")
+
+  users       User[]
+  clients     Client[]
+  projects    Project[]
+  quotes      Quote[]
+  invoices    Invoice[]
+  payments    Payment[]
+  meetings    Meeting[]
+  automations Automation[]
+}
+
+model Client {
+  id        String   @id @default(uuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  companyId String
+
+  name        String
+  contactName String?
+  email       String?
+  phone       String?
+  address     String?
+  city        String?
+  province    String  @default("QC")
+  postalCode  String?
+  notes       String?
+  status      String  @default("actif")
+
+  projects Project[]
+  quotes   Quote[]
+  invoices Invoice[]
+  meetings Meeting[]
+}
+
+model Project {
+  id        String   @id @default(uuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  companyId String
+
+  client   Client? @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  clientId String?
+
+  name        String
+  description String?
+  status      String    @default("en_cours")
+  startDate   DateTime?
+  dueDate     DateTime?
+  budget      Float?
+
+  quotes   Quote[]
+  invoices Invoice[]
+}
+
+model Quote {
+  id        String   @id @default(uuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  companyId String
+
+  client   Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  clientId String
+
+  project   Project? @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  projectId String?
+
+  number      String
+  title       String
+  description String?
+  status      String      @default("brouillon")
+  issueDate   DateTime    @default(now())
+  validUntil  DateTime?
+  subtotal    Float       @default(0)
+  taxGst      Float       @default(0)
+  taxQst      Float       @default(0)
+  total       Float       @default(0)
+  notes       String?
+  items       QuoteItem[]
+}
+
+model QuoteItem {
+  id      String @id @default(uuid())
+  quote   Quote  @relation(fields: [quoteId], references: [id], onDelete: Cascade)
+  quoteId String
+
+  description String
+  quantity    Float  @default(1)
+  unitPrice   Float  @default(0)
+  amount      Float  @default(0)
+}
+
+model Invoice {
+  id        String   @id @default(uuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  companyId String
+
+  client   Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  clientId String
+
+  project   Project? @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  projectId String?
+
+  number     String
+  status     String    @default("brouillon")
+  issueDate  DateTime  @default(now())
+  dueDate    DateTime?
+  subtotal   Float     @default(0)
+  taxGst     Float     @default(0)
+  taxQst     Float     @default(0)
+  total      Float     @default(0)
+  amountPaid Float     @default(0)
+  notes      String?
+
+  items    InvoiceItem[]
+  payments Payment[]
+}
+
+model InvoiceItem {
+  id        String  @id @default(uuid())
+  invoice   Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  invoiceId String
+
+  description String
+  quantity    Float  @default(1)
+  unitPrice   Float  @default(0)
+  amount      Float  @default(0)
+}
+
+model Payment {
+  id        String   @id @default(uuid())
+  createdAt DateTime @default(now())
+
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  companyId String
+
+  invoice   Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  invoiceId String
+
+  amount    Float
+  method    String   @default("virement")
+  paidAt    DateTime @default(now())
+  reference String?
+  notes     String?
+}
+
+model Meeting {
+  id        String   @id @default(uuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  companyId String
+
+  client   Client? @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  clientId String?
+
+  title       String
+  description String?
+  startsAt    DateTime
+  endsAt      DateTime?
+  location    String?
+  meetingUrl  String?
+  status      String    @default("prevue")
+}
+
+model Automation {
+  id        String   @id @default(uuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  companyId String
+
+  name        String
+  description String?
+  trigger     String
+  action      String
+  isActive    Boolean @default(true)
+  config      Json?
+}

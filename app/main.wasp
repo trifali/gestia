@@ -1,0 +1,277 @@
+app gestia {
+  wasp: {
+    version: "^0.16.0"
+  },
+
+  title: "Gestia — Gestion intelligente pour entreprises québécoises",
+
+  head: [
+    "<link rel='icon' href='/favicon.ico' />",
+    "<meta charset='utf-8' />",
+    "<meta name='description' content='Gestia — La plateforme tout-en-un pour gérer clients, projets, soumissions, factures et paiements au Québec.' />",
+    "<meta name='author' content='Gestia' />",
+    "<meta name='keywords' content='SaaS, Québec, gestion, clients, projets, soumissions, factures, paiements, entreprise' />",
+
+    "<meta property='og:type' content='website' />",
+    "<meta property='og:title' content='Gestia — Gestion intelligente' />",
+    "<meta property='og:site_name' content='Gestia' />",
+    "<meta property='og:description' content='Gérez clients, projets, soumissions, factures et paiements en un seul endroit.' />"
+  ],
+
+  auth: {
+    userEntity: User,
+    methods: {
+      email: {
+        fromField: {
+          name: "Gestia",
+          email: "info@gestia.ca"
+        },
+        emailVerification: {
+          clientRoute: EmailVerificationRoute,
+          getEmailContentFn: import { getVerificationEmailContent } from "@src/auth/email-and-pass/emails",
+        },
+        passwordReset: {
+          clientRoute: PasswordResetRoute,
+          getEmailContentFn: import { getPasswordResetEmailContent } from "@src/auth/email-and-pass/emails",
+        },
+        userSignupFields: import { getEmailUserFields } from "@src/auth/userSignupFields",
+      },
+    },
+    onAuthFailedRedirectTo: "/connexion",
+    onAuthSucceededRedirectTo: "/tableau-de-bord",
+  },
+
+  client: {
+    rootComponent: import App from "@src/client/App",
+  },
+
+  emailSender: {
+    provider: Dummy,
+    defaultFrom: {
+      name: "Gestia",
+      email: "info@gestia.ca"
+    },
+  },
+}
+
+route LandingPageRoute { path: "/", to: LandingPage }
+page LandingPage {
+  component: import LandingPage from "@src/landing/LandingPage"
+}
+
+route LoginRoute { path: "/connexion", to: LoginPage }
+page LoginPage {
+  component: import Login from "@src/auth/LoginPage"
+}
+
+route SignupRoute { path: "/inscription", to: SignupPage }
+page SignupPage {
+  component: import { Signup } from "@src/auth/SignupPage"
+}
+
+route RequestPasswordResetRoute { path: "/mot-de-passe-oublie", to: RequestPasswordResetPage }
+page RequestPasswordResetPage {
+  component: import { RequestPasswordResetPage } from "@src/auth/email-and-pass/RequestPasswordResetPage",
+}
+
+route PasswordResetRoute { path: "/reinitialiser-mot-de-passe", to: PasswordResetPage }
+page PasswordResetPage {
+  component: import { PasswordResetPage } from "@src/auth/email-and-pass/PasswordResetPage",
+}
+
+route EmailVerificationRoute { path: "/verification-courriel", to: EmailVerificationPage }
+page EmailVerificationPage {
+  component: import { EmailVerificationPage } from "@src/auth/email-and-pass/EmailVerificationPage",
+}
+
+route DashboardRoute { path: "/tableau-de-bord", to: DashboardPage }
+page DashboardPage {
+  authRequired: true,
+  component: import DashboardPage from "@src/app/dashboard/DashboardPage"
+}
+
+route ClientsRoute { path: "/clients", to: ClientsPage }
+page ClientsPage {
+  authRequired: true,
+  component: import ClientsPage from "@src/app/clients/ClientsPage"
+}
+
+route ProjectsRoute { path: "/projets", to: ProjectsPage }
+page ProjectsPage {
+  authRequired: true,
+  component: import ProjectsPage from "@src/app/projects/ProjectsPage"
+}
+
+route QuotesRoute { path: "/soumissions", to: QuotesPage }
+page QuotesPage {
+  authRequired: true,
+  component: import QuotesPage from "@src/app/quotes/QuotesPage"
+}
+
+route InvoicesRoute { path: "/factures", to: InvoicesPage }
+page InvoicesPage {
+  authRequired: true,
+  component: import InvoicesPage from "@src/app/invoices/InvoicesPage"
+}
+
+route PaymentsRoute { path: "/paiements", to: PaymentsPage }
+page PaymentsPage {
+  authRequired: true,
+  component: import PaymentsPage from "@src/app/payments/PaymentsPage"
+}
+
+route MeetingsRoute { path: "/rencontres", to: MeetingsPage }
+page MeetingsPage {
+  authRequired: true,
+  component: import MeetingsPage from "@src/app/meetings/MeetingsPage"
+}
+
+route AutomationsRoute { path: "/automatisations", to: AutomationsPage }
+page AutomationsPage {
+  authRequired: true,
+  component: import AutomationsPage from "@src/app/automations/AutomationsPage"
+}
+
+route SettingsRoute { path: "/parametres", to: SettingsPage }
+page SettingsPage {
+  authRequired: true,
+  component: import SettingsPage from "@src/app/settings/SettingsPage"
+}
+
+route NotFoundRoute { path: "*", to: NotFoundPage }
+page NotFoundPage {
+  component: import { NotFoundPage } from "@src/client/NotFoundPage"
+}
+
+query getCurrentCompany {
+  fn: import { getCurrentCompany } from "@src/app/company/operations",
+  entities: [User, Company]
+}
+action updateCompany {
+  fn: import { updateCompany } from "@src/app/company/operations",
+  entities: [User, Company]
+}
+action createCompany {
+  fn: import { createCompany } from "@src/app/company/operations",
+  entities: [User, Company]
+}
+
+query getClients {
+  fn: import { getClients } from "@src/app/clients/operations",
+  entities: [User, Client]
+}
+action createClient {
+  fn: import { createClient } from "@src/app/clients/operations",
+  entities: [User, Client]
+}
+action updateClient {
+  fn: import { updateClient } from "@src/app/clients/operations",
+  entities: [User, Client]
+}
+action deleteClient {
+  fn: import { deleteClient } from "@src/app/clients/operations",
+  entities: [User, Client]
+}
+
+query getProjects {
+  fn: import { getProjects } from "@src/app/projects/operations",
+  entities: [User, Project, Client]
+}
+action createProject {
+  fn: import { createProject } from "@src/app/projects/operations",
+  entities: [User, Project]
+}
+action updateProject {
+  fn: import { updateProject } from "@src/app/projects/operations",
+  entities: [User, Project]
+}
+action deleteProject {
+  fn: import { deleteProject } from "@src/app/projects/operations",
+  entities: [User, Project]
+}
+
+query getQuotes {
+  fn: import { getQuotes } from "@src/app/quotes/operations",
+  entities: [User, Quote, Client, Project]
+}
+action createQuote {
+  fn: import { createQuote } from "@src/app/quotes/operations",
+  entities: [User, Quote, QuoteItem]
+}
+action updateQuoteStatus {
+  fn: import { updateQuoteStatus } from "@src/app/quotes/operations",
+  entities: [User, Quote]
+}
+action deleteQuote {
+  fn: import { deleteQuote } from "@src/app/quotes/operations",
+  entities: [User, Quote]
+}
+
+query getInvoices {
+  fn: import { getInvoices } from "@src/app/invoices/operations",
+  entities: [User, Invoice, Client, Project, Payment]
+}
+action createInvoice {
+  fn: import { createInvoice } from "@src/app/invoices/operations",
+  entities: [User, Invoice, InvoiceItem]
+}
+action updateInvoiceStatus {
+  fn: import { updateInvoiceStatus } from "@src/app/invoices/operations",
+  entities: [User, Invoice]
+}
+action deleteInvoice {
+  fn: import { deleteInvoice } from "@src/app/invoices/operations",
+  entities: [User, Invoice]
+}
+
+query getPayments {
+  fn: import { getPayments } from "@src/app/payments/operations",
+  entities: [User, Payment, Invoice, Client]
+}
+action createPayment {
+  fn: import { createPayment } from "@src/app/payments/operations",
+  entities: [User, Payment, Invoice]
+}
+action deletePayment {
+  fn: import { deletePayment } from "@src/app/payments/operations",
+  entities: [User, Payment, Invoice]
+}
+
+query getMeetings {
+  fn: import { getMeetings } from "@src/app/meetings/operations",
+  entities: [User, Meeting, Client]
+}
+action createMeeting {
+  fn: import { createMeeting } from "@src/app/meetings/operations",
+  entities: [User, Meeting]
+}
+action updateMeeting {
+  fn: import { updateMeeting } from "@src/app/meetings/operations",
+  entities: [User, Meeting]
+}
+action deleteMeeting {
+  fn: import { deleteMeeting } from "@src/app/meetings/operations",
+  entities: [User, Meeting]
+}
+
+query getAutomations {
+  fn: import { getAutomations } from "@src/app/automations/operations",
+  entities: [User, Automation]
+}
+action createAutomation {
+  fn: import { createAutomation } from "@src/app/automations/operations",
+  entities: [User, Automation]
+}
+action updateAutomation {
+  fn: import { updateAutomation } from "@src/app/automations/operations",
+  entities: [User, Automation]
+}
+action deleteAutomation {
+  fn: import { deleteAutomation } from "@src/app/automations/operations",
+  entities: [User, Automation]
+}
+
+query getDashboardStats {
+  fn: import { getDashboardStats } from "@src/app/dashboard/operations",
+  entities: [User, Client, Project, Quote, Invoice, Payment, Meeting]
+}
