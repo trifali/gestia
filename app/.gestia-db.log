@@ -1,0 +1,25 @@
+
+PostgreSQL Database directory appears to contain a database; Skipping initialization
+
+2026-04-30 18:29:28.964 UTC [1] LOG:  starting PostgreSQL 17.5 (Debian 17.5-1.pgdg120+1) on x86_64-pc-linux-gnu, compiled by gcc (Debian 12.2.0-14) 12.2.0, 64-bit
+2026-04-30 18:29:28.964 UTC [1] LOG:  listening on IPv4 address "0.0.0.0", port 5432
+2026-04-30 18:29:28.964 UTC [1] LOG:  listening on IPv6 address "::", port 5432
+2026-04-30 18:29:28.968 UTC [1] LOG:  listening on Unix socket "/var/run/postgresql/.s.PGSQL.5432"
+2026-04-30 18:29:28.974 UTC [29] LOG:  database system was shut down at 2026-04-30 18:28:39 UTC
+2026-04-30 18:29:28.981 UTC [1] LOG:  database system is ready to accept connections
+2026-04-30 18:29:29.165 UTC [33] LOG:  incomplete startup packet
+2026-04-30 18:29:29.167 UTC [34] LOG:  incomplete startup packet
+2026-04-30 18:29:41.554 UTC [38] FATAL:  terminating connection due to administrator command
+2026-04-30 18:29:41.658 UTC [27] LOG:  checkpoint starting: immediate force wait
+2026-04-30 18:29:41.673 UTC [27] LOG:  checkpoint complete: wrote 6 buffers (0.0%); 0 WAL file(s) added, 0 removed, 0 recycled; write=0.004 s, sync=0.003 s, total=0.015 s; sync files=5, longest=0.002 s, average=0.001 s; distance=4620 kB, estimate=4620 kB; lsn=0/65B6170, redo lsn=0/65B6118
+2026-04-30 18:29:41.887 UTC [39] FATAL:  terminating connection due to administrator command
+2026-04-30 18:29:41.991 UTC [27] LOG:  checkpoint starting: immediate force wait
+2026-04-30 18:29:42.003 UTC [27] LOG:  checkpoint complete: wrote 4 buffers (0.0%); 0 WAL file(s) added, 0 removed, 0 recycled; write=0.002 s, sync=0.003 s, total=0.013 s; sync files=4, longest=0.002 s, average=0.001 s; distance=4621 kB, estimate=4621 kB; lsn=0/6A39668, redo lsn=0/6A39610
+2026-04-30 18:29:42.165 UTC [40] FATAL:  terminating connection due to administrator command
+2026-04-30 18:29:42.269 UTC [27] LOG:  checkpoint starting: immediate force wait
+2026-04-30 18:29:42.290 UTC [27] LOG:  checkpoint complete: wrote 4 buffers (0.0%); 0 WAL file(s) added, 0 removed, 0 recycled; write=0.007 s, sync=0.003 s, total=0.021 s; sync files=4, longest=0.002 s, average=0.001 s; distance=4621 kB, estimate=4621 kB; lsn=0/6EBCC88, redo lsn=0/6EBCC30
+2026-04-30 18:29:42.445 UTC [41] FATAL:  terminating connection due to administrator command
+2026-04-30 18:29:42.548 UTC [27] LOG:  checkpoint starting: immediate force wait
+2026-04-30 18:29:42.561 UTC [27] LOG:  checkpoint complete: wrote 4 buffers (0.0%); 0 WAL file(s) added, 0 removed, 1 recycled; write=0.003 s, sync=0.003 s, total=0.013 s; sync files=4, longest=0.002 s, average=0.001 s; distance=4621 kB, estimate=4621 kB; lsn=0/73403B0, redo lsn=0/7340358
+2026-04-30 18:34:42.660 UTC [27] LOG:  checkpoint starting: time
+2026-04-30 18:34:45.402 UTC [27] LOG:  checkpoint complete: wrote 28 buffers (0.2%); 0 WAL file(s) added, 0 removed, 0 recycled; write=2.729 s, sync=0.007 s, total=2.742 s; sync files=18, longest=0.004 s, average=0.001 s; distance=5 kB, estimate=4160 kB; lsn=0/7341920, redo lsn=0/7341890

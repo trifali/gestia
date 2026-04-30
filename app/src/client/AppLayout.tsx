@@ -1,4 +1,4 @@
-import { Link, NavLink, useNavigate } from 'react-router-dom';
+import { Link, NavLink, useNavigate, useLocation, Navigate } from 'react-router-dom';
 import { logout } from 'wasp/client/auth';
 import { useQuery, getCurrentCompany } from 'wasp/client/operations';
 import { useState, type ReactNode } from 'react';
@@ -47,9 +47,17 @@ function Icon({ name, className = 'w-5 h-5' }: { name: string; className?: strin
 }
 
 export default function AppLayout({ user, children }: AppLayoutProps) {
-  const { data: company } = useQuery(getCurrentCompany);
+  const { data: company, isLoading: companyLoading } = useQuery(getCurrentCompany);
   const [mobileOpen, setMobileOpen] = useState(false);
   const navigate = useNavigate();
+  const location = useLocation();
+
+  // Tant que l'utilisateur n'a pas créé d'entreprise, on le force sur le tableau
+  // de bord où s'affiche le formulaire d'intégration. Évite ainsi les 403 sur
+  // toutes les autres pages dont les requêtes nécessitent un companyId.
+  if (!companyLoading && !company && location.pathname !== '/tableau-de-bord') {
+    return <Navigate to='/tableau-de-bord' replace />;
+  }
 
   const initials = (user?.email || 'U').slice(0, 2).toUpperCase();
 
