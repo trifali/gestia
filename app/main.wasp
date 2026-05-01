@@ -7,7 +7,6 @@ app gestia {
 
   head: [
     "<link rel='icon' href='/favicon.ico' />",
-    "<meta charset='utf-8' />",
     "<meta name='description' content='Gestia — La plateforme tout-en-un pour gérer clients, projets, soumissions, factures et paiements au Québec.' />",
     "<meta name='author' content='Gestia' />",
     "<meta name='keywords' content='SaaS, Québec, gestion, clients, projets, soumissions, factures, paiements, entreprise' />",
