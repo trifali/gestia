@@ -143,6 +143,11 @@ page NotFoundPage {
   component: import { NotFoundPage } from "@src/client/NotFoundPage"
 }
 
+query getAppConfig {
+  fn: import { getAppConfig } from "@src/server/config",
+  entities: []
+}
+
 query getCurrentCompany {
   fn: import { getCurrentCompany } from "@src/app/company/operations",
   entities: [User, Company]
