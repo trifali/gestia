@@ -1,5 +1,5 @@
 import { Fragment, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router';
 import { LuChevronDown, LuChevronUp, LuArrowRight } from 'react-icons/lu';
 import toast from 'react-hot-toast';
 import { useQuery, getClients, createClient, updateClient, deleteClient } from 'wasp/client/operations';

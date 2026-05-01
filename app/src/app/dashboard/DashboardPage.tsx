@@ -1,5 +1,5 @@
 import { useQuery, getDashboardStats, getCurrentCompany, createCompany } from 'wasp/client/operations';
-import { Link } from 'react-router-dom';
+import { Link } from 'react-router';
 import { useState } from 'react';
 import toast from 'react-hot-toast';
 import { PageHeader, EmptyState } from '../../client/ui';

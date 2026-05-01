@@ -1,4 +1,4 @@
-import { Link, NavLink, useNavigate, useLocation, Navigate } from 'react-router-dom';
+import { Link, NavLink, useNavigate, useLocation, Navigate } from 'react-router';
 import { logout } from 'wasp/client/auth';
 import { useQuery, getCurrentCompany } from 'wasp/client/operations';
 import { useState, type ReactNode } from 'react';

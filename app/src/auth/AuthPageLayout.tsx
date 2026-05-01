@@ -1,4 +1,4 @@
-import { Link } from 'react-router-dom';
+import { Link } from 'react-router';
 import { type ReactNode } from 'react';
 
 export function AuthPageLayout({ children, title, subtitle }: { children: ReactNode; title: string; subtitle?: string }) {

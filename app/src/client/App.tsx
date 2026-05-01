@@ -1,5 +1,5 @@
 import './Main.css';
-import { Outlet, useLocation } from 'react-router-dom';
+import { Outlet, useLocation } from 'react-router';
 import { useAuth } from 'wasp/client/auth';
 import { Toaster } from 'react-hot-toast';
 import AppLayout from './AppLayout';
