@@ -36,7 +36,7 @@ export const getDocuments: GetDocuments<void, DocumentWithDetails[]> = async (_a
   });
 };
 
-type ItemInput = { description: string; quantity: number; unitPrice: number };
+type ItemInput = { description: string; note?: string | null; quantity: number; unitPrice: number };
 type CreateDocumentArgs = {
   type: DocumentType;
   clientId: string;
@@ -75,6 +75,7 @@ export const createDocument: CreateDocument<CreateDocumentArgs, Document> = asyn
       items: {
         create: args.items.map((it) => ({
           description: it.description,
+          note: it.note?.trim() || null,
           quantity: it.quantity,
           unitPrice: it.unitPrice,
           amount: +(it.quantity * it.unitPrice).toFixed(2),
@@ -130,6 +131,7 @@ export const updateDocument: UpdateDocument<UpdateDocumentArgs, Document> = asyn
     data.items = {
       create: args.items.map((it) => ({
         description: it.description,
+        note: it.note?.trim() || null,
         quantity: it.quantity,
         unitPrice: it.unitPrice,
         amount: +(it.quantity * it.unitPrice).toFixed(2),

@@ -1,11 +1,12 @@
 import { useMemo, useState } from 'react';
-import { createDocument, updateDocument } from 'wasp/client/operations';
+import { createDocument, updateDocument, useQuery, getPriceItems, createPriceItem } from 'wasp/client/operations';
 import { Modal } from '../../client/ui';
 import {
   ItemsEditor,
   TotalsDisplay,
   prepareItemsForSubmit,
   type LineItem,
+  type PriceItemLike,
 } from './ItemsEditor';
 
 export type DocumentMode = 'quote' | 'invoice';
@@ -89,6 +90,7 @@ export function DocumentForm({
     document?.items?.length
       ? document.items.map((i) => ({
           description: i.description,
+          note: (i as any).note || '',
           quantity: i.quantity,
           unitPrice: i.unitPrice,
         }))
@@ -98,6 +100,8 @@ export function DocumentForm({
   );
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const { data: priceItems } = useQuery(getPriceItems);
 
   const filteredProjects = useMemo(
     () => projects.filter((p) => !clientId || p.clientId === clientId),
@@ -251,7 +255,22 @@ export function DocumentForm({
           </div>
         </div>
 
-        <ItemsEditor items={items} setItems={setItems} />
+        <ItemsEditor
+          items={items}
+          setItems={setItems}
+          priceItems={priceItems as PriceItemLike[] | undefined}
+          onAddToCatalogue={async (name, description) => {
+            const exists = (priceItems as PriceItemLike[] | undefined)?.some(
+              (p) => p.name.trim().toLowerCase() === name.toLowerCase()
+            );
+            if (exists) return;
+            try {
+              await createPriceItem({ name, description: description ?? undefined, unitPrice: 0 });
+            } catch (e: any) {
+              alert(e.message ?? 'Impossible d\'ajouter au catalogue');
+            }
+          }}
+        />
         <TotalsDisplay items={items} />
 
         <div>

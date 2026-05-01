@@ -19,7 +19,7 @@ import { formatCurrency } from '../../shared/format';
 export default function SettingsPage() {
   const { data: user } = useAuth();
   const { data: company, isLoading } = useQuery(getCurrentCompany);
-  const [tab, setTab] = useState<'entreprise' | 'tarifs' | 'compte' | 'localisation'>('entreprise');
+  const [tab, setTab] = useState<'entreprise' | 'catalogue' | 'compte' | 'localisation'>('entreprise');
 
   if (isLoading) return <div className='text-muted'>Chargement…</div>;
   if (!company) return <div className='text-muted'>Aucune entreprise associée.</div>;
@@ -32,13 +32,13 @@ export default function SettingsPage() {
 
       <div className='flex gap-2 border-b border-line mb-6'>
         <TabButton active={tab === 'entreprise'} onClick={() => setTab('entreprise')}>Entreprise</TabButton>
-        <TabButton active={tab === 'tarifs'} onClick={() => setTab('tarifs')}>Tarifs</TabButton>
+        <TabButton active={tab === 'catalogue'} onClick={() => setTab('catalogue')}>Catalogue</TabButton>
         <TabButton active={tab === 'compte'} onClick={() => setTab('compte')}>Compte</TabButton>
         <TabButton active={tab === 'localisation'} onClick={() => setTab('localisation')}>Localisation</TabButton>
       </div>
 
       {tab === 'entreprise' && <CompanyForm company={company} canEdit={!!isAdmin} />}
-      {tab === 'tarifs' && <PriceList canEdit={!!isAdmin} />}
+      {tab === 'catalogue' && <PriceList canEdit={!!isAdmin} />}
       {tab === 'compte' && <AccountInfo user={user} role={(user as any)?.role || 'client'} />}
       {tab === 'localisation' && <LocalizationInfo />}
     </>
