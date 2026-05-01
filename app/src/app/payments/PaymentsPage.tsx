@@ -6,7 +6,7 @@ import {
   createPayment,
   deletePayment,
 } from 'wasp/client/operations';
-import { PageHeader, EmptyState, Modal } from '../../client/ui';
+import { PageHeader, EmptyState, Modal, useConfirm } from '../../client/ui';
 import { formatCurrency, formatDate, formatDateForInput } from '../../shared/format';
 
 const METHODS: Record<string, string> = {
@@ -21,6 +21,7 @@ export default function PaymentsPage() {
   const { data: payments, isLoading } = useQuery(getPayments);
   const { data: invoices } = useQuery(getInvoices);
   const [creating, setCreating] = useState(false);
+  const { ask, Dialog: ConfirmDialog } = useConfirm();
 
   return (
     <>
@@ -65,7 +66,7 @@ export default function PaymentsPage() {
                     <button
                       className='btn-ghost text-xs text-danger'
                       onClick={async () => {
-                        if (confirm('Supprimer ce paiement ?')) {
+                        if (await ask('Supprimer ce paiement ?')) {
                           await deletePayment({ id: p.id });
                         }
                       }}
@@ -83,6 +84,7 @@ export default function PaymentsPage() {
       {creating && (
         <PaymentForm invoices={invoices || []} onClose={() => setCreating(false)} />
       )}
+      {ConfirmDialog}
     </>
   );
 }
@@ -154,7 +156,7 @@ function PaymentForm({ invoices, onClose }: { invoices: any[]; onClose: () => vo
             ))}
           </select>
         </div>
-        <div className='grid grid-cols-2 gap-4'>
+        <div className='grid grid-cols-1 sm:grid-cols-2 gap-4'>
           <div>
             <label className='label'>Montant (CAD) *</label>
             <input type='number' step='0.01' className='input' required value={amount} onChange={(e) => setAmount(e.target.value)} />

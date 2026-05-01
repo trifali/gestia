@@ -8,7 +8,7 @@ import {
   updateInvoiceStatus,
   deleteInvoice,
 } from 'wasp/client/operations';
-import { PageHeader, EmptyState, Modal } from '../../client/ui';
+import { PageHeader, EmptyState, Modal, useConfirm } from '../../client/ui';
 import { formatCurrency, formatDate } from '../../shared/format';
 
 const STATUS: Record<string, { label: string; className: string }> = {
@@ -27,6 +27,7 @@ export default function InvoicesPage() {
   const { data: clients } = useQuery(getClients);
   const { data: projects } = useQuery(getProjects);
   const [creating, setCreating] = useState(false);
+  const { ask, Dialog: ConfirmDialog } = useConfirm();
 
   return (
     <>
@@ -89,7 +90,7 @@ export default function InvoicesPage() {
                       <button
                         className='btn-ghost text-xs text-danger'
                         onClick={async () => {
-                          if (confirm(`Supprimer la facture ${inv.number} ?`)) {
+                          if (await ask(`Supprimer la facture ${inv.number} ?`)) {
                             await deleteInvoice({ id: inv.id });
                           }
                         }}
@@ -108,6 +109,7 @@ export default function InvoicesPage() {
       {creating && (
         <InvoiceForm clients={clients || []} projects={projects || []} onClose={() => setCreating(false)} />
       )}
+      {ConfirmDialog}
     </>
   );
 }
@@ -163,7 +165,7 @@ function InvoiceForm({ clients, projects, onClose }: { clients: any[]; projects:
       }
     >
       <form id='invoice-form' onSubmit={onSubmit} className='space-y-4'>
-        <div className='grid grid-cols-2 gap-4'>
+        <div className='grid grid-cols-1 sm:grid-cols-2 gap-4'>
           <div>
             <label className='label'>Client *</label>
             <select className='input' required value={clientId} onChange={(e) => setClientId(e.target.value)}>
@@ -188,34 +190,36 @@ function InvoiceForm({ clients, projects, onClose }: { clients: any[]; projects:
           <div className='label'>Items</div>
           <div className='space-y-2'>
             {items.map((it, idx) => (
-              <div key={idx} className='grid grid-cols-12 gap-2'>
+              <div key={idx} className='flex flex-col sm:grid sm:grid-cols-12 gap-2'>
                 <input
-                  className='input col-span-6'
+                  className='input sm:col-span-6'
                   placeholder='Description'
                   value={it.description}
                   onChange={(e) => {
                     const next = [...items]; next[idx] = { ...it, description: e.target.value }; setItems(next);
                   }}
                 />
-                <input
-                  type='number' step='0.01' className='input col-span-2' placeholder='Qté'
-                  value={it.quantity}
-                  onChange={(e) => {
-                    const next = [...items]; next[idx] = { ...it, quantity: parseFloat(e.target.value) || 0 }; setItems(next);
-                  }}
-                />
-                <input
-                  type='number' step='0.01' className='input col-span-3' placeholder='Prix unitaire'
-                  value={it.unitPrice}
-                  onChange={(e) => {
-                    const next = [...items]; next[idx] = { ...it, unitPrice: parseFloat(e.target.value) || 0 }; setItems(next);
-                  }}
-                />
-                <button
-                  type='button' className='btn-ghost col-span-1 text-danger'
-                  onClick={() => setItems(items.filter((_, i) => i !== idx))}
-                  disabled={items.length === 1}
-                >×</button>
+                <div className='flex gap-2 sm:contents'>
+                  <input
+                    type='number' step='0.01' className='input sm:col-span-2 flex-1' placeholder='Qté'
+                    value={it.quantity}
+                    onChange={(e) => {
+                      const next = [...items]; next[idx] = { ...it, quantity: parseFloat(e.target.value) || 0 }; setItems(next);
+                    }}
+                  />
+                  <input
+                    type='number' step='0.01' className='input sm:col-span-3 flex-[2]' placeholder='Prix unitaire'
+                    value={it.unitPrice}
+                    onChange={(e) => {
+                      const next = [...items]; next[idx] = { ...it, unitPrice: parseFloat(e.target.value) || 0 }; setItems(next);
+                    }}
+                  />
+                  <button
+                    type='button' className='btn-ghost sm:col-span-1 text-danger shrink-0'
+                    onClick={() => setItems(items.filter((_, i) => i !== idx))}
+                    disabled={items.length === 1}
+                  >×</button>
+                </div>
               </div>
             ))}
           </div>

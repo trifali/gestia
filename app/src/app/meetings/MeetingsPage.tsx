@@ -7,7 +7,7 @@ import {
   updateMeeting,
   deleteMeeting,
 } from 'wasp/client/operations';
-import { PageHeader, EmptyState, Modal } from '../../client/ui';
+import { PageHeader, EmptyState, Modal, useConfirm } from '../../client/ui';
 import { formatDate, formatTime, formatDateTimeForInput } from '../../shared/format';
 
 const STATUS: Record<string, { label: string; className: string }> = {
@@ -22,6 +22,7 @@ export default function MeetingsPage() {
   const { data: clients } = useQuery(getClients);
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState<any>(null);
+  const { ask, Dialog: ConfirmDialog } = useConfirm();
 
   return (
     <>
@@ -73,7 +74,7 @@ export default function MeetingsPage() {
                 <button
                   className='btn-ghost text-xs text-danger'
                   onClick={async () => {
-                    if (confirm('Supprimer cette rencontre ?')) {
+                    if (await ask('Supprimer cette rencontre ?')) {
                       await deleteMeeting({ id: m.id });
                     }
                   }}
@@ -96,6 +97,7 @@ export default function MeetingsPage() {
           }}
         />
       )}
+      {ConfirmDialog}
     </>
   );
 }
@@ -154,7 +156,7 @@ function MeetingForm({ meeting, clients, onClose }: { meeting?: any; clients: an
         </>
       }
     >
-      <form id='meeting-form' onSubmit={onSubmit} className='grid grid-cols-2 gap-4'>
+      <form id='meeting-form' onSubmit={onSubmit} className='grid grid-cols-1 sm:grid-cols-2 gap-4'>
         <div className='col-span-2'>
           <label className='label'>Titre *</label>
           <input className='input' required value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} />

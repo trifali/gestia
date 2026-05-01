@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useQuery, getClients, createClient, updateClient, deleteClient } from 'wasp/client/operations';
 import type { Client } from 'wasp/entities';
-import { PageHeader, EmptyState, Modal } from '../../client/ui';
+import { PageHeader, EmptyState, Modal, useConfirm } from '../../client/ui';
 import { formatDate } from '../../shared/format';
 
 /** Formate les digits saisis en +1 (438) 444-4343 */
@@ -26,6 +26,7 @@ const STATUS = {
 
 export default function ClientsPage() {
   const { data: clients, isLoading } = useQuery(getClients);
+  const { ask, Dialog: ConfirmDialog } = useConfirm();
   const [search, setSearch] = useState('');
   const [editing, setEditing] = useState<Client | null>(null);
   const [creating, setCreating] = useState(false);
@@ -95,7 +96,7 @@ export default function ClientsPage() {
                     <button
                       className='btn-ghost text-xs text-danger'
                       onClick={async () => {
-                        if (confirm(`Supprimer le client « ${c.name} » ?`)) {
+                          if (await ask(`Supprimer le client « ${c.name} » ?`)) {
                           await deleteClient({ id: c.id });
                         }
                       }}
@@ -112,6 +113,7 @@ export default function ClientsPage() {
 
       {creating && <ClientForm onClose={() => setCreating(false)} />}
       {editing && <ClientForm client={editing} onClose={() => setEditing(null)} />}
+      {ConfirmDialog}
     </>
   );
 }
@@ -159,7 +161,7 @@ function ClientForm({ client, onClose }: { client?: Client; onClose: () => void 
         </>
       }
     >
-      <form id='client-form' onSubmit={onSubmit} className='grid grid-cols-2 gap-4'>
+      <form id='client-form' onSubmit={onSubmit} className='grid grid-cols-1 sm:grid-cols-2 gap-4'>
         <div className='col-span-2'>
           <label className='label'>Nom de l'entreprise / client *</label>
           <input className='input' required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />

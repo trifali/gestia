@@ -1,4 +1,49 @@
-import { type ReactNode } from 'react';
+import { type ReactNode, useState } from 'react';
+
+// ─── Confirmation dialog ───────────────────────────────────────────────────
+
+type ConfirmState = { message: string; confirmLabel?: string; resolve: (v: boolean) => void };
+
+function ConfirmDialog({ state, onAnswer }: { state: ConfirmState; onAnswer: (v: boolean) => void }) {
+  return (
+    <div className='modal-backdrop' onClick={() => onAnswer(false)}>
+      <div
+        className='bg-white rounded-2xl shadow-xl w-full max-w-sm mx-4 p-6'
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className='flex items-start gap-4 mb-5'>
+          <div className='shrink-0 w-10 h-10 rounded-full bg-red-50 flex items-center justify-center'>
+            <svg className='w-5 h-5 text-danger' fill='none' viewBox='0 0 24 24' stroke='currentColor' strokeWidth='2'>
+              <path strokeLinecap='round' strokeLinejoin='round' d='M12 9v4m0 4h.01M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z'/>
+            </svg>
+          </div>
+          <p className='text-ink text-sm leading-relaxed pt-1'>{state.message}</p>
+        </div>
+        <div className='flex justify-end gap-2'>
+          <button className='btn-secondary' onClick={() => onAnswer(false)}>Annuler</button>
+          <button className='btn-danger' onClick={() => onAnswer(true)}>
+            {state.confirmLabel ?? 'Supprimer'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export function useConfirm() {
+  const [state, setState] = useState<ConfirmState | null>(null);
+
+  const ask = (message: string, confirmLabel?: string): Promise<boolean> =>
+    new Promise((resolve) => setState({ message, confirmLabel, resolve }));
+
+  const handle = (answer: boolean) => {
+    state?.resolve(answer);
+    setState(null);
+  };
+
+  const Dialog = state ? <ConfirmDialog state={state} onAnswer={handle} /> : null;
+  return { ask, Dialog };
+}
 
 export function PageHeader({
   title,
@@ -10,7 +55,7 @@ export function PageHeader({
   actions?: ReactNode;
 }) {
   return (
-    <div className='flex items-start justify-between gap-4 mb-6'>
+    <div className='flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between mb-6'>
       <div>
         <h1 className='page-title'>{title}</h1>
         {subtitle && <p className='page-subtitle'>{subtitle}</p>}

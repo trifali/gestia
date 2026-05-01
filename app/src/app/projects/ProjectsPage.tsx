@@ -7,7 +7,7 @@ import {
   updateProject,
   deleteProject,
 } from 'wasp/client/operations';
-import { PageHeader, EmptyState, Modal } from '../../client/ui';
+import { PageHeader, EmptyState, Modal, useConfirm } from '../../client/ui';
 import { formatCurrency, formatDate, formatDateForInput } from '../../shared/format';
 
 const STATUS: Record<string, { label: string; className: string }> = {
@@ -21,6 +21,7 @@ const STATUS: Record<string, { label: string; className: string }> = {
 export default function ProjectsPage() {
   const { data: projects, isLoading } = useQuery(getProjects);
   const { data: clients } = useQuery(getClients);
+  const { ask, Dialog: ConfirmDialog } = useConfirm();
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState<any>(null);
 
@@ -70,7 +71,7 @@ export default function ProjectsPage() {
                     <button
                       className='btn-ghost text-xs text-danger'
                       onClick={async () => {
-                        if (confirm(`Supprimer le projet « ${p.name} » ?`)) {
+                        if (await ask(`Supprimer le projet « ${p.name} » ?`)) {
                           await deleteProject({ id: p.id });
                         }
                       }}
@@ -95,6 +96,7 @@ export default function ProjectsPage() {
           }}
         />
       )}
+      {ConfirmDialog}
     </>
   );
 }
@@ -151,7 +153,7 @@ function ProjectForm({ project, clients, onClose }: { project?: any; clients: an
         </>
       }
     >
-      <form id='project-form' onSubmit={onSubmit} className='grid grid-cols-2 gap-4'>
+      <form id='project-form' onSubmit={onSubmit} className='grid grid-cols-1 sm:grid-cols-2 gap-4'>
         <div className='col-span-2'>
           <label className='label'>Nom du projet *</label>
           <input className='input' required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />

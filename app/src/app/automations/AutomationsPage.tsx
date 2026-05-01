@@ -6,7 +6,7 @@ import {
   updateAutomation,
   deleteAutomation,
 } from 'wasp/client/operations';
-import { PageHeader, EmptyState, Modal } from '../../client/ui';
+import { PageHeader, EmptyState, Modal, useConfirm } from '../../client/ui';
 
 const TRIGGERS: Record<string, string> = {
   facture_creee: 'Lorsqu\'une facture est créée',
@@ -27,6 +27,7 @@ export default function AutomationsPage() {
   const { data: automations, isLoading } = useQuery(getAutomations);
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState<any>(null);
+  const { ask, Dialog: ConfirmDialog } = useConfirm();
 
   return (
     <>
@@ -82,7 +83,7 @@ export default function AutomationsPage() {
                 <button
                   className='btn-ghost text-xs text-danger ml-auto'
                   onClick={async () => {
-                    if (confirm('Supprimer cette automatisation ?')) {
+                    if (await ask('Supprimer cette automatisation ?')) {
                       await deleteAutomation({ id: a.id });
                     }
                   }}
@@ -98,6 +99,7 @@ export default function AutomationsPage() {
       {(creating || editing) && (
         <AutomationForm automation={editing} onClose={() => { setCreating(false); setEditing(null); }} />
       )}
+      {ConfirmDialog}
     </>
   );
 }
@@ -152,7 +154,7 @@ function AutomationForm({ automation, onClose }: { automation?: any; onClose: ()
           <label className='label'>Description</label>
           <textarea className='input' rows={2} value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} />
         </div>
-        <div className='grid grid-cols-2 gap-4'>
+        <div className='grid grid-cols-1 sm:grid-cols-2 gap-4'>
           <div>
             <label className='label'>Quand</label>
             <select className='input' value={form.trigger} onChange={(e) => setForm({ ...form, trigger: e.target.value })}>
