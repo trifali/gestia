@@ -1,14 +1,13 @@
 import { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { LuArrowLeft, LuPencil } from 'react-icons/lu';
+import { LuArrowLeft, LuPencil, LuFileCheck, LuUndo2 } from 'react-icons/lu';
 import {
   useQuery,
   getClientDetail,
   getProjects,
-  deleteQuote,
-  updateQuoteStatus,
-  deleteInvoice,
-  updateInvoiceStatus,
+  deleteDocument,
+  updateDocumentStatus,
+  setDocumentType,
   deleteMeeting,
   updateClient,
 } from 'wasp/client/operations';
@@ -16,8 +15,7 @@ import { Modal, useConfirm, IconBtn, TrashIcon } from '../../client/ui';
 import { formatCurrency, formatDate } from '../../shared/format';
 import type { Client } from 'wasp/entities';
 import type { ClientDetail } from './operations';
-import { QuoteForm } from '../quotes/QuoteForm';
-import { InvoiceForm } from '../invoices/InvoiceForm';
+import { DocumentForm } from '../shared/DocumentForm';
 import { MeetingForm } from '../meetings/MeetingForm';
 
 // ─── Status maps ──────────────────────────────────────────────────────────────
@@ -37,6 +35,11 @@ const INVOICE_STATUS: Record<string, { label: string; className: string }> = {
   annulee: { label: 'Annulée', className: 'badge-neutral' },
 };
 
+function statusFor(doc: { type: string; status: string }) {
+  const map = doc.type === 'invoice' ? INVOICE_STATUS : QUOTE_STATUS;
+  return map[doc.status] || { label: doc.status, className: 'badge-neutral' };
+}
+
 const CLIENT_STATUS: Record<string, { label: string; className: string }> = {
   actif: { label: 'Actif', className: 'badge-success' },
   prospect: { label: 'Prospect', className: 'badge-info' },
@@ -44,12 +47,11 @@ const CLIENT_STATUS: Record<string, { label: string; className: string }> = {
 };
 
 // ─── Tabs ─────────────────────────────────────────────────────────────────────
-type Tab = 'resume' | 'soumissions' | 'factures' | 'paiements' | 'rencontres';
+type Tab = 'resume' | 'documents' | 'paiements' | 'rencontres';
 
 const TABS: { id: Tab; label: string }[] = [
   { id: 'resume', label: 'Résumé' },
-  { id: 'soumissions', label: 'Soumissions' },
-  { id: 'factures', label: 'Factures' },
+  { id: 'documents', label: 'Facturation' },
   { id: 'paiements', label: 'Paiements' },
   { id: 'rencontres', label: 'Rencontres' },
 ];
@@ -115,8 +117,7 @@ export default function ClientDetailPage() {
 
       {/* Tab content */}
       {tab === 'resume' && <ResumeTab client={client} />}
-      {tab === 'soumissions' && <SoumissionsTab client={client} projects={clientProjects} />}
-      {tab === 'factures' && <FacturesTab client={client} projects={clientProjects} />}
+      {tab === 'documents' && <DocumentsTab client={client} projects={clientProjects} />}
       {tab === 'paiements' && <PaiementsTab client={client} />}
       {tab === 'rencontres' && <RencontresTab client={client} />}
 
@@ -127,13 +128,15 @@ export default function ClientDetailPage() {
 
 // ─── Résumé ───────────────────────────────────────────────────────────────────
 function ResumeTab({ client }: { client: ClientDetail }) {
-  const totalFacture = client.invoices.reduce((s, inv) => s + inv.total, 0);
-  const totalRecu = client.invoices.reduce((s, inv) => s + inv.amountPaid, 0);
-  const totalSoumissions = client.quotes.reduce((s, q) => s + q.total, 0);
+  const quotes = client.documents.filter((d) => d.type === 'quote');
+  const invoices = client.documents.filter((d) => d.type === 'invoice');
+  const totalFacture = invoices.reduce((s, inv) => s + inv.total, 0);
+  const totalRecu = invoices.reduce((s, inv) => s + inv.amountPaid, 0);
+  const totalSoumissions = quotes.reduce((s, q) => s + q.total, 0);
 
   const stats = [
-    { label: 'Soumissions', value: client.quotes.length.toString(), sub: formatCurrency(totalSoumissions) },
-    { label: 'Factures', value: client.invoices.length.toString(), sub: formatCurrency(totalFacture) },
+    { label: 'Soumissions', value: quotes.length.toString(), sub: formatCurrency(totalSoumissions) },
+    { label: 'Factures', value: invoices.length.toString(), sub: formatCurrency(totalFacture) },
     { label: 'Montant reçu', value: formatCurrency(totalRecu), sub: `solde ${formatCurrency(totalFacture - totalRecu)}` },
     { label: 'Rencontres', value: client.meetings.length.toString(), sub: '' },
   ];
@@ -181,51 +184,104 @@ function InfoRow({ label, value }: { label: string; value: string }) {
   );
 }
 
-// ─── Soumissions ──────────────────────────────────────────────────────────────
-function SoumissionsTab({ client, projects }: { client: ClientDetail; projects: any[] }) {
+// ─── Documents (soumissions + factures) ──────────────────────────────────────
+function DocumentsTab({ client, projects }: { client: ClientDetail; projects: any[] }) {
   const { ask, Dialog: ConfirmDialog } = useConfirm();
   const [creating, setCreating] = useState(false);
+  const [editing, setEditing] = useState<any | null>(null);
+  const [filter, setFilter] = useState<'all' | 'quote' | 'invoice'>('all');
+
+  const docs = filter === 'all'
+    ? client.documents
+    : client.documents.filter((d) => d.type === filter);
 
   return (
     <>
-      <div className='flex items-center justify-between mb-4'>
-        <p className='text-sm text-muted'>{client.quotes.length} soumission(s)</p>
+      <div className='flex items-center justify-between mb-4 gap-3 flex-wrap'>
+        <div className='flex items-center gap-2'>
+          <p className='text-sm text-muted'>{client.documents.length} soumission(s) / facture(s)</p>
+          <div className='inline-flex rounded-lg border border-line p-0.5 bg-canvas ml-2'>
+            {([
+              { v: 'all', l: 'Tous' },
+              { v: 'quote', l: 'Soumissions' },
+              { v: 'invoice', l: 'Factures' },
+            ] as const).map((opt) => (
+              <button
+                key={opt.v}
+                onClick={() => setFilter(opt.v)}
+                className={`px-3 py-1 text-xs rounded-md transition-colors ${
+                  filter === opt.v ? 'bg-white text-ink shadow-sm' : 'text-muted hover:text-ink'
+                }`}
+              >
+                {opt.l}
+              </button>
+            ))}
+          </div>
+        </div>
         <button className='btn-primary' onClick={() => setCreating(true)}>
-          Nouvelle soumission
+          Nouvelle soumission / facture
         </button>
       </div>
 
-      {client.quotes.length === 0 ? (
-        <p className='text-muted text-sm'>Aucune soumission pour ce client.</p>
+      {docs.length === 0 ? (
+        <p className='text-muted text-sm'>Aucune soumission ni facture.</p>
       ) : (
         <div className='table-wrap'>
           <table>
             <thead>
               <tr>
+                <th>Type</th>
                 <th>Numéro</th>
                 <th>Titre</th>
-                <th>Émise le</th>
+                <th>Émis le</th>
                 <th>Statut</th>
                 <th className='text-right'>Total</th>
                 <th className='text-right'>Actions</th>
               </tr>
             </thead>
             <tbody>
-              {client.quotes.map((q) => {
-                const st = QUOTE_STATUS[q.status] || { label: q.status, className: 'badge-neutral' };
+              {docs.map((d) => {
+                const st = statusFor(d);
                 return (
-                  <tr key={q.id}>
-                    <td className='font-mono text-sm'>{q.number}</td>
-                    <td>{q.title}</td>
-                    <td className='text-muted'>{formatDate(q.issueDate)}</td>
+                  <tr key={d.id}>
+                    <td>
+                      <span className={d.type === 'invoice' ? 'badge-info' : 'badge-neutral'}>
+                        {d.type === 'invoice' ? 'Facture' : 'Soumission'}
+                      </span>
+                    </td>
+                    <td className='font-mono text-sm'>{d.number}</td>
+                    <td>{d.title || '—'}</td>
+                    <td className='text-muted'>{formatDate(d.issueDate)}</td>
                     <td><span className={st.className}>{st.label}</span></td>
-                    <td className='text-right font-medium'>{formatCurrency(q.total)}</td>
+                    <td className='text-right font-medium'>{formatCurrency(d.total)}</td>
                     <td className='text-right'>
-                      <IconBtn variant='danger' title='Supprimer' onClick={async () => {
-                        if (await ask(`Supprimer la soumission ${q.number} ?`)) await deleteQuote({ id: q.id });
-                      }}>
-                        <TrashIcon />
-                      </IconBtn>
+                      <div className='flex items-center justify-end gap-1'>
+                        <IconBtn title='Modifier' onClick={() => setEditing(d)}>
+                          <LuPencil size={14} />
+                        </IconBtn>
+                        {d.type === 'quote' ? (
+                          <IconBtn title='Convertir en facture' onClick={async () => {
+                            if (await ask(`Convertir la soumission ${d.number} en facture ?`, { confirmLabel: 'Convertir', variant: 'primary' })) {
+                              await setDocumentType({ id: d.id, type: 'invoice' });
+                            }
+                          }}>
+                            <LuFileCheck size={14} />
+                          </IconBtn>
+                        ) : (
+                          <IconBtn title='Repasser en soumission' onClick={async () => {
+                            if (await ask(`Repasser la facture ${d.number} en soumission ?`, { confirmLabel: 'Repasser en soumission', variant: 'primary' })) {
+                              await setDocumentType({ id: d.id, type: 'quote' });
+                            }
+                          }}>
+                            <LuUndo2 size={14} />
+                          </IconBtn>
+                        )}
+                        <IconBtn variant='danger' title='Supprimer' onClick={async () => {
+                          if (await ask(`Supprimer ${d.number} ?`)) await deleteDocument({ id: d.id });
+                        }}>
+                          <TrashIcon />
+                        </IconBtn>
+                      </div>
                     </td>
                   </tr>
                 );
@@ -234,68 +290,23 @@ function SoumissionsTab({ client, projects }: { client: ClientDetail; projects: 
           </table>
         </div>
       )}
-      {creating && <QuoteForm clientId={client.id} projects={projects} onClose={() => setCreating(false)} />}
-      {ConfirmDialog}
-    </>
-  );
-}
-
-// ─── Factures ─────────────────────────────────────────────────────────────────
-function FacturesTab({ client, projects }: { client: ClientDetail; projects: any[] }) {
-  const { ask, Dialog: ConfirmDialog } = useConfirm();
-  const [creating, setCreating] = useState(false);
-
-  return (
-    <>
-      <div className='flex items-center justify-between mb-4'>
-        <p className='text-sm text-muted'>{client.invoices.length} facture(s)</p>
-        <button className='btn-primary' onClick={() => setCreating(true)}>
-          Nouvelle facture
-        </button>
-      </div>
-
-      {client.invoices.length === 0 ? (
-        <p className='text-muted text-sm'>Aucune facture pour ce client.</p>
-      ) : (
-        <div className='table-wrap'>
-          <table>
-            <thead>
-              <tr>
-                <th>Numéro</th>
-                <th>Émise le</th>
-                <th>Échéance</th>
-                <th>Statut</th>
-                <th className='text-right'>Total</th>
-                <th className='text-right'>Reçu</th>
-                <th className='text-right'>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {client.invoices.map((inv) => {
-                const st = INVOICE_STATUS[inv.status] || { label: inv.status, className: 'badge-neutral' };
-                return (
-                  <tr key={inv.id}>
-                    <td className='font-mono text-sm'>{inv.number}</td>
-                    <td className='text-muted'>{formatDate(inv.issueDate)}</td>
-                    <td className='text-muted'>{formatDate(inv.dueDate)}</td>
-                    <td><span className={st.className}>{st.label}</span></td>
-                    <td className='text-right font-medium'>{formatCurrency(inv.total)}</td>
-                    <td className='text-right text-muted'>{formatCurrency(inv.amountPaid)}</td>
-                    <td className='text-right'>
-                      <IconBtn variant='danger' title='Supprimer' onClick={async () => {
-                        if (await ask(`Supprimer la facture ${inv.number} ?`)) await deleteInvoice({ id: inv.id });
-                      }}>
-                        <TrashIcon />
-                      </IconBtn>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
+      {creating && (
+        <DocumentForm
+          defaultMode='quote'
+          clientId={client.id}
+          projects={projects}
+          onClose={() => setCreating(false)}
+        />
       )}
-      {creating && <InvoiceForm clientId={client.id} projects={projects} onClose={() => setCreating(false)} />}
+      {editing && (
+        <DocumentForm
+          clientId={client.id}
+          projects={projects}
+          document={editing}
+          allowModeToggle={false}
+          onClose={() => setEditing(null)}
+        />
+      )}
       {ConfirmDialog}
     </>
   );
@@ -303,9 +314,10 @@ function FacturesTab({ client, projects }: { client: ClientDetail; projects: any
 
 // ─── Paiements ────────────────────────────────────────────────────────────────
 function PaiementsTab({ client }: { client: ClientDetail }) {
-  const payments = client.invoices.flatMap((inv) =>
-    inv.payments.map((p) => ({ ...p, invoiceNumber: inv.number }))
-  ).sort((a, b) => new Date(b.paidAt).getTime() - new Date(a.paidAt).getTime());
+  const payments = client.documents
+    .filter((d) => d.type === 'invoice')
+    .flatMap((inv) => inv.payments.map((p) => ({ ...p, invoiceNumber: inv.number })))
+    .sort((a, b) => new Date(b.paidAt).getTime() - new Date(a.paidAt).getTime());
 
   const METHOD: Record<string, string> = {
     virement: 'Virement',

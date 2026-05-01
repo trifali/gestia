@@ -38,9 +38,17 @@ export const TrashIcon = () => <LuTrash2 size={16} />;
 
 // ─── Confirmation dialog ───────────────────────────────────────────────────
 
-type ConfirmState = { message: string; confirmLabel?: string; resolve: (v: boolean) => void };
+type ConfirmVariant = 'danger' | 'primary';
+type ConfirmState = {
+  message: string;
+  confirmLabel?: string;
+  variant?: ConfirmVariant;
+  resolve: (v: boolean) => void;
+};
 
 function ConfirmDialog({ state, onAnswer }: { state: ConfirmState; onAnswer: (v: boolean) => void }) {
+  const variant = state.variant ?? 'danger';
+  const isDanger = variant === 'danger';
   return (
     <div className='modal-backdrop' onClick={() => onAnswer(false)}>
       <div
@@ -48,15 +56,15 @@ function ConfirmDialog({ state, onAnswer }: { state: ConfirmState; onAnswer: (v:
         onClick={(e) => e.stopPropagation()}
       >
         <div className='flex items-start gap-4 mb-5'>
-          <div className='shrink-0 w-10 h-10 rounded-full bg-red-50 flex items-center justify-center'>
-            <LuAlertTriangle size={20} className='text-danger' />
+          <div className={`shrink-0 w-10 h-10 rounded-full flex items-center justify-center ${isDanger ? 'bg-red-50 text-danger' : 'bg-blue-50 text-blue-600'}`}>
+            <LuAlertTriangle size={20} />
           </div>
           <p className='text-ink text-sm leading-relaxed pt-1'>{state.message}</p>
         </div>
         <div className='flex justify-end gap-2'>
           <button className='btn-secondary' onClick={() => onAnswer(false)}>Annuler</button>
-          <button className='btn-danger' onClick={() => onAnswer(true)}>
-            {state.confirmLabel ?? 'Supprimer'}
+          <button className={isDanger ? 'btn-danger' : 'btn-primary'} onClick={() => onAnswer(true)}>
+            {state.confirmLabel ?? (isDanger ? 'Supprimer' : 'Confirmer')}
           </button>
         </div>
       </div>
@@ -67,8 +75,14 @@ function ConfirmDialog({ state, onAnswer }: { state: ConfirmState; onAnswer: (v:
 export function useConfirm() {
   const [state, setState] = useState<ConfirmState | null>(null);
 
-  const ask = (message: string, confirmLabel?: string): Promise<boolean> =>
-    new Promise((resolve) => setState({ message, confirmLabel, resolve }));
+  const ask = (
+    message: string,
+    opts?: string | { confirmLabel?: string; variant?: ConfirmVariant },
+  ): Promise<boolean> =>
+    new Promise((resolve) => {
+      const normalized = typeof opts === 'string' ? { confirmLabel: opts } : opts || {};
+      setState({ message, ...normalized, resolve });
+    });
 
   const handle = (answer: boolean) => {
     state?.resolve(answer);
@@ -140,9 +154,9 @@ export function Modal({
 }) {
   if (!open) return null;
   return (
-    <div className='modal-backdrop' onClick={onClose}>
+    <div className='modal-backdrop'>
       <div className='modal-panel' onClick={(e) => e.stopPropagation()}>
-        <div className='px-6 py-4 border-b border-line flex items-center justify-between'>
+        <div className='shrink-0 px-6 py-4 border-b border-line flex items-center justify-between'>
           <h2 className='font-semibold text-lg'>{title}</h2>
           <button onClick={onClose} className='text-muted hover:text-ink' aria-label='Fermer'>
             <svg className='w-5 h-5' fill='none' viewBox='0 0 24 24' stroke='currentColor' strokeWidth='2'>
@@ -150,8 +164,8 @@ export function Modal({
             </svg>
           </button>
         </div>
-        <div className='px-6 py-5'>{children}</div>
-        {footer && <div className='px-6 py-4 border-t border-line flex justify-end gap-2 bg-canvas-100'>{footer}</div>}
+        <div className='px-6 py-5 overflow-y-auto flex-1 min-h-0'>{children}</div>
+        {footer && <div className='shrink-0 px-6 py-4 border-t border-line flex justify-end gap-2 bg-canvas-100'>{footer}</div>}
       </div>
     </div>
   );

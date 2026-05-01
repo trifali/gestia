@@ -2,7 +2,7 @@ import { useState } from 'react';
 import {
   useQuery,
   getPayments,
-  getInvoices,
+  getDocuments,
   createPayment,
   deletePayment,
 } from 'wasp/client/operations';
@@ -19,7 +19,8 @@ const METHODS: Record<string, string> = {
 
 export default function PaymentsPage() {
   const { data: payments, isLoading } = useQuery(getPayments);
-  const { data: invoices } = useQuery(getInvoices);
+  const { data: documents } = useQuery(getDocuments);
+  const invoices = (documents || []).filter((d: any) => d.type === 'invoice');
   const [creating, setCreating] = useState(false);
   const { ask, Dialog: ConfirmDialog } = useConfirm();
 
@@ -57,8 +58,8 @@ export default function PaymentsPage() {
               {payments.map((p: any) => (
                 <tr key={p.id}>
                   <td className='text-muted'>{formatDate(p.paidAt)}</td>
-                  <td className='font-mono text-xs'>{p.invoice.number}</td>
-                  <td>{p.invoice.client.name}</td>
+                  <td className='font-mono text-xs'>{p.document.number}</td>
+                  <td>{p.document.client.name}</td>
                   <td className='text-muted'>{METHODS[p.method] || p.method}</td>
                   <td className='text-muted'>{p.reference || '—'}</td>
                   <td className='text-right font-medium'>{formatCurrency(p.amount)}</td>
@@ -84,8 +85,8 @@ export default function PaymentsPage() {
 
 function PaymentForm({ invoices, onClose }: { invoices: any[]; onClose: () => void }) {
   const open = invoices.filter((i: any) => i.status !== 'payee' && i.status !== 'annulee');
-  const [invoiceId, setInvoiceId] = useState(open[0]?.id || '');
-  const selected = invoices.find((i: any) => i.id === invoiceId);
+  const [documentId, setDocumentId] = useState(open[0]?.id || '');
+  const selected = invoices.find((i: any) => i.id === documentId);
   const balance = selected ? +(selected.total - selected.amountPaid).toFixed(2) : 0;
   const [amount, setAmount] = useState(balance.toString());
   const [method, setMethod] = useState('virement');
@@ -96,11 +97,11 @@ function PaymentForm({ invoices, onClose }: { invoices: any[]; onClose: () => vo
 
   const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!invoiceId) return;
+    if (!documentId) return;
     setSaving(true);
     try {
       await createPayment({
-        invoiceId,
+        documentId,
         amount: parseFloat(amount),
         method,
         paidAt,
@@ -134,9 +135,9 @@ function PaymentForm({ invoices, onClose }: { invoices: any[]; onClose: () => vo
           <label className='label'>Facture *</label>
           <select
             className='input' required
-            value={invoiceId}
+            value={documentId}
             onChange={(e) => {
-              setInvoiceId(e.target.value);
+              setDocumentId(e.target.value);
               const inv = invoices.find((i: any) => i.id === e.target.value);
               if (inv) setAmount((+(inv.total - inv.amountPaid).toFixed(2)).toString());
             }}

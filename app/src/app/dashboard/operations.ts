@@ -29,9 +29,9 @@ export const getDashboardStats: GetDashboardStats<void, DashboardStats> = async 
     await Promise.all([
       context.entities.Client.count({ where: { companyId } }),
       context.entities.Project.count({ where: { companyId, status: { in: ['en_cours', 'brouillon'] } } }),
-      context.entities.Quote.count({ where: { companyId, status: { in: ['brouillon', 'envoyee'] } } }),
-      context.entities.Invoice.findMany({
-        where: { companyId, status: { in: ['brouillon', 'envoyee', 'en_retard'] } },
+      context.entities.Document.count({ where: { companyId, type: 'quote', status: { in: ['brouillon', 'envoyee'] } } }),
+      context.entities.Document.findMany({
+        where: { companyId, type: 'invoice', status: { in: ['brouillon', 'envoyee', 'en_retard'] } },
         select: { id: true, total: true, amountPaid: true },
       }),
       context.entities.Payment.findMany({
@@ -44,8 +44,8 @@ export const getDashboardStats: GetDashboardStats<void, DashboardStats> = async 
         orderBy: { startsAt: 'asc' },
         take: 5,
       }),
-      context.entities.Invoice.findMany({
-        where: { companyId },
+      context.entities.Document.findMany({
+        where: { companyId, type: 'invoice' },
         include: { client: true },
         orderBy: { createdAt: 'desc' },
         take: 5,

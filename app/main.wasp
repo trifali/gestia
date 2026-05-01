@@ -108,16 +108,10 @@ page ProjectsPage {
   component: import ProjectsPage from "@src/app/projects/ProjectsPage"
 }
 
-route QuotesRoute { path: "/soumissions", to: QuotesPage }
-page QuotesPage {
+route DocumentsRoute { path: "/facturation", to: DocumentsPage }
+page DocumentsPage {
   authRequired: true,
-  component: import QuotesPage from "@src/app/quotes/QuotesPage"
-}
-
-route InvoicesRoute { path: "/factures", to: InvoicesPage }
-page InvoicesPage {
-  authRequired: true,
-  component: import InvoicesPage from "@src/app/invoices/InvoicesPage"
+  component: import DocumentsPage from "@src/app/documents/DocumentsPage"
 }
 
 route PaymentsRoute { path: "/paiements", to: PaymentsPage }
@@ -168,7 +162,7 @@ query getClients {
 }
 query getClientDetail {
   fn: import { getClientDetail } from "@src/app/clients/operations",
-  entities: [User, Client, Quote, QuoteItem, Invoice, InvoiceItem, Payment, Meeting, Project]
+  entities: [User, Client, Document, DocumentItem, Payment, Meeting, Project]
 }
 action createClient {
   fn: import { createClient } from "@src/app/clients/operations",
@@ -200,51 +194,42 @@ action deleteProject {
   entities: [User, Project]
 }
 
-query getQuotes {
-  fn: import { getQuotes } from "@src/app/quotes/operations",
-  entities: [User, Quote, Client, Project]
+query getDocuments {
+  fn: import { getDocuments } from "@src/app/documents/operations",
+  entities: [User, Document, Client, Project, Payment]
 }
-action createQuote {
-  fn: import { createQuote } from "@src/app/quotes/operations",
-  entities: [User, Quote, QuoteItem]
+action createDocument {
+  fn: import { createDocument } from "@src/app/documents/operations",
+  entities: [User, Document, DocumentItem]
 }
-action updateQuoteStatus {
-  fn: import { updateQuoteStatus } from "@src/app/quotes/operations",
-  entities: [User, Quote]
+action updateDocument {
+  fn: import { updateDocument } from "@src/app/documents/operations",
+  entities: [User, Document, DocumentItem]
 }
-action deleteQuote {
-  fn: import { deleteQuote } from "@src/app/quotes/operations",
-  entities: [User, Quote]
+action updateDocumentStatus {
+  fn: import { updateDocumentStatus } from "@src/app/documents/operations",
+  entities: [User, Document]
 }
-
-query getInvoices {
-  fn: import { getInvoices } from "@src/app/invoices/operations",
-  entities: [User, Invoice, Client, Project, Payment]
+action setDocumentType {
+  fn: import { setDocumentType } from "@src/app/documents/operations",
+  entities: [User, Document]
 }
-action createInvoice {
-  fn: import { createInvoice } from "@src/app/invoices/operations",
-  entities: [User, Invoice, InvoiceItem]
-}
-action updateInvoiceStatus {
-  fn: import { updateInvoiceStatus } from "@src/app/invoices/operations",
-  entities: [User, Invoice]
-}
-action deleteInvoice {
-  fn: import { deleteInvoice } from "@src/app/invoices/operations",
-  entities: [User, Invoice]
+action deleteDocument {
+  fn: import { deleteDocument } from "@src/app/documents/operations",
+  entities: [User, Document]
 }
 
 query getPayments {
   fn: import { getPayments } from "@src/app/payments/operations",
-  entities: [User, Payment, Invoice, Client]
+  entities: [User, Payment, Document, Client]
 }
 action createPayment {
   fn: import { createPayment } from "@src/app/payments/operations",
-  entities: [User, Payment, Invoice]
+  entities: [User, Payment, Document]
 }
 action deletePayment {
   fn: import { deletePayment } from "@src/app/payments/operations",
-  entities: [User, Payment, Invoice]
+  entities: [User, Payment, Document]
 }
 
 query getMeetings {
@@ -283,5 +268,5 @@ action deleteAutomation {
 
 query getDashboardStats {
   fn: import { getDashboardStats } from "@src/app/dashboard/operations",
-  entities: [User, Client, Project, Quote, Invoice, Payment, Meeting]
+  entities: [User, Client, Project, Document, Payment, Meeting]
 }

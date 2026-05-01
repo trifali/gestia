@@ -125,7 +125,7 @@ export default function DashboardPage() {
           <div className='card mt-6 overflow-hidden'>
             <div className='px-5 py-4 border-b border-line flex items-center justify-between'>
               <h2 className='font-semibold'>Factures récentes</h2>
-              <Link to='/factures' className='text-xs text-muted hover:text-ink'>Voir toutes les factures</Link>
+              <Link to='/facturation?type=invoice' className='text-xs text-muted hover:text-ink'>Voir toutes les factures</Link>
             </div>
             {stats.recentInvoices.length === 0 ? (
               <EmptyState title='Aucune facture' description='Créez votre première facture pour commencer.' />

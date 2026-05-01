@@ -32,13 +32,22 @@ export function computeTotals(items: { quantity: number; unitPrice: number }[]) 
 
 export async function nextDocNumber(
   prisma: any,
-  model: 'quote' | 'invoice',
+  type: 'quote' | 'invoice',
   companyId: string,
-  prefix: string
+  prefix: string,
 ): Promise<string> {
   const year = new Date().getFullYear();
-  const repo = (prisma as any)[model];
-  const count = await repo.count({ where: { companyId, number: { startsWith: `${prefix}-${year}-` } } });
-  const next = (count + 1).toString().padStart(4, '0');
+  const startsWith = `${prefix}-${year}-`;
+  const existing = await prisma.Document.findMany({
+    where: { companyId, number: { startsWith } },
+    select: { number: true },
+  });
+  let max = 0;
+  for (const d of existing as { number: string }[]) {
+    const tail = d.number.slice(startsWith.length);
+    const n = parseInt(tail, 10);
+    if (!Number.isNaN(n) && n > max) max = n;
+  }
+  const next = (max + 1).toString().padStart(4, '0');
   return `${prefix}-${year}-${next}`;
 }

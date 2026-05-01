@@ -95,11 +95,10 @@ export function TotalsDisplay({ items }: { items: LineItem[] }) {
 
 /**
  * Normalize items for server submission: ensure numbers and trimmed description.
- * Returns null with an alert if any item is missing a description.
+ * Returns null when any item is missing a description.
  */
 export function prepareItemsForSubmit(items: LineItem[]): LineItem[] | null {
   if (items.some((i) => !i.description.trim())) {
-    alert('Chaque item doit avoir une description.');
     return null;
   }
   return items.map((i) => ({

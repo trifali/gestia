@@ -3,7 +3,7 @@ import { logout } from 'wasp/client/auth';
 import { useQuery, getCurrentCompany } from 'wasp/client/operations';
 import { useState, type ReactNode } from 'react';
 import {
-  LuLayoutDashboard, LuUsers, LuFolder, LuFileText, LuReceipt,
+  LuLayoutDashboard, LuUsers, LuFolder, LuFileText,
   LuCreditCard, LuCalendar, LuZap, LuSettings, LuMenu, LuX
 } from 'react-icons/lu';
 
@@ -16,8 +16,7 @@ const NAV = [
   { to: '/tableau-de-bord', label: 'Tableau de bord', icon: LuLayoutDashboard },
   { to: '/clients', label: 'Clients', icon: LuUsers },
   { to: '/projets', label: 'Projets', icon: LuFolder },
-  { to: '/soumissions', label: 'Soumissions', icon: LuFileText },
-  { to: '/factures', label: 'Factures', icon: LuReceipt },
+  { to: '/facturation', label: 'Facturation', icon: LuFileText },
   { to: '/paiements', label: 'Paiements', icon: LuCreditCard },
   { to: '/rencontres', label: 'Rencontres', icon: LuCalendar },
   { to: '/automatisations', label: 'Automatisations', icon: LuZap },

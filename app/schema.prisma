@@ -45,8 +45,7 @@ model Company {
   users       User[]
   clients     Client[]
   projects    Project[]
-  quotes      Quote[]
-  invoices    Invoice[]
+  documents   Document[]
   payments    Payment[]
   meetings    Meeting[]
   automations Automation[]
@@ -71,10 +70,9 @@ model Client {
   notes       String?
   status      String  @default("actif")
 
-  projects Project[]
-  quotes   Quote[]
-  invoices Invoice[]
-  meetings Meeting[]
+  projects  Project[]
+  documents Document[]
+  meetings  Meeting[]
 }
 
 model Project {
@@ -95,11 +93,10 @@ model Project {
   dueDate     DateTime?
   budget      Float?
 
-  quotes   Quote[]
-  invoices Invoice[]
+  documents Document[]
 }
 
-model Quote {
+model Document {
   id        String   @id @default(uuid())
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -113,64 +110,32 @@ model Quote {
   project   Project? @relation(fields: [projectId], references: [id], onDelete: SetNull)
   projectId String?
 
+  // 'quote' | 'invoice' — same record can be promoted from quote to invoice.
+  type        String    @default("quote")
   number      String
-  title       String
+  title       String?
   description String?
-  status      String      @default("brouillon")
-  issueDate   DateTime    @default(now())
+  status      String    @default("brouillon")
+  issueDate   DateTime  @default(now())
   validUntil  DateTime?
-  subtotal    Float       @default(0)
-  taxGst      Float       @default(0)
-  taxQst      Float       @default(0)
-  total       Float       @default(0)
+  dueDate     DateTime?
+  subtotal    Float     @default(0)
+  taxGst      Float     @default(0)
+  taxQst      Float     @default(0)
+  total       Float     @default(0)
+  amountPaid  Float     @default(0)
   notes       String?
-  items       QuoteItem[]
-}
 
-model QuoteItem {
-  id      String @id @default(uuid())
-  quote   Quote  @relation(fields: [quoteId], references: [id], onDelete: Cascade)
-  quoteId String
-
-  description String
-  quantity    Float  @default(1)
-  unitPrice   Float  @default(0)
-  amount      Float  @default(0)
-}
-
-model Invoice {
-  id        String   @id @default(uuid())
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  companyId String
-
-  client   Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
-  clientId String
-
-  project   Project? @relation(fields: [projectId], references: [id], onDelete: SetNull)
-  projectId String?
-
-  number     String
-  status     String    @default("brouillon")
-  issueDate  DateTime  @default(now())
-  dueDate    DateTime?
-  subtotal   Float     @default(0)
-  taxGst     Float     @default(0)
-  taxQst     Float     @default(0)
-  total      Float     @default(0)
-  amountPaid Float     @default(0)
-  notes      String?
-
-  items    InvoiceItem[]
+  items    DocumentItem[]
   payments Payment[]
+
+  @@unique([companyId, number])
 }
 
-model InvoiceItem {
-  id        String  @id @default(uuid())
-  invoice   Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
-  invoiceId String
+model DocumentItem {
+  id         String   @id @default(uuid())
+  document   Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  documentId String
 
   description String
   quantity    Float  @default(1)
@@ -185,8 +150,8 @@ model Payment {
   company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
   companyId String
 
-  invoice   Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
-  invoiceId String
+  document   Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  documentId String
 
   amount    Float
   method    String   @default("virement")

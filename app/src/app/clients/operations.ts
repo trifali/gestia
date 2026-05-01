@@ -1,6 +1,6 @@
 import { HttpError } from 'wasp/server';
 import type { GetClients, CreateClient, UpdateClient, DeleteClient } from 'wasp/server/operations';
-import type { Client, Quote, QuoteItem, Invoice, InvoiceItem, Payment, Meeting, Project } from 'wasp/entities';
+import type { Client, Document, DocumentItem, Payment, Meeting, Project } from 'wasp/entities';
 
 function ensureCompany(user: any): string {
   if (!user) throw new HttpError(401);
@@ -9,8 +9,7 @@ function ensureCompany(user: any): string {
 }
 
 export type ClientDetail = Client & {
-  quotes: (Quote & { items: QuoteItem[]; project: Project | null })[];
-  invoices: (Invoice & { items: InvoiceItem[]; payments: Payment[]; project: Project | null })[];
+  documents: (Document & { items: DocumentItem[]; payments: Payment[]; project: Project | null })[];
   meetings: Meeting[];
 };
 
@@ -19,8 +18,7 @@ export const getClientDetail = async ({ clientId }: { clientId: string }, contex
   const client = await context.entities.Client.findUnique({
     where: { id: clientId },
     include: {
-      quotes: { include: { items: true, project: true }, orderBy: { createdAt: 'desc' } },
-      invoices: { include: { items: true, payments: true, project: true }, orderBy: { createdAt: 'desc' } },
+      documents: { include: { items: true, payments: true, project: true }, orderBy: { createdAt: 'desc' } },
       meetings: { orderBy: { startsAt: 'desc' } },
     },
   });
