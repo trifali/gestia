@@ -6,7 +6,7 @@ import {
   updateAutomation,
   deleteAutomation,
 } from 'wasp/client/operations';
-import { PageHeader, EmptyState, Modal, useConfirm } from '../../client/ui';
+import { PageHeader, EmptyState, Modal, useConfirm, IconBtn, EditIcon, TrashIcon } from '../../client/ui';
 
 const TRIGGERS: Record<string, string> = {
   facture_creee: 'Lorsqu\'une facture est créée',
@@ -80,16 +80,12 @@ export default function AutomationsPage() {
                 >
                   {a.isActive ? 'Désactiver' : 'Activer'}
                 </button>
-                <button
-                  className='btn-ghost text-xs text-danger ml-auto'
-                  onClick={async () => {
-                    if (await ask('Supprimer cette automatisation ?')) {
-                      await deleteAutomation({ id: a.id });
-                    }
-                  }}
-                >
-                  Supprimer
-                </button>
+                <div className='ml-auto flex gap-1'>
+                  <IconBtn title='Modifier' onClick={() => setEditing(a)}><EditIcon /></IconBtn>
+                  <IconBtn variant='danger' title='Supprimer' onClick={async () => {
+                    if (await ask('Supprimer cette automatisation ?')) await deleteAutomation({ id: a.id });
+                  }}><TrashIcon /></IconBtn>
+                </div>
               </div>
             </div>
           ))}

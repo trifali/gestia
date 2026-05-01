@@ -7,7 +7,7 @@ import {
   updateMeeting,
   deleteMeeting,
 } from 'wasp/client/operations';
-import { PageHeader, EmptyState, Modal, useConfirm } from '../../client/ui';
+import { PageHeader, EmptyState, Modal, useConfirm, IconBtn, EditIcon, TrashIcon } from '../../client/ui';
 import { formatDate, formatTime, formatDateTimeForInput } from '../../shared/format';
 
 const STATUS: Record<string, { label: string; className: string }> = {
@@ -70,17 +70,10 @@ export default function MeetingsPage() {
                 </div>
               </div>
               <div className='flex items-center gap-1 shrink-0'>
-                <button className='btn-ghost text-xs' onClick={() => setEditing(m)}>Modifier</button>
-                <button
-                  className='btn-ghost text-xs text-danger'
-                  onClick={async () => {
-                    if (await ask('Supprimer cette rencontre ?')) {
-                      await deleteMeeting({ id: m.id });
-                    }
-                  }}
-                >
-                  Supprimer
-                </button>
+                <IconBtn title='Modifier' onClick={() => setEditing(m)}><EditIcon /></IconBtn>
+                <IconBtn variant='danger' title='Supprimer' onClick={async () => {
+                  if (await ask('Supprimer cette rencontre ?')) await deleteMeeting({ id: m.id });
+                }}><TrashIcon /></IconBtn>
               </div>
             </div>
           ))}

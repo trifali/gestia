@@ -1,4 +1,40 @@
 import { type ReactNode, useState } from 'react';
+import { LuPencil, LuTrash2, LuAlertTriangle } from 'react-icons/lu';
+
+// ─── Reusable icon action buttons ─────────────────────────────────────────
+
+export function IconBtn({
+  variant = 'default',
+  onClick,
+  title,
+  disabled,
+  children,
+}: {
+  variant?: 'default' | 'danger';
+  onClick?: () => void;
+  title?: string;
+  disabled?: boolean;
+  children: ReactNode;
+}) {
+  return (
+    <button
+      type='button'
+      title={title}
+      disabled={disabled}
+      onClick={onClick}
+      className={`inline-flex items-center justify-center w-8 h-8 rounded-lg transition-colors disabled:opacity-40 ${
+        variant === 'danger'
+          ? 'text-muted hover:text-danger hover:bg-red-50'
+          : 'text-muted hover:text-ink hover:bg-canvas-200'
+      }`}
+    >
+      {children}
+    </button>
+  );
+}
+
+export const EditIcon = () => <LuPencil size={16} />;
+export const TrashIcon = () => <LuTrash2 size={16} />;
 
 // ─── Confirmation dialog ───────────────────────────────────────────────────
 
@@ -13,9 +49,7 @@ function ConfirmDialog({ state, onAnswer }: { state: ConfirmState; onAnswer: (v:
       >
         <div className='flex items-start gap-4 mb-5'>
           <div className='shrink-0 w-10 h-10 rounded-full bg-red-50 flex items-center justify-center'>
-            <svg className='w-5 h-5 text-danger' fill='none' viewBox='0 0 24 24' stroke='currentColor' strokeWidth='2'>
-              <path strokeLinecap='round' strokeLinejoin='round' d='M12 9v4m0 4h.01M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z'/>
-            </svg>
+            <LuAlertTriangle size={20} className='text-danger' />
           </div>
           <p className='text-ink text-sm leading-relaxed pt-1'>{state.message}</p>
         </div>

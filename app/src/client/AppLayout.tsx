@@ -2,6 +2,10 @@ import { Link, NavLink, useNavigate, useLocation, Navigate } from 'react-router-
 import { logout } from 'wasp/client/auth';
 import { useQuery, getCurrentCompany } from 'wasp/client/operations';
 import { useState, type ReactNode } from 'react';
+import {
+  LuLayoutDashboard, LuUsers, LuFolder, LuFileText, LuReceipt,
+  LuCreditCard, LuCalendar, LuZap, LuSettings, LuMenu, LuX
+} from 'react-icons/lu';
 
 type AppLayoutProps = {
   user: any;
@@ -9,41 +13,15 @@ type AppLayoutProps = {
 };
 
 const NAV = [
-  { to: '/tableau-de-bord', label: 'Tableau de bord', icon: 'home' },
-  { to: '/clients', label: 'Clients', icon: 'users' },
-  { to: '/projets', label: 'Projets', icon: 'folder' },
-  { to: '/soumissions', label: 'Soumissions', icon: 'file' },
-  { to: '/factures', label: 'Factures', icon: 'invoice' },
-  { to: '/paiements', label: 'Paiements', icon: 'card' },
-  { to: '/rencontres', label: 'Rencontres', icon: 'calendar' },
-  { to: '/automatisations', label: 'Automatisations', icon: 'bolt' },
+  { to: '/tableau-de-bord', label: 'Tableau de bord', icon: LuLayoutDashboard },
+  { to: '/clients', label: 'Clients', icon: LuUsers },
+  { to: '/projets', label: 'Projets', icon: LuFolder },
+  { to: '/soumissions', label: 'Soumissions', icon: LuFileText },
+  { to: '/factures', label: 'Factures', icon: LuReceipt },
+  { to: '/paiements', label: 'Paiements', icon: LuCreditCard },
+  { to: '/rencontres', label: 'Rencontres', icon: LuCalendar },
+  { to: '/automatisations', label: 'Automatisations', icon: LuZap },
 ];
-
-function Icon({ name, className = 'w-5 h-5' }: { name: string; className?: string }) {
-  const common = { className, fill: 'none', viewBox: '0 0 24 24', strokeWidth: 1.7, stroke: 'currentColor' } as const;
-  switch (name) {
-    case 'home':
-      return (<svg {...common}><path strokeLinecap='round' strokeLinejoin='round' d='M3 11.5 12 4l9 7.5V20a1 1 0 0 1-1 1h-5v-6h-6v6H4a1 1 0 0 1-1-1v-8.5Z'/></svg>);
-    case 'users':
-      return (<svg {...common}><path strokeLinecap='round' strokeLinejoin='round' d='M16 19v-1a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v1M21 19v-1a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75M9.5 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z'/></svg>);
-    case 'folder':
-      return (<svg {...common}><path strokeLinecap='round' strokeLinejoin='round' d='M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z'/></svg>);
-    case 'file':
-      return (<svg {...common}><path strokeLinecap='round' strokeLinejoin='round' d='M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9l-6-6Z M14 3v6h6 M9 13h6 M9 17h6'/></svg>);
-    case 'invoice':
-      return (<svg {...common}><path strokeLinecap='round' strokeLinejoin='round' d='M6 3h12v18l-3-2-3 2-3-2-3 2V3Z M9 8h6 M9 12h6 M9 16h4'/></svg>);
-    case 'card':
-      return (<svg {...common}><path strokeLinecap='round' strokeLinejoin='round' d='M3 7a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z M3 11h18'/></svg>);
-    case 'calendar':
-      return (<svg {...common}><path strokeLinecap='round' strokeLinejoin='round' d='M8 3v3 M16 3v3 M3 9h18 M5 5h14a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Z'/></svg>);
-    case 'bolt':
-      return (<svg {...common}><path strokeLinecap='round' strokeLinejoin='round' d='M13 3 4 14h7l-1 7 9-11h-7l1-7Z'/></svg>);
-    case 'cog':
-      return (<svg {...common}><path strokeLinecap='round' strokeLinejoin='round' d='M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h.01a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v.01a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z'/></svg>);
-    default:
-      return null;
-  }
-}
 
 export default function AppLayout({ user, children }: AppLayoutProps) {
   const { data: company, isLoading: companyLoading } = useQuery(getCurrentCompany);
@@ -82,7 +60,7 @@ export default function AppLayout({ user, children }: AppLayoutProps) {
             }
             onClick={() => setMobileOpen(false)}
           >
-            <Icon name={item.icon} />
+            <item.icon size={18} />
             <span>{item.label}</span>
           </NavLink>
         ))}
@@ -101,7 +79,7 @@ export default function AppLayout({ user, children }: AppLayoutProps) {
             <div className='text-sm font-medium text-ink truncate'>{user?.email || 'Utilisateur'}</div>
             <div className='text-xs text-muted'>{(user as any)?.role === 'admin' ? 'Administrateur' : 'Client'}</div>
           </div>
-          <Icon name='cog' className='w-4 h-4 text-muted shrink-0' />
+          <LuSettings size={16} className='text-muted shrink-0' />
         </Link>
         <button
           onClick={async () => { await logout(); navigate('/connexion'); }}
@@ -127,9 +105,7 @@ export default function AppLayout({ user, children }: AppLayoutProps) {
       <div className='flex-1 min-w-0 flex flex-col'>
         <header className='lg:hidden sticky top-0 z-30 bg-white border-b border-line px-4 py-3 flex items-center justify-between'>
           <button onClick={() => setMobileOpen(true)} className='btn-ghost'>
-            <svg className='w-5 h-5' fill='none' viewBox='0 0 24 24' stroke='currentColor' strokeWidth='2'>
-              <path strokeLinecap='round' strokeLinejoin='round' d='M4 6h16M4 12h16M4 18h16' />
-            </svg>
+            <LuMenu size={20} />
           </button>
           <span className='font-semibold'>Gestia</span>
           <span className='w-9' />

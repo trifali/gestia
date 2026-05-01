@@ -6,7 +6,7 @@ import {
   createPayment,
   deletePayment,
 } from 'wasp/client/operations';
-import { PageHeader, EmptyState, Modal, useConfirm } from '../../client/ui';
+import { PageHeader, EmptyState, Modal, useConfirm, IconBtn, TrashIcon } from '../../client/ui';
 import { formatCurrency, formatDate, formatDateForInput } from '../../shared/format';
 
 const METHODS: Record<string, string> = {
@@ -63,16 +63,9 @@ export default function PaymentsPage() {
                   <td className='text-muted'>{p.reference || '—'}</td>
                   <td className='text-right font-medium'>{formatCurrency(p.amount)}</td>
                   <td className='text-right'>
-                    <button
-                      className='btn-ghost text-xs text-danger'
-                      onClick={async () => {
-                        if (await ask('Supprimer ce paiement ?')) {
-                          await deletePayment({ id: p.id });
-                        }
-                      }}
-                    >
-                      Supprimer
-                    </button>
+                    <IconBtn variant='danger' title='Supprimer' onClick={async () => {
+                      if (await ask('Supprimer ce paiement ?')) await deletePayment({ id: p.id });
+                    }}><TrashIcon /></IconBtn>
                   </td>
                 </tr>
               ))}

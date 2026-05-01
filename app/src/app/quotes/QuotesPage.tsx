@@ -8,7 +8,7 @@ import {
   updateQuoteStatus,
   deleteQuote,
 } from 'wasp/client/operations';
-import { PageHeader, EmptyState, Modal, useConfirm } from '../../client/ui';
+import { PageHeader, EmptyState, Modal, useConfirm, IconBtn, TrashIcon } from '../../client/ui';
 import { formatCurrency, formatDate, formatDateForInput } from '../../shared/format';
 
 const STATUS: Record<string, { label: string; className: string }> = {
@@ -81,16 +81,9 @@ export default function QuotesPage() {
                   </td>
                   <td className='text-right font-medium'>{formatCurrency(q.total)}</td>
                   <td className='text-right'>
-                    <button
-                      className='btn-ghost text-xs text-danger'
-                      onClick={async () => {
-                        if (await ask(`Supprimer la soumission ${q.number} ?`)) {
-                          await deleteQuote({ id: q.id });
-                        }
-                      }}
-                    >
-                      Supprimer
-                    </button>
+                    <IconBtn variant='danger' title='Supprimer' onClick={async () => {
+                      if (await ask(`Supprimer la soumission ${q.number} ?`)) await deleteQuote({ id: q.id });
+                    }}><TrashIcon /></IconBtn>
                   </td>
                 </tr>
               ))}

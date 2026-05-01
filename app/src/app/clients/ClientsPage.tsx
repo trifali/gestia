@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useQuery, getClients, createClient, updateClient, deleteClient } from 'wasp/client/operations';
 import type { Client } from 'wasp/entities';
-import { PageHeader, EmptyState, Modal, useConfirm } from '../../client/ui';
+import { PageHeader, EmptyState, Modal, useConfirm, IconBtn, EditIcon, TrashIcon } from '../../client/ui';
 import { formatDate } from '../../shared/format';
 
 /** Formate les digits saisis en +1 (438) 444-4343 */
@@ -92,17 +92,12 @@ export default function ClientsPage() {
                   </td>
                   <td className='text-muted'>{formatDate(c.createdAt)}</td>
                   <td className='text-right'>
-                    <button className='btn-ghost text-xs' onClick={() => setEditing(c)}>Modifier</button>
-                    <button
-                      className='btn-ghost text-xs text-danger'
-                      onClick={async () => {
-                          if (await ask(`Supprimer le client « ${c.name} » ?`)) {
-                          await deleteClient({ id: c.id });
-                        }
-                      }}
-                    >
-                      Supprimer
-                    </button>
+                    <div className='flex items-center justify-end gap-1'>
+                      <IconBtn title='Modifier' onClick={() => setEditing(c)}><EditIcon /></IconBtn>
+                      <IconBtn variant='danger' title='Supprimer' onClick={async () => {
+                        if (await ask(`Supprimer le client « ${c.name} » ?`)) await deleteClient({ id: c.id });
+                      }}><TrashIcon /></IconBtn>
+                    </div>
                   </td>
                 </tr>
               ))}

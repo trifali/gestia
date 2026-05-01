@@ -8,7 +8,7 @@ import {
   updateInvoiceStatus,
   deleteInvoice,
 } from 'wasp/client/operations';
-import { PageHeader, EmptyState, Modal, useConfirm } from '../../client/ui';
+import { PageHeader, EmptyState, Modal, useConfirm, IconBtn, TrashIcon } from '../../client/ui';
 import { formatCurrency, formatDate } from '../../shared/format';
 
 const STATUS: Record<string, { label: string; className: string }> = {
@@ -87,16 +87,9 @@ export default function InvoicesPage() {
                       </span>
                     </td>
                     <td className='text-right'>
-                      <button
-                        className='btn-ghost text-xs text-danger'
-                        onClick={async () => {
-                          if (await ask(`Supprimer la facture ${inv.number} ?`)) {
-                            await deleteInvoice({ id: inv.id });
-                          }
-                        }}
-                      >
-                        Supprimer
-                      </button>
+                      <IconBtn variant='danger' title='Supprimer' onClick={async () => {
+                        if (await ask(`Supprimer la facture ${inv.number} ?`)) await deleteInvoice({ id: inv.id });
+                      }}><TrashIcon /></IconBtn>
                     </td>
                   </tr>
                 );

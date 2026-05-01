@@ -7,7 +7,7 @@ import {
   updateProject,
   deleteProject,
 } from 'wasp/client/operations';
-import { PageHeader, EmptyState, Modal, useConfirm } from '../../client/ui';
+import { PageHeader, EmptyState, Modal, useConfirm, IconBtn, EditIcon, TrashIcon } from '../../client/ui';
 import { formatCurrency, formatDate, formatDateForInput } from '../../shared/format';
 
 const STATUS: Record<string, { label: string; className: string }> = {
@@ -67,17 +67,12 @@ export default function ProjectsPage() {
                   <td className='text-muted'>{p.dueDate ? formatDate(p.dueDate) : '—'}</td>
                   <td className='text-muted'>{p.budget ? formatCurrency(p.budget) : '—'}</td>
                   <td className='text-right'>
-                    <button className='btn-ghost text-xs' onClick={() => setEditing(p)}>Modifier</button>
-                    <button
-                      className='btn-ghost text-xs text-danger'
-                      onClick={async () => {
-                        if (await ask(`Supprimer le projet « ${p.name} » ?`)) {
-                          await deleteProject({ id: p.id });
-                        }
-                      }}
-                    >
-                      Supprimer
-                    </button>
+                    <div className='flex items-center justify-end gap-1'>
+                      <IconBtn title='Modifier' onClick={() => setEditing(p)}><EditIcon /></IconBtn>
+                      <IconBtn variant='danger' title='Supprimer' onClick={async () => {
+                        if (await ask(`Supprimer le projet « ${p.name} » ?`)) await deleteProject({ id: p.id });
+                      }}><TrashIcon /></IconBtn>
+                    </div>
                   </td>
                 </tr>
               ))}
