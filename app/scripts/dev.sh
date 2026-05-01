@@ -84,22 +84,26 @@ fi
 ok "Docker prêt."
 
 # 3. Base de données Wasp en arrière-plan
-info "Démarrage de la base de données PostgreSQL..."
-: > "$DB_LOG"
-("$WASP_BIN" start db >>"$DB_LOG" 2>&1) &
-echo $! > "$DB_PID_FILE"
+if grep -q "^DATABASE_URL=" "$APP_DIR/.env.server" 2>/dev/null; then
+  info "DATABASE_URL définie dans .env.server — base de données locale ignorée."
+else
+  info "Démarrage de la base de données PostgreSQL..."
+  : > "$DB_LOG"
+  ("$WASP_BIN" start db >>"$DB_LOG" 2>&1) &
+  echo $! > "$DB_PID_FILE"
 
-# Attendre que Postgres accepte les connexions
-printf "  En attente de la base de données"
-for _ in $(seq 1 60); do
-  if (echo > /dev/tcp/127.0.0.1/5432) >/dev/null 2>&1; then echo; ok "Base de données prête."; break; fi
-  printf "."
-  sleep 1
-done
-if ! (echo > /dev/tcp/127.0.0.1/5432) >/dev/null 2>&1; then
-  fail "La base de données n'a pas démarré. Voir $DB_LOG"
-  tail -40 "$DB_LOG" || true
-  exit 1
+  # Attendre que Postgres accepte les connexions
+  printf "  En attente de la base de données"
+  for _ in $(seq 1 60); do
+    if (echo > /dev/tcp/127.0.0.1/5432) >/dev/null 2>&1; then echo; ok "Base de données prête."; break; fi
+    printf "."
+    sleep 1
+  done
+  if ! (echo > /dev/tcp/127.0.0.1/5432) >/dev/null 2>&1; then
+    fail "La base de données n'a pas démarré. Voir $DB_LOG"
+    tail -40 "$DB_LOG" || true
+    exit 1
+  fi
 fi
 
 # 4. Migrations
