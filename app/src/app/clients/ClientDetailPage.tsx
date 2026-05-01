@@ -1,17 +1,24 @@
 import { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { LuArrowLeft, LuPencil, LuExternalLink } from 'react-icons/lu';
-import { useQuery, getClientDetail } from 'wasp/client/operations';
+import { LuArrowLeft, LuPencil } from 'react-icons/lu';
+import {
+  useQuery,
+  getClientDetail,
+  getProjects,
+  deleteQuote,
+  updateQuoteStatus,
+  deleteInvoice,
+  updateInvoiceStatus,
+  deleteMeeting,
+  updateClient,
+} from 'wasp/client/operations';
 import { Modal, useConfirm, IconBtn, TrashIcon } from '../../client/ui';
 import { formatCurrency, formatDate } from '../../shared/format';
-import {
-  deleteQuote,
-  deleteInvoice,
-  updateQuoteStatus,
-  updateInvoiceStatus,
-} from 'wasp/client/operations';
 import type { Client } from 'wasp/entities';
 import type { ClientDetail } from './operations';
+import { QuoteForm } from '../quotes/QuoteForm';
+import { InvoiceForm } from '../invoices/InvoiceForm';
+import { MeetingForm } from '../meetings/MeetingForm';
 
 // ─── Status maps ──────────────────────────────────────────────────────────────
 const QUOTE_STATUS: Record<string, { label: string; className: string }> = {
@@ -52,11 +59,14 @@ export default function ClientDetailPage() {
   const { clientId } = useParams<{ clientId: string }>();
   const navigate = useNavigate();
   const { data: client, isLoading } = useQuery(getClientDetail, { clientId: clientId! });
+  const { data: projects } = useQuery(getProjects);
   const [tab, setTab] = useState<Tab>('resume');
   const [editingClient, setEditingClient] = useState(false);
 
   if (isLoading) return <div className='text-muted p-6'>Chargement…</div>;
   if (!client) return <div className='text-muted p-6'>Client introuvable.</div>;
+
+  const clientProjects = (projects || []).filter((p: any) => p.clientId === client.id);
 
   return (
     <>
@@ -105,8 +115,8 @@ export default function ClientDetailPage() {
 
       {/* Tab content */}
       {tab === 'resume' && <ResumeTab client={client} />}
-      {tab === 'soumissions' && <SoumissionsTab client={client} />}
-      {tab === 'factures' && <FacturesTab client={client} />}
+      {tab === 'soumissions' && <SoumissionsTab client={client} projects={clientProjects} />}
+      {tab === 'factures' && <FacturesTab client={client} projects={clientProjects} />}
       {tab === 'paiements' && <PaiementsTab client={client} />}
       {tab === 'rencontres' && <RencontresTab client={client} />}
 
@@ -172,19 +182,15 @@ function InfoRow({ label, value }: { label: string; value: string }) {
 }
 
 // ─── Soumissions ──────────────────────────────────────────────────────────────
-function SoumissionsTab({ client }: { client: ClientDetail }) {
-  const navigate = useNavigate();
+function SoumissionsTab({ client, projects }: { client: ClientDetail; projects: any[] }) {
   const { ask, Dialog: ConfirmDialog } = useConfirm();
+  const [creating, setCreating] = useState(false);
 
   return (
     <>
       <div className='flex items-center justify-between mb-4'>
         <p className='text-sm text-muted'>{client.quotes.length} soumission(s)</p>
-        <button
-          className='btn-primary flex items-center gap-1.5'
-          onClick={() => navigate('/soumissions')}
-        >
-          <LuExternalLink size={14} />
+        <button className='btn-primary' onClick={() => setCreating(true)}>
           Nouvelle soumission
         </button>
       </div>
@@ -228,25 +234,22 @@ function SoumissionsTab({ client }: { client: ClientDetail }) {
           </table>
         </div>
       )}
+      {creating && <QuoteForm clientId={client.id} projects={projects} onClose={() => setCreating(false)} />}
       {ConfirmDialog}
     </>
   );
 }
 
 // ─── Factures ─────────────────────────────────────────────────────────────────
-function FacturesTab({ client }: { client: ClientDetail }) {
-  const navigate = useNavigate();
+function FacturesTab({ client, projects }: { client: ClientDetail; projects: any[] }) {
   const { ask, Dialog: ConfirmDialog } = useConfirm();
+  const [creating, setCreating] = useState(false);
 
   return (
     <>
       <div className='flex items-center justify-between mb-4'>
         <p className='text-sm text-muted'>{client.invoices.length} facture(s)</p>
-        <button
-          className='btn-primary flex items-center gap-1.5'
-          onClick={() => navigate('/factures')}
-        >
-          <LuExternalLink size={14} />
+        <button className='btn-primary' onClick={() => setCreating(true)}>
           Nouvelle facture
         </button>
       </div>
@@ -292,6 +295,7 @@ function FacturesTab({ client }: { client: ClientDetail }) {
           </table>
         </div>
       )}
+      {creating && <InvoiceForm clientId={client.id} projects={projects} onClose={() => setCreating(false)} />}
       {ConfirmDialog}
     </>
   );
@@ -351,10 +355,13 @@ function PaiementsTab({ client }: { client: ClientDetail }) {
 
 // ─── Rencontres ───────────────────────────────────────────────────────────────
 function RencontresTab({ client }: { client: ClientDetail }) {
-  const navigate = useNavigate();
+  const { ask, Dialog: ConfirmDialog } = useConfirm();
+  const [creating, setCreating] = useState(false);
+  const [editing, setEditing] = useState<any>(null);
 
   const MEETING_STATUS: Record<string, { label: string; className: string }> = {
     prevue: { label: 'Prévue', className: 'badge-info' },
+    confirmee: { label: 'Confirmée', className: 'badge-info' },
     terminee: { label: 'Terminée', className: 'badge-success' },
     annulee: { label: 'Annulée', className: 'badge-neutral' },
   };
@@ -363,11 +370,7 @@ function RencontresTab({ client }: { client: ClientDetail }) {
     <>
       <div className='flex items-center justify-between mb-4'>
         <p className='text-sm text-muted'>{client.meetings.length} rencontre(s)</p>
-        <button
-          className='btn-primary flex items-center gap-1.5'
-          onClick={() => navigate('/rencontres')}
-        >
-          <LuExternalLink size={14} />
+        <button className='btn-primary' onClick={() => setCreating(true)}>
           Nouvelle rencontre
         </button>
       </div>
@@ -383,6 +386,7 @@ function RencontresTab({ client }: { client: ClientDetail }) {
                 <th>Date</th>
                 <th>Lieu / URL</th>
                 <th>Statut</th>
+                <th className='text-right'>Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -394,6 +398,18 @@ function RencontresTab({ client }: { client: ClientDetail }) {
                     <td className='text-muted'>{formatDate(m.startsAt)}</td>
                     <td className='text-muted'>{m.location || m.meetingUrl || '—'}</td>
                     <td><span className={st.className}>{st.label}</span></td>
+                    <td className='text-right'>
+                      <div className='flex items-center justify-end gap-1'>
+                        <IconBtn title='Modifier' onClick={() => setEditing(m)}>
+                          <LuPencil size={14} />
+                        </IconBtn>
+                        <IconBtn variant='danger' title='Supprimer' onClick={async () => {
+                          if (await ask(`Supprimer la rencontre « ${m.title} » ?`)) await deleteMeeting({ id: m.id });
+                        }}>
+                          <TrashIcon />
+                        </IconBtn>
+                      </div>
+                    </td>
                   </tr>
                 );
               })}
@@ -401,6 +417,14 @@ function RencontresTab({ client }: { client: ClientDetail }) {
           </table>
         </div>
       )}
+      {(creating || editing) && (
+        <MeetingForm
+          meeting={editing}
+          clientId={client.id}
+          onClose={() => { setCreating(false); setEditing(null); }}
+        />
+      )}
+      {ConfirmDialog}
     </>
   );
 }
@@ -418,8 +442,6 @@ function maskPhone(raw: string): string {
   if (digits.length <= 6) return `+1 (${a}) ${p}`;
   return `+1 (${a}) ${p}-${l}`;
 }
-
-import { updateClient } from 'wasp/client/operations';
 
 function ClientEditModal({ client, onClose }: { client: Client; onClose: () => void }) {
   const [form, setForm] = useState({
@@ -502,3 +524,4 @@ function ClientEditModal({ client, onClose }: { client: Client; onClose: () => v
     </Modal>
   );
 }
+
