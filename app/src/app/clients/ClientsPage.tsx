@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { LuChevronDown, LuChevronUp } from 'react-icons/lu';
 import { useQuery, getClients, createClient, updateClient, deleteClient } from 'wasp/client/operations';
 import type { Client } from 'wasp/entities';
 import { PageHeader, EmptyState, Modal, useConfirm, IconBtn, EditIcon, TrashIcon } from '../../client/ui';
@@ -28,6 +29,15 @@ export default function ClientsPage() {
   const { data: clients, isLoading } = useQuery(getClients);
   const { ask, Dialog: ConfirmDialog } = useConfirm();
   const [search, setSearch] = useState('');
+  const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
+
+  function toggleNote(id: string) {
+    setExpandedIds((prev) => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  }
   const [editing, setEditing] = useState<Client | null>(null);
   const [creating, setCreating] = useState(false);
 
@@ -69,6 +79,7 @@ export default function ClientsPage() {
           <table>
             <thead>
               <tr>
+                <th className='w-8'></th>
                 <th>Nom</th>
                 <th>Contact</th>
                 <th>Courriel</th>
@@ -79,28 +90,47 @@ export default function ClientsPage() {
               </tr>
             </thead>
             <tbody>
-              {filtered.map((c) => (
-                <tr key={c.id}>
-                  <td className='font-medium'>{c.name}</td>
-                  <td className='text-muted'>{c.contactName || '—'}</td>
-                  <td className='text-muted'>{c.email || '—'}</td>
-                  <td className='text-muted'>{c.phone || '—'}</td>
-                  <td>
-                    <span className={STATUS[c.status as keyof typeof STATUS]?.className || 'badge-neutral'}>
-                      {STATUS[c.status as keyof typeof STATUS]?.label || c.status}
-                    </span>
-                  </td>
-                  <td className='text-muted'>{formatDate(c.createdAt)}</td>
-                  <td className='text-right'>
-                    <div className='flex items-center justify-end gap-1'>
-                      <IconBtn title='Modifier' onClick={() => setEditing(c)}><EditIcon /></IconBtn>
-                      <IconBtn variant='danger' title='Supprimer' onClick={async () => {
-                        if (await ask(`Supprimer le client « ${c.name} » ?`)) await deleteClient({ id: c.id });
-                      }}><TrashIcon /></IconBtn>
-                    </div>
-                  </td>
-                </tr>
-              ))}
+              {filtered.map((c) => {
+                const expanded = expandedIds.has(c.id);
+                return (
+                  <>
+                    <tr key={c.id}>
+                      <td className='w-8'>
+                        {c.notes ? (
+                          <IconBtn title={expanded ? 'Masquer la note' : 'Voir la note'} onClick={() => toggleNote(c.id)}>
+                            {expanded ? <LuChevronUp size={16} /> : <LuChevronDown size={16} />}
+                          </IconBtn>
+                        ) : null}
+                      </td>
+                      <td className='font-medium'>{c.name}</td>
+                      <td className='text-muted'>{c.contactName || '—'}</td>
+                      <td className='text-muted'>{c.email || '—'}</td>
+                      <td className='text-muted'>{c.phone || '—'}</td>
+                      <td>
+                        <span className={STATUS[c.status as keyof typeof STATUS]?.className || 'badge-neutral'}>
+                          {STATUS[c.status as keyof typeof STATUS]?.label || c.status}
+                        </span>
+                      </td>
+                      <td className='text-muted'>{formatDate(c.createdAt)}</td>
+                      <td className='text-right'>
+                        <div className='flex items-center justify-end gap-1'>
+                          <IconBtn title='Modifier' onClick={() => setEditing(c)}><EditIcon /></IconBtn>
+                          <IconBtn variant='danger' title='Supprimer' onClick={async () => {
+                            if (await ask(`Supprimer le client « ${c.name} » ?`)) await deleteClient({ id: c.id });
+                          }}><TrashIcon /></IconBtn>
+                        </div>
+                      </td>
+                    </tr>
+                    {expanded && c.notes && (
+                      <tr key={`${c.id}-note`} className='bg-canvas'>
+                        <td colSpan={8} className='px-4 py-3'>
+                          <p className='text-sm text-muted whitespace-pre-wrap'>{c.notes}</p>
+                        </td>
+                      </tr>
+                    )}
+                  </>
+                );
+              })}
             </tbody>
           </table>
         </div>
