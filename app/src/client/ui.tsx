@@ -1,6 +1,6 @@
 import { type ReactNode, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { LuPencil, LuTrash2, LuAlertTriangle } from 'react-icons/lu';
+import { LuPencil, LuTrash2, LuTriangleAlert } from 'react-icons/lu';
 
 // ─── Reusable icon action buttons ─────────────────────────────────────────
 
@@ -58,7 +58,7 @@ function ConfirmDialog({ state, onAnswer }: { state: ConfirmState; onAnswer: (v:
       >
         <div className='flex items-start gap-4 mb-5'>
           <div className={`shrink-0 w-10 h-10 rounded-full flex items-center justify-center ${isDanger ? 'bg-red-50 text-danger' : 'bg-blue-50 text-blue-600'}`}>
-            <LuAlertTriangle size={20} />
+            <LuTriangleAlert size={20} />
           </div>
           <p className='text-ink text-sm leading-relaxed pt-1'>{state.message}</p>
         </div>
