@@ -283,6 +283,19 @@ action deletePriceItem {
   entities: [User, PriceItem]
 }
 
+query getPriceCategories {
+  fn: import { getPriceCategories } from "@src/app/prices/operations",
+  entities: [User, PriceCategory]
+}
+action createPriceCategory {
+  fn: import { createPriceCategory } from "@src/app/prices/operations",
+  entities: [User, PriceCategory]
+}
+action deletePriceCategory {
+  fn: import { deletePriceCategory } from "@src/app/prices/operations",
+  entities: [User, PriceCategory]
+}
+
 query getDashboardStats {
   fn: import { getDashboardStats } from "@src/app/dashboard/operations",
   entities: [User, Client, Project, Document, Payment, Meeting]

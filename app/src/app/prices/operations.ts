@@ -4,8 +4,11 @@ import type {
   CreatePriceItem,
   UpdatePriceItem,
   DeletePriceItem,
+  GetPriceCategories,
+  CreatePriceCategory,
+  DeletePriceCategory,
 } from 'wasp/server/operations';
-import type { PriceItem } from 'wasp/entities';
+import type { PriceItem, PriceCategory } from 'wasp/entities';
 
 function ensureCompany(user: any): string {
   if (!user) throw new HttpError(401);
@@ -97,4 +100,31 @@ export const deletePriceItem: DeletePriceItem<{ id: string }, { id: string }> = 
   if (!existing || existing.companyId !== companyId) throw new HttpError(404);
   await context.entities.PriceItem.delete({ where: { id } });
   return { id };
+};
+
+export const getPriceCategories: GetPriceCategories<void, PriceCategory[]> = async (_args, context) => {
+  const companyId = ensureCompany(context.user);
+  return context.entities.PriceCategory.findMany({
+    where: { companyId },
+    orderBy: { name: 'asc' },
+  });
+};
+
+export const createPriceCategory: CreatePriceCategory<{ name: string }, PriceCategory> = async (args, context) => {
+  const companyId = ensureCompany(context.user);
+  ensureAdmin(context.user);
+  if (!args.name?.trim()) throw new HttpError(400, 'Nom requis');
+  return context.entities.PriceCategory.upsert({
+    where: { companyId_name: { companyId, name: args.name.trim() } },
+    create: { companyId, name: args.name.trim() },
+    update: {},
+  });
+};
+
+export const deletePriceCategory: DeletePriceCategory<{ id: string }, PriceCategory> = async ({ id }, context) => {
+  const companyId = ensureCompany(context.user);
+  ensureAdmin(context.user);
+  const existing = await context.entities.PriceCategory.findFirst({ where: { id, companyId } });
+  if (!existing) throw new HttpError(404);
+  return context.entities.PriceCategory.delete({ where: { id } });
 };

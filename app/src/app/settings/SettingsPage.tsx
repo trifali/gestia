@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import {
   useQuery,
   getCurrentCompany,
@@ -7,6 +7,9 @@ import {
   createPriceItem,
   updatePriceItem,
   deletePriceItem,
+  getPriceCategories,
+  createPriceCategory,
+  deletePriceCategory,
 } from 'wasp/client/operations';
 import { useAuth } from 'wasp/client/auth';
 import { LuPlus } from 'react-icons/lu';
@@ -285,6 +288,7 @@ function PriceList({ canEdit }: { canEdit: boolean }) {
       {(creating || editing) && (
         <PriceFormModal
           initial={editing}
+          canEdit={canEdit}
           onClose={() => { setCreating(false); setEditing(null); }}
           onSaved={() => { setCreating(false); setEditing(null); refetch(); }}
         />
@@ -297,11 +301,15 @@ function PriceFormModal({
   initial,
   onClose,
   onSaved,
+  canEdit,
 }: {
   initial: PriceItem | null;
   onClose: () => void;
   onSaved: () => void;
+  canEdit: boolean;
 }) {
+  const { data: rawCategories } = useQuery(getPriceCategories);
+  const categories = (rawCategories || []) as Array<{ id: string; name: string }>;
   const [form, setForm] = useState<PriceForm>(
     initial
       ? {
@@ -369,11 +377,11 @@ function PriceFormModal({
           </div>
           <div>
             <label className='label'>Catégorie</label>
-            <input
-              className='input'
+            <CategoryCombobox
               value={form.category}
-              onChange={(e) => setForm({ ...form, category: e.target.value })}
-              placeholder='Services'
+              onChange={(v) => setForm({ ...form, category: v })}
+              categories={categories}
+              canManage={canEdit}
             />
           </div>
         </div>
@@ -421,5 +429,110 @@ function PriceFormModal({
         </label>
       </form>
     </Modal>
+  );
+}
+
+function CategoryCombobox({
+  value,
+  onChange,
+  categories,
+  canManage,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  categories: Array<{ id: string; name: string }>;
+  canManage: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const [busyId, setBusyId] = useState<string | null>(null);
+
+  const trimmed = value.trim().toLowerCase();
+  const filtered = trimmed
+    ? categories.filter((c) => c.name.toLowerCase().includes(trimmed))
+    : categories;
+  const isNew =
+    value.trim() !== '' &&
+    !categories.some((c) => c.name.toLowerCase() === value.trim().toLowerCase());
+
+  const select = (name: string) => {
+    onChange(name);
+    setOpen(false);
+  };
+
+  const handleAdd = async () => {
+    if (!value.trim() || !isNew || busyId === 'new') return;
+    setBusyId('new');
+    try {
+      const cat = await createPriceCategory({ name: value.trim() });
+      onChange((cat as any).name);
+      setOpen(false);
+    } catch (e: any) {
+      alert(e?.message || 'Erreur');
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const handleDelete = async (e: React.MouseEvent, id: string, name: string) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setBusyId(id);
+    try {
+      await deletePriceCategory({ id });
+      if (value.toLowerCase() === name.toLowerCase()) onChange('');
+    } catch (err: any) {
+      alert(err?.message || 'Erreur');
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  return (
+    <div className='relative'>
+      <input
+        className='input'
+        value={value}
+        onChange={(e) => { onChange(e.target.value); setOpen(true); }}
+        onFocus={() => setOpen(true)}
+        onBlur={() => setTimeout(() => setOpen(false), 200)}
+        placeholder='Sélectionner ou créer…'
+        autoComplete='off'
+      />
+      {open && (
+        <div className='absolute z-50 top-full mt-1 left-0 right-0 bg-white border border-line rounded-xl shadow-lg max-h-52 overflow-y-auto'>
+          {filtered.map((c) => (
+            <div
+              key={c.id}
+              className='flex items-center justify-between px-3 py-2 hover:bg-canvas-100 cursor-pointer text-sm group'
+              onMouseDown={(e) => { e.preventDefault(); select(c.name); }}
+            >
+              <span>{c.name}</span>
+              {canManage && (
+                <button
+                  type='button'
+                  className='opacity-0 group-hover:opacity-100 text-muted hover:text-danger ml-2 leading-none text-base'
+                  onMouseDown={(e) => handleDelete(e, c.id, c.name)}
+                  disabled={busyId === c.id}
+                  title='Supprimer la catégorie'
+                >
+                  ×
+                </button>
+              )}
+            </div>
+          ))}
+          {isNew && (
+            <div
+              className='px-3 py-2 hover:bg-canvas-100 cursor-pointer text-sm text-accent font-medium border-t border-line'
+              onMouseDown={(e) => { e.preventDefault(); handleAdd(); }}
+            >
+              {busyId === 'new' ? 'Création…' : `+ Créer « ${value.trim()} »`}
+            </div>
+          )}
+          {filtered.length === 0 && !isNew && (
+            <div className='px-3 py-2 text-sm text-muted italic'>Aucune catégorie disponible</div>
+          )}
+        </div>
+      )}
+    </div>
   );
 }

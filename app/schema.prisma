@@ -42,14 +42,15 @@ model Company {
   currency     String  @default("CAD")
   locale       String  @default("fr-CA")
 
-  users       User[]
-  clients     Client[]
-  projects    Project[]
-  documents   Document[]
-  payments    Payment[]
-  meetings    Meeting[]
-  automations Automation[]
-  priceItems  PriceItem[]
+  users           User[]
+  clients         Client[]
+  projects        Project[]
+  documents       Document[]
+  payments        Payment[]
+  meetings        Meeting[]
+  automations     Automation[]
+  priceItems      PriceItem[]
+  priceCategories PriceCategory[]
 }
 
 model Client {
@@ -196,6 +197,18 @@ model PriceItem {
   unit        String  @default("unite")
   unitPrice   Float   @default(0)
   isActive    Boolean @default(true)
+}
+
+model PriceCategory {
+  id        String   @id @default(uuid())
+  createdAt DateTime @default(now())
+
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  companyId String
+
+  name String
+
+  @@unique([companyId, name])
 }
 
 model Automation {
