@@ -1,6 +1,6 @@
 app gestia {
   wasp: {
-    version: "^0.16.0"
+    version: "^0.23.0"
   },
 
   title: "Gestia — Gestion intelligente pour entreprises québécoises",
@@ -46,7 +46,7 @@ app gestia {
   },
 
   emailSender: {
-    provider: Dummy,
+    provider: SMTP,
     defaultFrom: {
       name: "Gestia",
       email: "info@gestia.ca"
