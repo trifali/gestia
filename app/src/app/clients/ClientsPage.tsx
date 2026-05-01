@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { LuChevronDown, LuChevronUp } from 'react-icons/lu';
+import { useNavigate } from 'react-router-dom';
+import { LuChevronDown, LuChevronUp, LuArrowRight } from 'react-icons/lu';
 import { useQuery, getClients, createClient, updateClient, deleteClient } from 'wasp/client/operations';
 import type { Client } from 'wasp/entities';
 import { PageHeader, EmptyState, Modal, useConfirm, IconBtn, EditIcon, TrashIcon } from '../../client/ui';
@@ -28,6 +29,7 @@ const STATUS = {
 export default function ClientsPage() {
   const { data: clients, isLoading } = useQuery(getClients);
   const { ask, Dialog: ConfirmDialog } = useConfirm();
+  const navigate = useNavigate();
   const [search, setSearch] = useState('');
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
 
@@ -87,6 +89,7 @@ export default function ClientsPage() {
                 <th>Statut</th>
                 <th>Ajouté le</th>
                 <th className='text-right'>Actions</th>
+                <th className='w-8'></th>
               </tr>
             </thead>
             <tbody>
@@ -120,10 +123,15 @@ export default function ClientsPage() {
                           }}><TrashIcon /></IconBtn>
                         </div>
                       </td>
+                      <td className='w-8'>
+                        <IconBtn title='Ouvrir le dossier client' onClick={() => navigate(`/clients/${c.id}`)}>
+                          <LuArrowRight size={16} />
+                        </IconBtn>
+                      </td>
                     </tr>
                     {expanded && c.notes && (
                       <tr key={`${c.id}-note`} className='bg-canvas'>
-                        <td colSpan={8} className='px-4 py-3'>
+                        <td colSpan={9} className='px-4 py-3'>
                           <p className='text-sm text-muted whitespace-pre-wrap'>{c.notes}</p>
                         </td>
                       </tr>

@@ -1,12 +1,32 @@
 import { HttpError } from 'wasp/server';
 import type { GetClients, CreateClient, UpdateClient, DeleteClient } from 'wasp/server/operations';
-import type { Client } from 'wasp/entities';
+import type { Client, Quote, QuoteItem, Invoice, InvoiceItem, Payment, Meeting, Project } from 'wasp/entities';
 
 function ensureCompany(user: any): string {
   if (!user) throw new HttpError(401);
   if (!user.companyId) throw new HttpError(403, 'Aucune entreprise associée');
   return user.companyId;
 }
+
+export type ClientDetail = Client & {
+  quotes: (Quote & { items: QuoteItem[]; project: Project | null })[];
+  invoices: (Invoice & { items: InvoiceItem[]; payments: Payment[]; project: Project | null })[];
+  meetings: Meeting[];
+};
+
+export const getClientDetail = async ({ clientId }: { clientId: string }, context: any): Promise<ClientDetail> => {
+  const companyId = ensureCompany(context.user);
+  const client = await context.entities.Client.findUnique({
+    where: { id: clientId },
+    include: {
+      quotes: { include: { items: true, project: true }, orderBy: { createdAt: 'desc' } },
+      invoices: { include: { items: true, payments: true, project: true }, orderBy: { createdAt: 'desc' } },
+      meetings: { orderBy: { startsAt: 'desc' } },
+    },
+  });
+  if (!client || client.companyId !== companyId) throw new HttpError(404, 'Client introuvable');
+  return client;
+};
 
 export const getClients: GetClients<void, Client[]> = async (_args, context) => {
   const companyId = ensureCompany(context.user);

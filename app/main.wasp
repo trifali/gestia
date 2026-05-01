@@ -96,6 +96,12 @@ page ClientsPage {
   component: import ClientsPage from "@src/app/clients/ClientsPage"
 }
 
+route ClientDetailRoute { path: "/clients/:clientId", to: ClientDetailPage }
+page ClientDetailPage {
+  authRequired: true,
+  component: import ClientDetailPage from "@src/app/clients/ClientDetailPage"
+}
+
 route ProjectsRoute { path: "/projets", to: ProjectsPage }
 page ProjectsPage {
   authRequired: true,
@@ -159,6 +165,10 @@ action createCompany {
 query getClients {
   fn: import { getClients } from "@src/app/clients/operations",
   entities: [User, Client]
+}
+query getClientDetail {
+  fn: import { getClientDetail } from "@src/app/clients/operations",
+  entities: [User, Client, Quote, QuoteItem, Invoice, InvoiceItem, Payment, Meeting, Project]
 }
 action createClient {
   fn: import { createClient } from "@src/app/clients/operations",
