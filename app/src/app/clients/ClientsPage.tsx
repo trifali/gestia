@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { Fragment, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { LuChevronDown, LuChevronUp, LuArrowRight } from 'react-icons/lu';
 import { useQuery, getClients, createClient, updateClient, deleteClient } from 'wasp/client/operations';
@@ -96,8 +96,8 @@ export default function ClientsPage() {
               {filtered.map((c) => {
                 const expanded = expandedIds.has(c.id);
                 return (
-                  <>
-                    <tr key={c.id}>
+                  <Fragment key={c.id}>
+                    <tr>
                       <td className='w-8'>
                         {c.notes ? (
                           <IconBtn title={expanded ? 'Masquer la note' : 'Voir la note'} onClick={() => toggleNote(c.id)}>
@@ -130,13 +130,13 @@ export default function ClientsPage() {
                       </td>
                     </tr>
                     {expanded && c.notes && (
-                      <tr key={`${c.id}-note`} className='bg-canvas'>
+                      <tr className='bg-canvas'>
                         <td colSpan={9} className='px-4 py-3'>
                           <p className='text-sm text-muted whitespace-pre-wrap'>{c.notes}</p>
                         </td>
                       </tr>
                     )}
-                  </>
+                  </Fragment>
                 );
               })}
             </tbody>
