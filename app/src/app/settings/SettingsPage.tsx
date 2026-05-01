@@ -1,12 +1,22 @@
 import { useState, useEffect } from 'react';
-import { useQuery, getCurrentCompany, updateCompany } from 'wasp/client/operations';
+import {
+  useQuery,
+  getCurrentCompany,
+  updateCompany,
+  getPriceItems,
+  createPriceItem,
+  updatePriceItem,
+  deletePriceItem,
+} from 'wasp/client/operations';
 import { useAuth } from 'wasp/client/auth';
-import { PageHeader } from '../../client/ui';
+import { LuPlus } from 'react-icons/lu';
+import { PageHeader, IconBtn, EditIcon, TrashIcon, useConfirm, Modal, EmptyState } from '../../client/ui';
+import { formatCurrency } from '../../shared/format';
 
 export default function SettingsPage() {
   const { data: user } = useAuth();
   const { data: company, isLoading } = useQuery(getCurrentCompany);
-  const [tab, setTab] = useState<'entreprise' | 'compte' | 'localisation'>('entreprise');
+  const [tab, setTab] = useState<'entreprise' | 'tarifs' | 'compte' | 'localisation'>('entreprise');
 
   if (isLoading) return <div className='text-muted'>Chargement…</div>;
   if (!company) return <div className='text-muted'>Aucune entreprise associée.</div>;
@@ -19,11 +29,13 @@ export default function SettingsPage() {
 
       <div className='flex gap-2 border-b border-line mb-6'>
         <TabButton active={tab === 'entreprise'} onClick={() => setTab('entreprise')}>Entreprise</TabButton>
+        <TabButton active={tab === 'tarifs'} onClick={() => setTab('tarifs')}>Tarifs</TabButton>
         <TabButton active={tab === 'compte'} onClick={() => setTab('compte')}>Compte</TabButton>
         <TabButton active={tab === 'localisation'} onClick={() => setTab('localisation')}>Localisation</TabButton>
       </div>
 
       {tab === 'entreprise' && <CompanyForm company={company} canEdit={!!isAdmin} />}
+      {tab === 'tarifs' && <PriceList canEdit={!!isAdmin} />}
       {tab === 'compte' && <AccountInfo user={user} role={(user as any)?.role || 'client'} />}
       {tab === 'localisation' && <LocalizationInfo />}
     </>
@@ -152,5 +164,262 @@ function LocalizationInfo() {
         <li className='flex justify-between'><span className='text-muted'>TVQ</span><span>9,975 %</span></li>
       </ul>
     </div>
+  );
+}
+
+// ─── Tarifs ────────────────────────────────────────────────────────────────
+
+type PriceItem = {
+  id: string;
+  code: string | null;
+  name: string;
+  description: string | null;
+  category: string | null;
+  unit: string;
+  unitPrice: number;
+  isActive: boolean;
+};
+
+type PriceForm = {
+  code: string;
+  name: string;
+  description: string;
+  category: string;
+  unitPrice: string;
+  isActive: boolean;
+};
+
+const emptyPriceForm: PriceForm = {
+  code: '',
+  name: '',
+  description: '',
+  category: '',
+  unitPrice: '0',
+  isActive: true,
+};
+
+function PriceList({ canEdit }: { canEdit: boolean }) {
+  const { data: items, isLoading, refetch } = useQuery(getPriceItems);
+  const [editing, setEditing] = useState<PriceItem | null>(null);
+  const [creating, setCreating] = useState(false);
+  const { ask, Dialog } = useConfirm();
+
+  const onDelete = async (item: PriceItem) => {
+    const ok = await ask(`Supprimer « ${item.name} » de la grille tarifaire ?`);
+    if (!ok) return;
+    try {
+      await deletePriceItem({ id: item.id });
+      refetch();
+    } catch (e: any) {
+      alert(e?.message || 'Erreur');
+    }
+  };
+
+  if (isLoading) return <div className='text-muted'>Chargement…</div>;
+
+  const list = (items || []) as PriceItem[];
+
+  return (
+    <div className='space-y-4'>
+      {Dialog}
+      <div className='flex justify-between items-center'>
+        <p className='text-sm text-muted'>
+          Définissez votre grille tarifaire — réutilisable dans les soumissions et factures.
+        </p>
+        {canEdit && (
+          <button className='btn-primary' onClick={() => setCreating(true)}>
+            <LuPlus size={16} className='mr-1.5' /> Nouvel article
+          </button>
+        )}
+      </div>
+
+      {list.length === 0 ? (
+        <EmptyState
+          title='Aucun article tarifaire'
+          description='Ajoutez vos services et produits avec leurs prix unitaires pour les réutiliser facilement.'
+          action={canEdit ? <button className='btn-primary' onClick={() => setCreating(true)}>Ajouter un article</button> : undefined}
+        />
+      ) : (
+        <div className='card overflow-hidden'>
+          <table className='w-full text-sm'>
+            <thead className='bg-canvas-100 text-muted'>
+              <tr>
+                <th className='text-left px-4 py-3 font-medium'>Code</th>
+                <th className='text-left px-4 py-3 font-medium'>Nom</th>
+                <th className='text-left px-4 py-3 font-medium'>Catégorie</th>
+                <th className='text-right px-4 py-3 font-medium'>Prix unitaire</th>
+                <th className='text-center px-4 py-3 font-medium'>Statut</th>
+                {canEdit && <th className='px-4 py-3 w-24'></th>}
+              </tr>
+            </thead>
+            <tbody>
+              {list.map((it) => (
+                <tr key={it.id} className='border-t border-line'>
+                  <td className='px-4 py-3 text-muted'>{it.code || '—'}</td>
+                  <td className='px-4 py-3'>
+                    <div className='font-medium text-ink'>{it.name}</div>
+                    {it.description && <div className='text-xs text-muted mt-0.5'>{it.description}</div>}
+                  </td>
+                  <td className='px-4 py-3 text-muted'>{it.category || '—'}</td>
+                  <td className='px-4 py-3 text-right tabular-nums'>{formatCurrency(it.unitPrice)}</td>
+                  <td className='px-4 py-3 text-center'>
+                    <span className={it.isActive ? 'badge-success' : 'badge-neutral'}>
+                      {it.isActive ? 'Actif' : 'Inactif'}
+                    </span>
+                  </td>
+                  {canEdit && (
+                    <td className='px-4 py-3'>
+                      <div className='flex justify-end gap-1'>
+                        <IconBtn title='Modifier' onClick={() => setEditing(it)}><EditIcon /></IconBtn>
+                        <IconBtn variant='danger' title='Supprimer' onClick={() => onDelete(it)}><TrashIcon /></IconBtn>
+                      </div>
+                    </td>
+                  )}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {(creating || editing) && (
+        <PriceFormModal
+          initial={editing}
+          onClose={() => { setCreating(false); setEditing(null); }}
+          onSaved={() => { setCreating(false); setEditing(null); refetch(); }}
+        />
+      )}
+    </div>
+  );
+}
+
+function PriceFormModal({
+  initial,
+  onClose,
+  onSaved,
+}: {
+  initial: PriceItem | null;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const [form, setForm] = useState<PriceForm>(
+    initial
+      ? {
+          code: initial.code || '',
+          name: initial.name,
+          description: initial.description || '',
+          category: initial.category || '',
+          unitPrice: String(initial.unitPrice),
+          isActive: initial.isActive,
+        }
+      : emptyPriceForm,
+  );
+  const [saving, setSaving] = useState(false);
+
+  const onSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSaving(true);
+    try {
+      const payload = {
+        code: form.code.trim() || undefined,
+        name: form.name.trim(),
+        description: form.description.trim() || undefined,
+        category: form.category.trim() || undefined,
+        unit: 'unite',
+        unitPrice: Number(form.unitPrice),
+        isActive: form.isActive,
+      };
+      if (initial) {
+        await updatePriceItem({ id: initial.id, ...payload });
+      } else {
+        await createPriceItem(payload);
+      }
+      onSaved();
+    } catch (err: any) {
+      alert(err?.message || 'Erreur');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title={initial ? 'Modifier l\u2019article' : 'Nouvel article tarifaire'}
+      footer={
+        <>
+          <button className='btn-secondary' onClick={onClose} disabled={saving}>Annuler</button>
+          <button className='btn-primary' onClick={onSubmit} disabled={saving || !form.name.trim()}>
+            {saving ? 'Enregistrement…' : 'Enregistrer'}
+          </button>
+        </>
+      }
+    >
+      <form onSubmit={onSubmit} className='space-y-4'>
+        <div className='grid grid-cols-2 gap-4'>
+          <div>
+            <label className='label'>Code</label>
+            <input
+              className='input'
+              value={form.code}
+              onChange={(e) => setForm({ ...form, code: e.target.value })}
+              placeholder='SERV-001'
+            />
+          </div>
+          <div>
+            <label className='label'>Catégorie</label>
+            <input
+              className='input'
+              value={form.category}
+              onChange={(e) => setForm({ ...form, category: e.target.value })}
+              placeholder='Services'
+            />
+          </div>
+        </div>
+
+        <div>
+          <label className='label'>Nom *</label>
+          <input
+            className='input'
+            value={form.name}
+            onChange={(e) => setForm({ ...form, name: e.target.value })}
+            required
+          />
+        </div>
+
+        <div>
+          <label className='label'>Description</label>
+          <textarea
+            className='input'
+            rows={2}
+            value={form.description}
+            onChange={(e) => setForm({ ...form, description: e.target.value })}
+          />
+        </div>
+
+        <div>
+          <label className='label'>Prix unitaire (CAD) *</label>
+          <input
+            className='input'
+            type='number'
+            min='0'
+            step='0.01'
+            value={form.unitPrice}
+            onChange={(e) => setForm({ ...form, unitPrice: e.target.value })}
+            required
+          />
+        </div>
+
+        <label className='flex items-center gap-2 text-sm'>
+          <input
+            type='checkbox'
+            checked={form.isActive}
+            onChange={(e) => setForm({ ...form, isActive: e.target.checked })}
+          />
+          Article actif (disponible dans les soumissions et factures)
+        </label>
+      </form>
+    </Modal>
   );
 }

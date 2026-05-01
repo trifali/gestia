@@ -1,4 +1,5 @@
 import { type ReactNode, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { LuPencil, LuTrash2, LuAlertTriangle } from 'react-icons/lu';
 
 // ─── Reusable icon action buttons ─────────────────────────────────────────
@@ -49,7 +50,7 @@ type ConfirmState = {
 function ConfirmDialog({ state, onAnswer }: { state: ConfirmState; onAnswer: (v: boolean) => void }) {
   const variant = state.variant ?? 'danger';
   const isDanger = variant === 'danger';
-  return (
+  return createPortal(
     <div className='modal-backdrop' onClick={() => onAnswer(false)}>
       <div
         className='bg-white rounded-2xl shadow-xl w-full max-w-sm mx-4 p-6'
@@ -68,7 +69,8 @@ function ConfirmDialog({ state, onAnswer }: { state: ConfirmState; onAnswer: (v:
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 
@@ -153,7 +155,7 @@ export function Modal({
   footer?: ReactNode;
 }) {
   if (!open) return null;
-  return (
+  return createPortal(
     <div className='modal-backdrop'>
       <div className='modal-panel' onClick={(e) => e.stopPropagation()}>
         <div className='shrink-0 px-6 py-4 border-b border-line flex items-center justify-between'>
@@ -167,6 +169,7 @@ export function Modal({
         <div className='px-6 py-5 overflow-y-auto flex-1 min-h-0'>{children}</div>
         {footer && <div className='shrink-0 px-6 py-4 border-t border-line flex justify-end gap-2 bg-canvas-100'>{footer}</div>}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

@@ -49,6 +49,7 @@ model Company {
   payments    Payment[]
   meetings    Meeting[]
   automations Automation[]
+  priceItems  PriceItem[]
 }
 
 model Client {
@@ -178,6 +179,23 @@ model Meeting {
   location    String?
   meetingUrl  String?
   status      String    @default("prevue")
+}
+
+model PriceItem {
+  id        String   @id @default(uuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  companyId String
+
+  code        String?
+  name        String
+  description String?
+  category    String?
+  unit        String  @default("unite")
+  unitPrice   Float   @default(0)
+  isActive    Boolean @default(true)
 }
 
 model Automation {

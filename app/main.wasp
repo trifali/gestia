@@ -266,6 +266,23 @@ action deleteAutomation {
   entities: [User, Automation]
 }
 
+query getPriceItems {
+  fn: import { getPriceItems } from "@src/app/prices/operations",
+  entities: [User, PriceItem]
+}
+action createPriceItem {
+  fn: import { createPriceItem } from "@src/app/prices/operations",
+  entities: [User, PriceItem]
+}
+action updatePriceItem {
+  fn: import { updatePriceItem } from "@src/app/prices/operations",
+  entities: [User, PriceItem]
+}
+action deletePriceItem {
+  fn: import { deletePriceItem } from "@src/app/prices/operations",
+  entities: [User, PriceItem]
+}
+
 query getDashboardStats {
   fn: import { getDashboardStats } from "@src/app/dashboard/operations",
   entities: [User, Client, Project, Document, Payment, Meeting]
