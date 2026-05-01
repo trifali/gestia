@@ -1,5 +1,6 @@
 import { defineConfig } from 'vite'
 import path from 'node:path'
+import { wasp } from 'wasp/client/vite'
 
 // Force a single copy of React (and friends) so Wasp's nested `web-app`
 // `node_modules` cannot accidentally pull in a different React version
@@ -7,6 +8,7 @@ import path from 'node:path'
 const appNodeModules = path.resolve(__dirname, 'node_modules')
 
 export default defineConfig({
+  plugins: [wasp()],
   server: {
     open: true,
   },
