@@ -224,7 +224,9 @@ function DocumentsTab({ client, projects }: { client: ClientDetail; projects: an
       </div>
 
       {docs.length === 0 ? (
-        <p className='text-muted text-sm'>Aucune soumission ni facture.</p>
+        <p className='text-muted text-sm'>
+          {filter === 'invoice' ? 'Aucune facture.' : filter === 'quote' ? 'Aucune soumission.' : 'Aucune soumission ni facture.'}
+        </p>
       ) : (
         <div className='table-wrap'>
           <table>
