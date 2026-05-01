@@ -15,6 +15,7 @@ import {
 import { useAuth } from 'wasp/client/auth';
 import { LuPlus } from 'react-icons/lu';
 import { PageHeader, IconBtn, EditIcon, TrashIcon, useConfirm, Modal, EmptyState } from '../../client/ui';
+import { MagicInput, MagicTextarea } from '../../client/magic';
 import { formatCurrency } from '../../shared/format';
 
 export default function SettingsPage() {
@@ -89,7 +90,7 @@ function CompanyForm({ company, canEdit }: { company: any; canEdit: boolean }) {
   const field = (label: string, k: string, type: string = 'text', wrapClass?: string) => (
     <div className={wrapClass}>
       <label className='label'>{label}</label>
-      <input
+      <MagicInput
         type={type}
         className='input'
         value={form[k] ?? ''}
@@ -394,7 +395,7 @@ function PriceFormModal({
 
         <div>
           <label className='label'>Nom *</label>
-          <input
+          <MagicInput
             className='input'
             value={form.name}
             onChange={(e) => setForm({ ...form, name: e.target.value })}
@@ -404,7 +405,7 @@ function PriceFormModal({
 
         <div>
           <label className='label'>Description</label>
-          <textarea
+          <MagicTextarea
             className='input'
             rows={2}
             value={form.description}

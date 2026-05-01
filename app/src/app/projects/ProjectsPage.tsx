@@ -9,6 +9,7 @@ import {
   deleteProject,
 } from 'wasp/client/operations';
 import { PageHeader, EmptyState, Modal, useConfirm, IconBtn, EditIcon, TrashIcon } from '../../client/ui';
+import { MagicInput, MagicTextarea } from '../../client/magic';
 import { formatCurrency, formatDate, formatDateForInput } from '../../shared/format';
 
 const STATUS: Record<string, { label: string; className: string }> = {
@@ -161,7 +162,7 @@ function ProjectForm({ project, clients, onClose }: { project?: any; clients: an
       <form id='project-form' onSubmit={onSubmit} className='grid grid-cols-1 sm:grid-cols-2 gap-4'>
         <div className='col-span-2'>
           <label className='label'>Nom du projet *</label>
-          <input className='input' required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
+          <MagicInput className='input' required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
         </div>
         <div>
           <label className='label'>Client</label>
@@ -196,7 +197,7 @@ function ProjectForm({ project, clients, onClose }: { project?: any; clients: an
         </div>
         <div className='col-span-2'>
           <label className='label'>Description</label>
-          <textarea className='input' rows={3} value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} />
+          <MagicTextarea className='input' rows={3} value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} />
         </div>
       </form>
     </Modal>

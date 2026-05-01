@@ -5,6 +5,7 @@ import toast from 'react-hot-toast';
 import { useQuery, getClients, createClient, updateClient, deleteClient } from 'wasp/client/operations';
 import type { Client } from 'wasp/entities';
 import { PageHeader, EmptyState, Modal, useConfirm, IconBtn, EditIcon, TrashIcon } from '../../client/ui';
+import { MagicInput, MagicTextarea } from '../../client/magic';
 import { formatDate } from '../../shared/format';
 
 /** Formate les digits saisis en +1 (438) 444-4343 */
@@ -207,11 +208,11 @@ function ClientForm({ client, onClose }: { client?: Client; onClose: () => void 
       <form id='client-form' onSubmit={onSubmit} className='grid grid-cols-1 sm:grid-cols-2 gap-4'>
         <div className='col-span-2'>
           <label className='label'>Nom de l'entreprise / client *</label>
-          <input className='input' required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
+          <MagicInput className='input' required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
         </div>
         <div>
           <label className='label'>Personne contact</label>
-          <input className='input' value={form.contactName} onChange={(e) => setForm({ ...form, contactName: e.target.value })} />
+          <MagicInput className='input' value={form.contactName} onChange={(e) => setForm({ ...form, contactName: e.target.value })} />
         </div>
         <div>
           <label className='label'>Statut</label>
@@ -236,11 +237,11 @@ function ClientForm({ client, onClose }: { client?: Client; onClose: () => void 
         </div>
         <div className='col-span-2'>
           <label className='label'>Adresse</label>
-          <input className='input' placeholder='123 rue Exemple, Montréal, QC H1A 1A1' value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} />
+          <MagicInput className='input' placeholder='123 rue Exemple, Montréal, QC H1A 1A1' value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} />
         </div>
         <div className='col-span-2'>
           <label className='label'>Notes</label>
-          <textarea className='input' rows={3} value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} />
+          <MagicTextarea className='input' rows={3} value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} />
         </div>
       </form>
     </Modal>

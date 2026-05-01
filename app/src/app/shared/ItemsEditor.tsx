@@ -1,5 +1,6 @@
 import { useMemo, useState, useRef, useEffect } from 'react';
 import { formatCurrency } from '../../shared/format';
+import { MagicInput } from '../../client/magic';
 
 export const TPS = 0.05;
 export const TVQ = 0.09975;
@@ -187,8 +188,9 @@ export function ItemsEditor({
           <div key={idx} className='rounded-lg border border-line bg-surface p-2 space-y-1.5'>
             {/* Main row */}
             <div className='flex flex-col sm:grid sm:grid-cols-12 gap-2'>
-              <input
-                className='input sm:col-span-6'
+              <MagicInput
+                containerClassName='sm:col-span-6'
+                className='input'
                 placeholder='Nom / Description'
                 value={it.description}
                 onChange={(e) => update(idx, { description: e.target.value })}
@@ -248,7 +250,7 @@ export function ItemsEditor({
               </div>
             </div>
             {/* Note sub-row */}
-            <input
+            <MagicInput
               className='input text-sm w-full'
               placeholder='Note / détails (optionnel)'
               value={it.note || ''}

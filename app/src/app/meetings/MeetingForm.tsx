@@ -2,6 +2,7 @@ import { useState } from 'react';
 import toast from 'react-hot-toast';
 import { createMeeting, updateMeeting } from 'wasp/client/operations';
 import { Modal } from '../../client/ui';
+import { MagicInput, MagicTextarea } from '../../client/magic';
 import { formatDateTimeForInput } from '../../shared/format';
 
 type Props = {
@@ -73,7 +74,7 @@ export function MeetingForm({ meeting, clientId: presetClientId, clients, onClos
       <form id='meeting-form' onSubmit={onSubmit} className='grid grid-cols-1 sm:grid-cols-2 gap-4'>
         <div className='col-span-2'>
           <label className='label'>Titre *</label>
-          <input
+          <MagicInput
             className='input'
             required
             value={form.title}
@@ -129,7 +130,7 @@ export function MeetingForm({ meeting, clientId: presetClientId, clients, onClos
         </div>
         <div className='col-span-2'>
           <label className='label'>Lieu</label>
-          <input
+          <MagicInput
             className='input'
             value={form.location}
             onChange={(e) => setForm({ ...form, location: e.target.value })}
@@ -147,7 +148,7 @@ export function MeetingForm({ meeting, clientId: presetClientId, clients, onClos
         </div>
         <div className='col-span-2'>
           <label className='label'>Description</label>
-          <textarea
+          <MagicTextarea
             className='input'
             rows={3}
             value={form.description}

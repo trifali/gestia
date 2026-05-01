@@ -8,6 +8,7 @@ import {
   deletePayment,
 } from 'wasp/client/operations';
 import { PageHeader, EmptyState, Modal, useConfirm, IconBtn, TrashIcon } from '../../client/ui';
+import { MagicTextarea } from '../../client/magic';
 import { formatCurrency, formatDate, formatDateForInput } from '../../shared/format';
 
 const METHODS: Record<string, string> = {
@@ -181,7 +182,7 @@ function PaymentForm({ invoices, onClose }: { invoices: any[]; onClose: () => vo
           </div>
           <div className='col-span-2'>
             <label className='label'>Notes</label>
-            <textarea className='input' rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} />
+            <MagicTextarea className='input' rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} />
           </div>
         </div>
       </form>

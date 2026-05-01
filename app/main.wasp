@@ -304,3 +304,8 @@ query getDashboardStats {
   fn: import { getDashboardStats } from "@src/app/dashboard/operations",
   entities: [User, Client, Project, Document, Payment, Meeting]
 }
+
+action magicCorrect {
+  fn: import { magicCorrect } from "@src/app/ai/operations",
+  entities: []
+}

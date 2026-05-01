@@ -3,6 +3,7 @@ import { Link } from 'react-router';
 import { useState } from 'react';
 import toast from 'react-hot-toast';
 import { PageHeader, EmptyState } from '../../client/ui';
+import { MagicInput } from '../../client/magic';
 import { formatCurrency, formatDate, formatTime } from '../../shared/format';
 
 const INVOICE_STATUS: Record<string, { label: string; className: string }> = {
@@ -47,7 +48,7 @@ export default function DashboardPage() {
           >
             <div>
               <label className='label'>Nom de l'entreprise</label>
-              <input className='input' value={companyName} onChange={(e) => setCompanyName(e.target.value)} placeholder='Ex. Trifali Concept inc.' required />
+              <MagicInput className='input' value={companyName} onChange={(e) => setCompanyName(e.target.value)} placeholder='Ex. Trifali Concept inc.' required />
             </div>
             <button type='submit' className='btn-primary w-full' disabled={creating}>
               {creating ? 'Création…' : 'Créer mon entreprise'}

@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import toast from 'react-hot-toast';
 import { createDocument, updateDocument, useQuery, getPriceItems, createPriceItem } from 'wasp/client/operations';
 import { Modal } from '../../client/ui';
+import { MagicInput, MagicTextarea } from '../../client/magic';
 import {
   ItemsEditor,
   TotalsDisplay,
@@ -221,7 +222,7 @@ export function DocumentForm({
 
           <div className='col-span-2'>
             <label className='label'>Titre <span className='text-danger'>*</span></label>
-            <input
+            <MagicInput
               className='input'
               required
               value={title}
@@ -231,7 +232,7 @@ export function DocumentForm({
           </div>
           <div className='col-span-2'>
             <label className='label'>Description</label>
-            <textarea
+            <MagicTextarea
               className='input'
               rows={2}
               value={description}
@@ -278,7 +279,7 @@ export function DocumentForm({
 
         <div>
           <label className='label'>Notes</label>
-          <textarea
+          <MagicTextarea
             className='input'
             rows={2}
             value={notes}

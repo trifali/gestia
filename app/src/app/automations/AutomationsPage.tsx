@@ -8,6 +8,7 @@ import {
   deleteAutomation,
 } from 'wasp/client/operations';
 import { PageHeader, EmptyState, Modal, useConfirm, IconBtn, EditIcon, TrashIcon } from '../../client/ui';
+import { MagicInput, MagicTextarea } from '../../client/magic';
 
 const TRIGGERS: Record<string, string> = {
   facture_creee: 'Lorsqu\'une facture est créée',
@@ -161,11 +162,11 @@ function AutomationForm({ automation, onClose }: { automation?: any; onClose: ()
       <form id='automation-form' onSubmit={onSubmit} className='space-y-4'>
         <div>
           <label className='label'>Nom *</label>
-          <input className='input' required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder='Ex. Rappel automatique de facture' />
+          <MagicInput className='input' required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder='Ex. Rappel automatique de facture' />
         </div>
         <div>
           <label className='label'>Description</label>
-          <textarea className='input' rows={2} value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} />
+          <MagicTextarea className='input' rows={2} value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} />
         </div>
         <div className='grid grid-cols-1 sm:grid-cols-2 gap-4'>
           <div>
