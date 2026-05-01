@@ -48,7 +48,10 @@ function CompanyForm({ company, canEdit }: { company: any; canEdit: boolean }) {
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
 
-  useEffect(() => { setForm(company); }, [company]);
+  // Ne réinitialise le formulaire que lorsque l'entreprise change vraiment
+  // (changement d'id), pas à chaque refetch (ex. retour sur l'onglet du
+  // navigateur) — sinon les saisies en cours seraient écrasées.
+  useEffect(() => { setForm(company); }, [company?.id]);
 
   const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -66,13 +69,13 @@ function CompanyForm({ company, canEdit }: { company: any; canEdit: boolean }) {
     }
   };
 
-  const Field = ({ label, value, k, type = 'text' }: { label: string; value: any; k: string; type?: string }) => (
-    <div>
+  const field = (label: string, k: string, type: string = 'text', wrapClass?: string) => (
+    <div className={wrapClass}>
       <label className='label'>{label}</label>
       <input
         type={type}
         className='input'
-        value={value || ''}
+        value={form[k] ?? ''}
         onChange={(e) => setForm({ ...form, [k]: e.target.value })}
         disabled={!canEdit}
       />
@@ -87,21 +90,19 @@ function CompanyForm({ company, canEdit }: { company: any; canEdit: boolean }) {
         </p>
       )}
       <div className='grid md:grid-cols-2 gap-4'>
-        <Field label='Nom commercial' value={form.name} k='name' />
-        <Field label='Raison sociale' value={form.legalName} k='legalName' />
-        <Field label='Courriel' value={form.email} k='email' type='email' />
-        <Field label='Téléphone' value={form.phone} k='phone' />
-        <div className='md:col-span-2'>
-          <Field label='Adresse' value={form.address} k='address' />
-        </div>
-        <Field label='Ville' value={form.city} k='city' />
-        <Field label='Province' value={form.province} k='province' />
-        <Field label='Code postal' value={form.postalCode} k='postalCode' />
-        <Field label='Pays' value={form.country} k='country' />
-        <Field label='Site web' value={form.website} k='website' />
-        <Field label='NEQ' value={form.neq} k='neq' />
-        <Field label='Numéro TPS' value={form.taxNumberGst} k='taxNumberGst' />
-        <Field label='Numéro TVQ' value={form.taxNumberQst} k='taxNumberQst' />
+        {field('Nom commercial', 'name')}
+        {field('Raison sociale', 'legalName')}
+        {field('Courriel', 'email', 'email')}
+        {field('Téléphone', 'phone')}
+        {field('Adresse', 'address', 'text', 'md:col-span-2')}
+        {field('Ville', 'city')}
+        {field('Province', 'province')}
+        {field('Code postal', 'postalCode')}
+        {field('Pays', 'country')}
+        {field('Site web', 'website')}
+        {field('NEQ', 'neq')}
+        {field('Numéro TPS', 'taxNumberGst')}
+        {field('Numéro TVQ', 'taxNumberQst')}
       </div>
 
       {canEdit && (

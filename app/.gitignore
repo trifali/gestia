@@ -9,3 +9,10 @@ node_modules/
 # Don't ignore example dotenv files.
 !.env.example
 !.env.*.example
+
+# Dev server runtime files
+.gestia-db.log
+.gestia-db.pid
+
+#macOS specific files
+.DS_Store
