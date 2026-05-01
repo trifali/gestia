@@ -91,7 +91,7 @@ export default function DocumentsPage() {
         <div className='text-muted'>Chargement…</div>
       ) : docs.length === 0 ? (
         <EmptyState
-          title='Aucune soumission ni facture'
+          title={filter === 'invoice' ? 'Aucune facture' : filter === 'quote' ? 'Aucune soumission' : 'Aucune soumission ni facture'}
           description="Créez une soumission ou une facture pour commencer. La TPS (5 %) et la TVQ (9,975 %) sont calculées automatiquement."
           action={<button className='btn-primary' onClick={() => setCreating({ mode: 'quote' })}>Créer une soumission</button>}
         />
