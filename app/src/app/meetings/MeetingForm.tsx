@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import toast from 'react-hot-toast';
 import { createMeeting, updateMeeting } from 'wasp/client/operations';
 import { Modal } from '../../client/ui';
 import { formatDateTimeForInput } from '../../shared/format';
@@ -42,12 +43,14 @@ export function MeetingForm({ meeting, clientId: presetClientId, clients, onClos
       };
       if (meeting) {
         await updateMeeting({ id: meeting.id, ...payload });
+        toast.success('Rencontre modifiée');
       } else {
         await createMeeting(payload);
+        toast.success('Rencontre créée');
       }
       onClose();
     } catch (err: any) {
-      alert(err?.message || 'Erreur');
+      toast.error(err?.message || 'Une erreur est survenue');
     } finally {
       setSaving(false);
     }

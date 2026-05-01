@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import toast from 'react-hot-toast';
 import {
   useQuery,
   getProjects,
@@ -70,7 +71,14 @@ export default function ProjectsPage() {
                     <div className='flex items-center justify-end gap-1'>
                       <IconBtn title='Modifier' onClick={() => setEditing(p)}><EditIcon /></IconBtn>
                       <IconBtn variant='danger' title='Supprimer' onClick={async () => {
-                        if (await ask(`Supprimer le projet « ${p.name} » ?`)) await deleteProject({ id: p.id });
+                        if (await ask(`Supprimer le projet « ${p.name} » ?`)) {
+                          try {
+                            await deleteProject({ id: p.id });
+                            toast.success('Projet supprimé');
+                          } catch (err: any) {
+                            toast.error(err?.message || 'Erreur lors de la suppression');
+                          }
+                        }
                       }}><TrashIcon /></IconBtn>
                     </div>
                   </td>
@@ -123,12 +131,14 @@ function ProjectForm({ project, clients, onClose }: { project?: any; clients: an
       };
       if (project) {
         await updateProject({ id: project.id, ...payload });
+        toast.success('Projet modifié');
       } else {
         await createProject(payload);
+        toast.success('Projet créé');
       }
       onClose();
     } catch (err: any) {
-      alert(err?.message || 'Erreur');
+      toast.error(err?.message || 'Une erreur est survenue');
     } finally {
       setSaving(false);
     }

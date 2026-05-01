@@ -1,6 +1,7 @@
 import { useQuery, getDashboardStats, getCurrentCompany, createCompany } from 'wasp/client/operations';
 import { Link } from 'react-router-dom';
 import { useState } from 'react';
+import toast from 'react-hot-toast';
 import { PageHeader, EmptyState } from '../../client/ui';
 import { formatCurrency, formatDate, formatTime } from '../../shared/format';
 
@@ -38,7 +39,7 @@ export default function DashboardPage() {
                 await createCompany({ name: companyName.trim() });
                 window.location.reload();
               } catch (err: any) {
-                alert(err?.message || 'Erreur lors de la création');
+                toast.error(err?.message || 'Erreur lors de la création');
               } finally {
                 setCreating(false);
               }

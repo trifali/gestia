@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import toast from 'react-hot-toast';
 import {
   useQuery,
   getAutomations,
@@ -76,14 +77,28 @@ export default function AutomationsPage() {
               <div className='mt-4 flex items-center gap-2 pt-4 border-t border-line'>
                 <button
                   className='btn-secondary text-xs'
-                  onClick={async () => { await updateAutomation({ id: a.id, isActive: !a.isActive }); }}
+                  onClick={async () => {
+                    try {
+                      await updateAutomation({ id: a.id, isActive: !a.isActive });
+                      toast.success(a.isActive ? 'Automatisation désactivée' : 'Automatisation activée');
+                    } catch (err: any) {
+                      toast.error(err?.message || 'Une erreur est survenue');
+                    }
+                  }}
                 >
                   {a.isActive ? 'Désactiver' : 'Activer'}
                 </button>
                 <div className='ml-auto flex gap-1'>
                   <IconBtn title='Modifier' onClick={() => setEditing(a)}><EditIcon /></IconBtn>
                   <IconBtn variant='danger' title='Supprimer' onClick={async () => {
-                    if (await ask('Supprimer cette automatisation ?')) await deleteAutomation({ id: a.id });
+                    if (await ask('Supprimer cette automatisation ?')) {
+                      try {
+                        await deleteAutomation({ id: a.id });
+                        toast.success('Automatisation supprimée');
+                      } catch (err: any) {
+                        toast.error(err?.message || 'Erreur lors de la suppression');
+                      }
+                    }
                   }}><TrashIcon /></IconBtn>
                 </div>
               </div>
@@ -116,12 +131,14 @@ function AutomationForm({ automation, onClose }: { automation?: any; onClose: ()
     try {
       if (automation) {
         await updateAutomation({ id: automation.id, ...form });
+        toast.success('Automatisation modifiée');
       } else {
         await createAutomation(form);
+        toast.success('Automatisation créée');
       }
       onClose();
     } catch (err: any) {
-      alert(err?.message || 'Erreur');
+      toast.error(err?.message || 'Une erreur est survenue');
     } finally {
       setSaving(false);
     }

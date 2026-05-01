@@ -1,6 +1,7 @@
 import './Main.css';
 import { Outlet, useLocation } from 'react-router-dom';
 import { useAuth } from 'wasp/client/auth';
+import { Toaster } from 'react-hot-toast';
 import AppLayout from './AppLayout';
 
 // Le routeur est généré par Wasp et ne nous permet pas d'activer les `future`
@@ -31,8 +32,20 @@ export default function App() {
 
   const isPublic = PUBLIC_PATHS.has(location.pathname);
 
+  const toaster = (
+    <Toaster
+      position='bottom-right'
+      toastOptions={{
+        duration: 4000,
+        style: { fontSize: '0.875rem' },
+        success: { iconTheme: { primary: '#16a34a', secondary: '#fff' } },
+        error: { iconTheme: { primary: '#dc2626', secondary: '#fff' } },
+      }}
+    />
+  );
+
   if (isPublic) {
-    return <Outlet />;
+    return <>{toaster}<Outlet /></>;
   }
 
   if (isLoading) {
@@ -44,12 +57,31 @@ export default function App() {
   }
 
   if (!user) {
-    return <Outlet />;
+    return <>{toaster}<Outlet /></>;
   }
 
   return (
-    <AppLayout user={user}>
-      <Outlet />
-    </AppLayout>
+    <>
+      {toaster}
+      <AppLayout user={user}>
+        <Outlet />
+      </AppLayout>
+    </>
   );
 }
+
+function ToastProvider() {
+  return (
+    <Toaster
+      position='bottom-right'
+      toastOptions={{
+        duration: 4000,
+        style: { fontSize: '0.875rem' },
+        success: { iconTheme: { primary: '#16a34a', secondary: '#fff' } },
+        error: { iconTheme: { primary: '#dc2626', secondary: '#fff' } },
+      }}
+    />
+  );
+}
+
+export { ToastProvider };

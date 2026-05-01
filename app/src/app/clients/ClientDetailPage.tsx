@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { LuArrowLeft, LuPencil, LuFileCheck, LuUndo2 } from 'react-icons/lu';
+import toast from 'react-hot-toast';
 import {
   useQuery,
   getClientDetail,
@@ -264,7 +265,12 @@ function DocumentsTab({ client, projects }: { client: ClientDetail; projects: an
                         {d.type === 'quote' ? (
                           <IconBtn title='Convertir en facture' onClick={async () => {
                             if (await ask(`Convertir la soumission ${d.number} en facture ?`, { confirmLabel: 'Convertir', variant: 'primary' })) {
-                              await setDocumentType({ id: d.id, type: 'invoice' });
+                              try {
+                                await setDocumentType({ id: d.id, type: 'invoice' });
+                                toast.success('Converti en facture');
+                              } catch (err: any) {
+                                toast.error(err?.message || 'Erreur lors de la conversion');
+                              }
                             }
                           }}>
                             <LuFileCheck size={14} />
@@ -272,14 +278,26 @@ function DocumentsTab({ client, projects }: { client: ClientDetail; projects: an
                         ) : (
                           <IconBtn title='Repasser en soumission' onClick={async () => {
                             if (await ask(`Repasser la facture ${d.number} en soumission ?`, { confirmLabel: 'Repasser en soumission', variant: 'primary' })) {
-                              await setDocumentType({ id: d.id, type: 'quote' });
+                              try {
+                                await setDocumentType({ id: d.id, type: 'quote' });
+                                toast.success('Repassé en soumission');
+                              } catch (err: any) {
+                                toast.error(err?.message || 'Erreur lors de la conversion');
+                              }
                             }
                           }}>
                             <LuUndo2 size={14} />
                           </IconBtn>
                         )}
                         <IconBtn variant='danger' title='Supprimer' onClick={async () => {
-                          if (await ask(`Supprimer ${d.number} ?`)) await deleteDocument({ id: d.id });
+                          if (await ask(`Supprimer ${d.number} ?`)) {
+                            try {
+                              await deleteDocument({ id: d.id });
+                              toast.success('Document supprimé');
+                            } catch (err: any) {
+                              toast.error(err?.message || 'Erreur lors de la suppression');
+                            }
+                          }
                         }}>
                           <TrashIcon />
                         </IconBtn>
@@ -418,7 +436,14 @@ function RencontresTab({ client }: { client: ClientDetail }) {
                           <LuPencil size={14} />
                         </IconBtn>
                         <IconBtn variant='danger' title='Supprimer' onClick={async () => {
-                          if (await ask(`Supprimer la rencontre « ${m.title} » ?`)) await deleteMeeting({ id: m.id });
+                          if (await ask(`Supprimer la rencontre « ${m.title} » ?`)) {
+                            try {
+                              await deleteMeeting({ id: m.id });
+                              toast.success('Rencontre supprimée');
+                            } catch (err: any) {
+                              toast.error(err?.message || 'Erreur lors de la suppression');
+                            }
+                          }
                         }}>
                           <TrashIcon />
                         </IconBtn>
@@ -474,9 +499,10 @@ function ClientEditModal({ client, onClose }: { client: Client; onClose: () => v
     setSaving(true);
     try {
       await updateClient({ id: client.id, ...form });
+      toast.success('Client modifié');
       onClose();
     } catch (err: any) {
-      alert(err?.message || 'Erreur');
+      toast.error(err?.message || 'Une erreur est survenue');
     } finally {
       setSaving(false);
     }

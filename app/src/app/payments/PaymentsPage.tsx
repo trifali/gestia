@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import toast from 'react-hot-toast';
 import {
   useQuery,
   getPayments,
@@ -65,7 +66,14 @@ export default function PaymentsPage() {
                   <td className='text-right font-medium'>{formatCurrency(p.amount)}</td>
                   <td className='text-right'>
                     <IconBtn variant='danger' title='Supprimer' onClick={async () => {
-                      if (await ask('Supprimer ce paiement ?')) await deletePayment({ id: p.id });
+                      if (await ask('Supprimer ce paiement ?')) {
+                        try {
+                          await deletePayment({ id: p.id });
+                          toast.success('Paiement supprimé');
+                        } catch (err: any) {
+                          toast.error(err?.message || 'Erreur lors de la suppression');
+                        }
+                      }
                     }}><TrashIcon /></IconBtn>
                   </td>
                 </tr>
@@ -108,9 +116,10 @@ function PaymentForm({ invoices, onClose }: { invoices: any[]; onClose: () => vo
         reference,
         notes,
       });
+      toast.success('Paiement enregistré');
       onClose();
     } catch (err: any) {
-      alert(err?.message || 'Erreur');
+      toast.error(err?.message || 'Une erreur est survenue');
     } finally {
       setSaving(false);
     }

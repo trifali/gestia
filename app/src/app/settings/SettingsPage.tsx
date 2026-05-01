@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import toast from 'react-hot-toast';
 import {
   useQuery,
   getCurrentCompany,
@@ -75,10 +76,11 @@ function CompanyForm({ company, canEdit }: { company: any; canEdit: boolean }) {
     try {
       const { id, createdAt, updatedAt, _userRole, ...rest } = form;
       await updateCompany(rest);
+      toast.success('Entreprise enregistrée');
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
     } catch (err: any) {
-      alert(err?.message || 'Erreur');
+      toast.error(err?.message || 'Une erreur est survenue');
     } finally {
       setSaving(false);
     }
@@ -212,9 +214,10 @@ function PriceList({ canEdit }: { canEdit: boolean }) {
     if (!ok) return;
     try {
       await deletePriceItem({ id: item.id });
+      toast.success('Article supprimé');
       refetch();
     } catch (e: any) {
-      alert(e?.message || 'Erreur');
+      toast.error(e?.message || 'Erreur lors de la suppression');
     }
   };
 
@@ -339,12 +342,14 @@ function PriceFormModal({
       };
       if (initial) {
         await updatePriceItem({ id: initial.id, ...payload });
+        toast.success('Article modifié');
       } else {
         await createPriceItem(payload);
+        toast.success('Article créé');
       }
       onSaved();
     } catch (err: any) {
-      alert(err?.message || 'Erreur');
+      toast.error(err?.message || 'Une erreur est survenue');
     } finally {
       setSaving(false);
     }
@@ -466,9 +471,10 @@ function CategoryCombobox({
     try {
       const cat = await createPriceCategory({ name: value.trim() });
       onChange((cat as any).name);
+      toast.success('Catégorie créée');
       setOpen(false);
     } catch (e: any) {
-      alert(e?.message || 'Erreur');
+      toast.error(e?.message || 'Erreur');
     } finally {
       setBusyId(null);
     }
@@ -481,8 +487,9 @@ function CategoryCombobox({
     try {
       await deletePriceCategory({ id });
       if (value.toLowerCase() === name.toLowerCase()) onChange('');
+      toast.success('Catégorie supprimée');
     } catch (err: any) {
-      alert(err?.message || 'Erreur');
+      toast.error(err?.message || 'Erreur');
     } finally {
       setBusyId(null);
     }

@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useLocation } from 'react-router-dom';
 import { LuFileCheck, LuUndo2, LuPencil } from 'react-icons/lu';
+import toast from 'react-hot-toast';
 import {
   useQuery,
   getDocuments,
@@ -132,7 +133,14 @@ export default function DocumentsPage() {
                       <select
                         className={`text-xs px-2 py-1 rounded-md border-0 cursor-pointer ${statusMap[d.status]?.className || 'badge-neutral'}`}
                         value={d.status}
-                        onChange={async (e) => { await updateDocumentStatus({ id: d.id, status: e.target.value }); }}
+                        onChange={async (e) => {
+                          try {
+                            await updateDocumentStatus({ id: d.id, status: e.target.value });
+                            toast.success('Statut mis à jour');
+                          } catch (err: any) {
+                            toast.error(err?.message || 'Erreur lors de la mise à jour');
+                          }
+                        }}
                       >
                         {Object.entries(statusMap).map(([k, v]) => (
                           <option key={k} value={k}>{v.label}</option>
@@ -157,7 +165,12 @@ export default function DocumentsPage() {
                         {d.type === 'quote' ? (
                           <IconBtn title='Convertir en facture' onClick={async () => {
                             if (await ask(`Convertir la soumission ${d.number} en facture ?`, { confirmLabel: 'Convertir', variant: 'primary' })) {
-                              await setDocumentType({ id: d.id, type: 'invoice' });
+                              try {
+                                await setDocumentType({ id: d.id, type: 'invoice' });
+                                toast.success('Converti en facture');
+                              } catch (err: any) {
+                                toast.error(err?.message || 'Erreur lors de la conversion');
+                              }
                             }
                           }}>
                             <LuFileCheck size={14} />
@@ -165,14 +178,26 @@ export default function DocumentsPage() {
                         ) : (
                           <IconBtn title='Repasser en soumission' onClick={async () => {
                             if (await ask(`Repasser la facture ${d.number} en soumission ?`, { confirmLabel: 'Repasser en soumission', variant: 'primary' })) {
-                              await setDocumentType({ id: d.id, type: 'quote' });
+                              try {
+                                await setDocumentType({ id: d.id, type: 'quote' });
+                                toast.success('Repassé en soumission');
+                              } catch (err: any) {
+                                toast.error(err?.message || 'Erreur lors de la conversion');
+                              }
                             }
                           }}>
                             <LuUndo2 size={14} />
                           </IconBtn>
                         )}
                         <IconBtn variant='danger' title='Supprimer' onClick={async () => {
-                          if (await ask(`Supprimer ${d.number} ?`)) await deleteDocument({ id: d.id });
+                          if (await ask(`Supprimer ${d.number} ?`)) {
+                            try {
+                              await deleteDocument({ id: d.id });
+                              toast.success('Document supprimé');
+                            } catch (err: any) {
+                              toast.error(err?.message || 'Erreur lors de la suppression');
+                            }
+                          }
                         }}>
                           <TrashIcon />
                         </IconBtn>

@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import toast from 'react-hot-toast';
 import { createDocument, updateDocument, useQuery, getPriceItems, createPriceItem } from 'wasp/client/operations';
 import { Modal } from '../../client/ui';
 import {
@@ -139,6 +140,7 @@ export function DocumentForm({
           notes,
           items: safeItems,
         });
+        toast.success('Document modifié');
       } else {
         await createDocument({
           type: mode,
@@ -151,6 +153,7 @@ export function DocumentForm({
           notes,
           items: safeItems,
         });
+        toast.success(mode === 'invoice' ? 'Facture créée' : 'Soumission créée');
       }
       onClose();
     } catch (err: any) {

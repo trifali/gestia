@@ -1,6 +1,7 @@
 import { Fragment, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { LuChevronDown, LuChevronUp, LuArrowRight } from 'react-icons/lu';
+import toast from 'react-hot-toast';
 import { useQuery, getClients, createClient, updateClient, deleteClient } from 'wasp/client/operations';
 import type { Client } from 'wasp/entities';
 import { PageHeader, EmptyState, Modal, useConfirm, IconBtn, EditIcon, TrashIcon } from '../../client/ui';
@@ -119,7 +120,14 @@ export default function ClientsPage() {
                         <div className='flex items-center justify-end gap-1'>
                           <IconBtn title='Modifier' onClick={() => setEditing(c)}><EditIcon /></IconBtn>
                           <IconBtn variant='danger' title='Supprimer' onClick={async () => {
-                            if (await ask(`Supprimer le client « ${c.name} » ?`)) await deleteClient({ id: c.id });
+                            if (await ask(`Supprimer le client « ${c.name} » ?`)) {
+                              try {
+                                await deleteClient({ id: c.id });
+                                toast.success('Client supprimé');
+                              } catch (err: any) {
+                                toast.error(err?.message || 'Erreur lors de la suppression');
+                              }
+                            }
                           }}><TrashIcon /></IconBtn>
                         </div>
                       </td>
@@ -169,12 +177,14 @@ function ClientForm({ client, onClose }: { client?: Client; onClose: () => void 
     try {
       if (client) {
         await updateClient({ id: client.id, ...form });
+        toast.success('Client modifié');
       } else {
         await createClient(form);
+        toast.success('Client créé');
       }
       onClose();
     } catch (err: any) {
-      alert(err?.message || 'Erreur');
+      toast.error(err?.message || 'Une erreur est survenue');
     } finally {
       setSaving(false);
     }

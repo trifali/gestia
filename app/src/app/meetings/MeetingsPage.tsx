@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import toast from 'react-hot-toast';
 import {
   useQuery,
   getMeetings,
@@ -71,7 +72,14 @@ export default function MeetingsPage() {
               <div className='flex items-center gap-1 shrink-0'>
                 <IconBtn title='Modifier' onClick={() => setEditing(m)}><EditIcon /></IconBtn>
                 <IconBtn variant='danger' title='Supprimer' onClick={async () => {
-                  if (await ask('Supprimer cette rencontre ?')) await deleteMeeting({ id: m.id });
+                  if (await ask('Supprimer cette rencontre ?')) {
+                    try {
+                      await deleteMeeting({ id: m.id });
+                      toast.success('Rencontre supprimée');
+                    } catch (err: any) {
+                      toast.error(err?.message || 'Erreur lors de la suppression');
+                    }
+                  }
                 }}><TrashIcon /></IconBtn>
               </div>
             </div>
