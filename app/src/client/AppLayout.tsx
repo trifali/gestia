@@ -17,7 +17,6 @@ const NAV = [
   { to: '/paiements', label: 'Paiements', icon: 'card' },
   { to: '/rencontres', label: 'Rencontres', icon: 'calendar' },
   { to: '/automatisations', label: 'Automatisations', icon: 'bolt' },
-  { to: '/parametres', label: 'Paramètres', icon: 'cog' },
 ];
 
 function Icon({ name, className = 'w-5 h-5' }: { name: string; className?: string }) {
@@ -90,7 +89,11 @@ export default function AppLayout({ user, children }: AppLayoutProps) {
       </nav>
 
       <div className='border-t border-line p-3'>
-        <div className='flex items-center gap-3 px-2 py-2'>
+        <Link
+          to='/parametres'
+          onClick={() => setMobileOpen(false)}
+          className='flex items-center gap-3 px-2 py-2 rounded-lg hover:bg-canvas transition-colors'
+        >
           <div className='w-9 h-9 rounded-full bg-accent-50 text-accent-700 flex items-center justify-center font-semibold text-sm'>
             {initials}
           </div>
@@ -98,7 +101,8 @@ export default function AppLayout({ user, children }: AppLayoutProps) {
             <div className='text-sm font-medium text-ink truncate'>{user?.email || 'Utilisateur'}</div>
             <div className='text-xs text-muted'>{(user as any)?.role === 'admin' ? 'Administrateur' : 'Client'}</div>
           </div>
-        </div>
+          <Icon name='cog' className='w-4 h-4 text-muted shrink-0' />
+        </Link>
         <button
           onClick={async () => { await logout(); navigate('/connexion'); }}
           className='btn-ghost w-full justify-start mt-1 text-sm'
