@@ -23,7 +23,7 @@ app gestia {
       email: {
         fromField: {
           name: "Gestia",
-          email: "info@gestia.ca"
+          email: "no-reply@trifali.app"
         },
         emailVerification: {
           clientRoute: EmailVerificationRoute,
@@ -48,7 +48,7 @@ app gestia {
     provider: SMTP,
     defaultFrom: {
       name: "Gestia",
-      email: "info@gestia.ca"
+      email: "no-reply@trifali.app"
     },
   },
 }

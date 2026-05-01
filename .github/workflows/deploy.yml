@@ -12,7 +12,7 @@ concurrency:
 env:
   WASP_VERSION: "0.23"
   SERVER_APP_NAME: "gestia-backend"
-  SERVER_APP_URL: "https://api.gestia.com"
+  SERVER_APP_URL: "https://api.gestia.trifali.app"
   CLIENT_APP_NAME: "gestia-frontend"
   DOCKER_REGISTRY: "ghcr.io"
   DOCKER_REGISTRY_USERNAME: ${{ github.repository_owner }}
