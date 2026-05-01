@@ -4,6 +4,20 @@ import type { Client } from 'wasp/entities';
 import { PageHeader, EmptyState, Modal } from '../../client/ui';
 import { formatDate } from '../../shared/format';
 
+/** Formate les digits saisis en +1 (438) 444-4343 */
+function maskPhone(raw: string): string {
+  let digits = raw.replace(/\D/g, '');
+  if (digits.startsWith('1')) digits = digits.slice(1);
+  digits = digits.slice(0, 10);
+  const a = digits.slice(0, 3);
+  const p = digits.slice(3, 6);
+  const l = digits.slice(6, 10);
+  if (digits.length === 0) return '';
+  if (digits.length <= 3) return `+1 (${a}`;
+  if (digits.length <= 6) return `+1 (${a}) ${p}`;
+  return `+1 (${a}) ${p}-${l}`;
+}
+
 const STATUS = {
   actif: { label: 'Actif', className: 'badge-success' },
   prospect: { label: 'Prospect', className: 'badge-info' },
@@ -109,9 +123,6 @@ function ClientForm({ client, onClose }: { client?: Client; onClose: () => void 
     email: client?.email || '',
     phone: client?.phone || '',
     address: client?.address || '',
-    city: client?.city || '',
-    province: client?.province || 'QC',
-    postalCode: client?.postalCode || '',
     notes: client?.notes || '',
     status: client?.status || 'actif',
   });
@@ -171,23 +182,16 @@ function ClientForm({ client, onClose }: { client?: Client; onClose: () => void 
         </div>
         <div>
           <label className='label'>Téléphone</label>
-          <input className='input' value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} />
+          <input
+            className='input'
+            placeholder='+1 (514) 000-0000'
+            value={form.phone}
+            onChange={(e) => setForm({ ...form, phone: maskPhone(e.target.value) })}
+          />
         </div>
         <div className='col-span-2'>
           <label className='label'>Adresse</label>
-          <input className='input' value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} />
-        </div>
-        <div>
-          <label className='label'>Ville</label>
-          <input className='input' value={form.city} onChange={(e) => setForm({ ...form, city: e.target.value })} />
-        </div>
-        <div>
-          <label className='label'>Province</label>
-          <input className='input' value={form.province} onChange={(e) => setForm({ ...form, province: e.target.value })} />
-        </div>
-        <div>
-          <label className='label'>Code postal</label>
-          <input className='input' value={form.postalCode} onChange={(e) => setForm({ ...form, postalCode: e.target.value })} />
+          <input className='input' placeholder='123 rue Exemple, Montréal, QC H1A 1A1' value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} />
         </div>
         <div className='col-span-2'>
           <label className='label'>Notes</label>
