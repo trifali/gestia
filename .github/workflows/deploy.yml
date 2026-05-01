@@ -68,7 +68,10 @@ jobs:
         run: wasp build
 
       - name: (client) Build
-        run: REACT_APP_API_URL=${{ env.SERVER_APP_URL }} npx vite build
+        working-directory: ./app/.wasp/out/web-app
+        run: |
+          npm install
+          REACT_APP_API_URL=${{ env.SERVER_APP_URL }} npx vite build
 
       - name: (client) Prepare Dockerfile
         run: |
