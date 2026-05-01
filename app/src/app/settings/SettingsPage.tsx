@@ -329,10 +329,10 @@ function PriceFormModal({
     setSaving(true);
     try {
       const payload = {
-        code: form.code.trim() || undefined,
+        code: form.code.trim() || null,
         name: form.name.trim(),
-        description: form.description.trim() || undefined,
-        category: form.category.trim() || undefined,
+        description: form.description.trim() || null,
+        category: form.category.trim() || null,
         unit: 'unite',
         unitPrice: Number(form.unitPrice),
         isActive: form.isActive,
@@ -369,10 +369,11 @@ function PriceFormModal({
           <div>
             <label className='label'>Code</label>
             <input
-              className='input'
+              className='input disabled:opacity-50 disabled:cursor-not-allowed'
               value={form.code}
               onChange={(e) => setForm({ ...form, code: e.target.value })}
               placeholder='SERV-001'
+              disabled={!!initial}
             />
           </div>
           <div>

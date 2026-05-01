@@ -31,10 +31,10 @@ export const getPriceItems: GetPriceItems<void, PriceItem[]> = async (_args, con
 };
 
 type CreateArgs = {
-  code?: string;
+  code?: string | null;
   name: string;
-  description?: string;
-  category?: string;
+  description?: string | null;
+  category?: string | null;
   unit?: string;
   unitPrice: number;
   isActive?: boolean;
