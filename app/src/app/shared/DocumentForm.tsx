@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useState, useRef, useEffect } from 'react';
 import toast from 'react-hot-toast';
 import { createDocument, updateDocument, useQuery, getPriceItems, createPriceItem } from 'wasp/client/operations';
 import { Modal } from '../../client/ui';
@@ -106,10 +106,15 @@ export function DocumentForm({
         }))
       : initial?.items?.length
         ? initial.items
-        : [{ description: '', quantity: 1, unitPrice: 0 }],
+        : [],
   );
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const errorRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (error) errorRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }, [error]);
 
   const { data: priceItems } = useQuery(getPriceItems);
 
@@ -130,8 +135,12 @@ export function DocumentForm({
       return;
     }
     const safeItems = prepareItemsForSubmit(items);
-    if (!safeItems) {
+    if (safeItems === null) {
       setError('Chaque item doit avoir une description.');
+      return;
+    }
+    if (safeItems.length === 0) {
+      setError('Veuillez ajouter au moins un item.');
       return;
     }
 
@@ -198,7 +207,7 @@ export function DocumentForm({
         )}
 
         {error && (
-          <div className='rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-danger'>
+          <div ref={errorRef} className='rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-danger'>
             {error}
           </div>
         )}
@@ -271,6 +280,7 @@ export function DocumentForm({
           </div>
         </div>
 
+        <div className='mt-6 pt-4 border-t border-line'>
         <ItemsEditor
           items={items}
           setItems={setItems}
@@ -287,6 +297,7 @@ export function DocumentForm({
             }
           }}
         />
+        </div>
 
         {/* Discount */}
         <div className='flex items-center gap-3 pt-1'>
