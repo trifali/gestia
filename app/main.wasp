@@ -183,7 +183,7 @@ query getClients {
 }
 query getClientDetail {
   fn: import { getClientDetail } from "@src/app/clients/operations",
-  entities: [User, Client, Document, DocumentItem, Payment, Meeting, Project]
+  entities: [User, Client, Document, DocumentItem, Payment, Meeting, Project, ActivityLog]
 }
 action createClient {
   fn: import { createClient } from "@src/app/clients/operations",
@@ -217,7 +217,7 @@ action deleteProject {
 
 query getDocuments {
   fn: import { getDocuments } from "@src/app/documents/operations",
-  entities: [User, Document, Client, Project, Payment]
+  entities: [User, Document, Client, Project, Payment, ActivityLog]
 }
 action createDocument {
   fn: import { createDocument } from "@src/app/documents/operations",
@@ -229,11 +229,11 @@ action updateDocument {
 }
 action updateDocumentStatus {
   fn: import { updateDocumentStatus } from "@src/app/documents/operations",
-  entities: [User, Document]
+  entities: [User, Document, ActivityLog]
 }
 action setDocumentType {
   fn: import { setDocumentType } from "@src/app/documents/operations",
-  entities: [User, Document]
+  entities: [User, Document, ActivityLog]
 }
 action deleteDocument {
   fn: import { deleteDocument } from "@src/app/documents/operations",
@@ -242,6 +242,15 @@ action deleteDocument {
 action duplicateDocument {
   fn: import { duplicateDocument } from "@src/app/documents/operations",
   entities: [User, Document, DocumentItem]
+}
+action sendDocumentEmail {
+  fn: import { sendDocumentEmail } from "@src/app/documents/operations",
+  entities: [User, Document, Client, ActivityLog]
+}
+
+query getClientActivities {
+  fn: import { getClientActivities } from "@src/app/activity/operations",
+  entities: [User, ActivityLog]
 }
 
 query getPayments {

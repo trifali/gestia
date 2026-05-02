@@ -19,6 +19,8 @@ model User {
   companyId String?
   role      String   @default("client")
   fullName  String?
+
+  activities ActivityLog[]
 }
 
 model Company {
@@ -43,11 +45,12 @@ model Company {
   locale       String  @default("fr-CA")
 
   // Branding (used in generated PDFs / public docs).
-  brandLogoKey      String?
-  brandPrimaryColor String? @default("#0E0E0E")
-  brandAccentColor  String? @default("#D4A24C")
-  brandTextColor    String? @default("#1A1A1A")
-  brandTagline      String?
+  brandLogoKey        String?
+  brandPrimaryColor   String? @default("#0E0E0E")
+  brandAccentColor    String? @default("#D4A24C")
+  brandTextColor      String? @default("#1A1A1A")
+  brandTagline        String?
+  brandEmailSignature String?
 
   users           User[]
   clients         Client[]
@@ -58,6 +61,7 @@ model Company {
   automations     Automation[]
   priceItems      PriceItem[]
   priceCategories PriceCategory[]
+  activities      ActivityLog[]
 }
 
 model Client {
@@ -79,9 +83,10 @@ model Client {
   notes       String?
   status      String  @default("actif")
 
-  projects  Project[]
-  documents Document[]
-  meetings  Meeting[]
+  projects   Project[]
+  documents  Document[]
+  meetings   Meeting[]
+  activities ActivityLog[]
 }
 
 model Project {
@@ -137,8 +142,9 @@ model Document {
   amountPaid    Float     @default(0)
   notes         String?
 
-  items    DocumentItem[]
-  payments Payment[]
+  items      DocumentItem[]
+  payments   Payment[]
+  activities ActivityLog[]
 
   @@unique([companyId, number])
 }
@@ -235,4 +241,28 @@ model Automation {
   action      String
   isActive    Boolean @default(true)
   config      Json?
+}
+
+model ActivityLog {
+  id        String   @id @default(uuid())
+  createdAt DateTime @default(now())
+
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  companyId String
+
+  client   Client? @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  clientId String?
+
+  document   Document? @relation(fields: [documentId], references: [id], onDelete: SetNull)
+  documentId String?
+
+  user   User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
+  userId String?
+
+  type     String
+  message  String
+  metadata Json?
+
+  @@index([companyId, createdAt])
+  @@index([clientId, createdAt])
 }

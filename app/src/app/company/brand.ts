@@ -84,6 +84,7 @@ type BrandArgs = Partial<{
   brandAccentColor: string;
   brandTextColor: string;
   brandTagline: string;
+  brandEmailSignature: string;
 }>;
 
 const HEX_RE = /^#[0-9A-Fa-f]{6}$/;
@@ -102,6 +103,7 @@ export const updateCompanyBrand: UpdateCompanyBrand<BrandArgs, Company> = async 
       brandAccentColor: sanitizeColor(args.brandAccentColor, '#D4A24C'),
       brandTextColor: sanitizeColor(args.brandTextColor, '#1A1A1A'),
       brandTagline: (args.brandTagline ?? '').toString().slice(0, 200) || null,
+      brandEmailSignature: (args.brandEmailSignature ?? '').toString().slice(0, 2000) || null,
     },
   });
 };
@@ -112,6 +114,7 @@ type BrandAssets = {
   accentColor: string;
   textColor: string;
   tagline: string | null;
+  emailSignature: string | null;
 };
 
 export const getCompanyBrandAssets: GetCompanyBrandAssets<void, BrandAssets> = async (
@@ -138,5 +141,6 @@ export const getCompanyBrandAssets: GetCompanyBrandAssets<void, BrandAssets> = a
     accentColor: company.brandAccentColor || '#D4A24C',
     textColor: company.brandTextColor || '#1A1A1A',
     tagline: company.brandTagline,
+    emailSignature: (company as any).brandEmailSignature ?? null,
   };
 };

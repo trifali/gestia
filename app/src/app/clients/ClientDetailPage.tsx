@@ -8,6 +8,7 @@ import {
   getProjects,
   deleteMeeting,
   updateClient,
+  getClientActivities,
 } from 'wasp/client/operations';
 import { Modal, useConfirm, IconBtn, TrashIcon } from '../../client/ui';
 import { MagicInput, MagicTextarea } from '../../client/magic';
@@ -152,6 +153,8 @@ function ResumeTab({ client }: { client: ClientDetail }) {
           </div>
         )}
       </div>
+
+      <ActivityHistory clientId={client.id} />
     </div>
   );
 }
@@ -456,6 +459,49 @@ function ClientEditModal({ client, onClose }: { client: Client; onClose: () => v
         </div>
       </form>
     </Modal>
+  );
+}
+
+// ─── Activity history ─────────────────────────────────────────────────────────
+const ACTIVITY_TYPE_META: Record<string, { label: string; className: string }> = {
+  'document.email_sent': { label: 'Courriel envoyé', className: 'badge-info' },
+  'document.status_changed': { label: 'Statut modifié', className: 'badge-neutral' },
+  'document.converted_to_invoice': { label: 'Soumission → Facture', className: 'badge-success' },
+  'document.reverted_to_quote': { label: 'Facture → Soumission', className: 'badge-warning' },
+};
+
+function ActivityHistory({ clientId }: { clientId: string }) {
+  const { data: activities, isLoading } = useQuery(getClientActivities, { clientId, limit: 50 });
+
+  return (
+    <div className='bg-white border border-gray-100 rounded-xl p-5 shadow-sm'>
+      <h2 className='text-sm font-semibold text-ink mb-4 uppercase tracking-wide'>
+        Historique d'activité
+      </h2>
+      {isLoading ? (
+        <p className='text-muted text-sm'>Chargement…</p>
+      ) : !activities || activities.length === 0 ? (
+        <p className='text-muted text-sm'>Aucune activité enregistrée pour ce client.</p>
+      ) : (
+        <ol className='space-y-3'>
+          {activities.map((a: any) => {
+            const meta = ACTIVITY_TYPE_META[a.type] || { label: a.type, className: 'badge-neutral' };
+            const who = a.user?.fullName || a.user?.email || 'Système';
+            return (
+              <li key={a.id} className='flex items-start gap-3 text-sm'>
+                <span className={`${meta.className} shrink-0 mt-0.5`}>{meta.label}</span>
+                <div className='flex-1 min-w-0'>
+                  <p className='text-ink'>{a.message}</p>
+                  <p className='text-xs text-muted mt-0.5'>
+                    {formatDate(a.createdAt)} · {who}
+                  </p>
+                </div>
+              </li>
+            );
+          })}
+        </ol>
+      )}
+    </div>
   );
 }
 

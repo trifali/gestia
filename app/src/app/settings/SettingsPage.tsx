@@ -147,6 +147,7 @@ function BrandForm({ company, canEdit }: { company: any; canEdit: boolean }) {
   const [accent, setAccent] = useState<string>(company.brandAccentColor || '#D4A24C');
   const [textColor, setTextColor] = useState<string>(company.brandTextColor || '#1A1A1A');
   const [tagline, setTagline] = useState<string>(company.brandTagline || '');
+  const [signature, setSignature] = useState<string>(company.brandEmailSignature || '');
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -156,6 +157,7 @@ function BrandForm({ company, canEdit }: { company: any; canEdit: boolean }) {
     setAccent(company.brandAccentColor || '#D4A24C');
     setTextColor(company.brandTextColor || '#1A1A1A');
     setTagline(company.brandTagline || '');
+    setSignature(company.brandEmailSignature || '');
   }, [company?.id]);
 
   const onSave = async () => {
@@ -167,6 +169,7 @@ function BrandForm({ company, canEdit }: { company: any; canEdit: boolean }) {
         brandAccentColor: accent,
         brandTextColor: textColor,
         brandTagline: tagline,
+        brandEmailSignature: signature,
       });
       toast.success('Identité visuelle enregistrée');
     } catch (err: any) {
@@ -295,6 +298,22 @@ function BrandForm({ company, canEdit }: { company: any; canEdit: boolean }) {
             value={tagline}
             onChange={(e) => setTagline(e.target.value)}
             placeholder='Ex. Gestion intelligente pour entreprises québécoises'
+            disabled={!canEdit}
+          />
+        </div>
+
+        <div className='mt-6'>
+          <label className='label'>Signature de courriel</label>
+          <p className='text-xs text-muted mb-2'>
+            Ajoutée à la fin des courriels d'envoi de soumissions et factures.
+            Laissez vide pour utiliser uniquement le nom de l'entreprise.
+          </p>
+          <MagicTextarea
+            className='input min-h-[120px] resize-y'
+            rows={5}
+            value={signature}
+            onChange={(e) => setSignature(e.target.value)}
+            placeholder={'Cordialement,\nMarie Tremblay\n514-555-1234\ninfo@entreprise.com'}
             disabled={!canEdit}
           />
         </div>

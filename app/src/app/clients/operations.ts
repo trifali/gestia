@@ -18,7 +18,19 @@ export const getClientDetail = async ({ clientId }: { clientId: string }, contex
   const client = await context.entities.Client.findUnique({
     where: { id: clientId },
     include: {
-      documents: { include: { items: true, payments: true, project: true }, orderBy: { createdAt: 'desc' } },
+      documents: {
+        include: {
+          items: true,
+          payments: true,
+          project: true,
+          activities: {
+            where: { type: 'document.email_sent' },
+            orderBy: { createdAt: 'desc' },
+            take: 1,
+          },
+        },
+        orderBy: { createdAt: 'desc' },
+      },
       meetings: { orderBy: { startsAt: 'desc' } },
     },
   });

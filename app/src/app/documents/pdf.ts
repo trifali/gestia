@@ -608,3 +608,22 @@ export function downloadDocumentPdf(
   const name = `${fileBase}-${doc.number}${doc.status === 'brouillon' ? '-BROUILLON' : doc.status === 'expire' ? '-EXPIRE' : ''}.pdf`;
   pdfMake.createPdf(def).download(name);
 }
+
+export function buildDocumentPdfFilename(doc: DocForPdf): string {
+  const fileBase = doc.type === 'invoice' ? 'Facture' : 'Devis';
+  return `${fileBase}-${doc.number}${doc.status === 'brouillon' ? '-BROUILLON' : doc.status === 'expire' ? '-EXPIRE' : ''}.pdf`;
+}
+
+/**
+ * Build the PDF and return its content as a base64 string (without the
+ * `data:application/pdf;base64,` prefix). Used by the email-sending modal so
+ * the server can attach it.
+ */
+export function getDocumentPdfBase64(
+  doc: DocForPdf,
+  company: CompanyForPdf,
+  brand: BrandAssets,
+): Promise<string> {
+  const def = buildDocDefinition(doc, company, brand);
+  return pdfMake.createPdf(def).getBase64();
+}

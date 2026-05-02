@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { LuFileCheck, LuUndo2, LuPencil, LuDownload, LuCopy, LuLoader } from 'react-icons/lu';
+import { LuFileCheck, LuUndo2, LuPencil, LuDownload, LuCopy, LuLoader, LuMail, LuEye } from 'react-icons/lu';
 import toast from 'react-hot-toast';
 import {
   useQuery,
@@ -13,6 +13,8 @@ import { useConfirm, IconBtn, TrashIcon } from '../../client/ui';
 import { formatCurrency, formatDate } from '../../shared/format';
 import { DocumentForm } from './DocumentForm';
 import { downloadDocumentPdf } from '../documents/pdf';
+import { SendDocumentEmailModal } from './SendDocumentEmailModal';
+import { PdfPreviewModal } from './PdfPreviewModal';
 
 export const DOCUMENT_STATUS: Record<string, { label: string; className: string }> = {
   brouillon: { label: 'Brouillon', className: 'badge-neutral' },
@@ -57,6 +59,8 @@ export function DocumentTable({
   const { data: brand } = useQuery(getCompanyBrandAssets);
   const [editing, setEditing] = useState<any | null>(null);
   const [duplicating, setDuplicating] = useState<string | null>(null);
+  const [sending, setSending] = useState<any | null>(null);
+  const [previewing, setPreviewing] = useState<any | null>(null);
   const { ask, Dialog: ConfirmDialog } = useConfirm();
 
   return (
@@ -80,6 +84,8 @@ export function DocumentTable({
             {docs.map((d: any) => {
               const balance = d.type === 'invoice' ? +(d.total - d.amountPaid).toFixed(2) : null;
               const docForPdf = clientForPdf ? { ...d, client: clientForPdf } : d;
+              const lastSent = (d as any).activities?.[0] || null;
+              const wasSent = !!lastSent;
 
               return (
                 <tr key={d.id}>
@@ -115,6 +121,12 @@ export function DocumentTable({
                         <LuPencil size={14} />
                       </IconBtn>
                       <IconBtn
+                        title='Aperçu du PDF'
+                        onClick={() => setPreviewing(docForPdf)}
+                      >
+                        <LuEye size={14} />
+                      </IconBtn>
+                      <IconBtn
                         title='Télécharger en PDF'
                         onClick={() => {
                           try {
@@ -125,6 +137,12 @@ export function DocumentTable({
                         }}
                       >
                         <LuDownload size={14} />
+                      </IconBtn>
+                      <IconBtn
+                        title={wasSent ? `Renvoyer (envoyé le ${formatDate(lastSent.createdAt)})` : 'Envoyer par courriel'}
+                        onClick={() => setSending({ doc: docForPdf, lastSent })}
+                      >
+                        <LuMail size={14} className={wasSent ? 'text-success' : ''} />
                       </IconBtn>
                       <IconBtn
                         title='Dupliquer'
@@ -201,6 +219,23 @@ export function DocumentTable({
           document={editing}
           allowModeToggle={false}
           onClose={() => setEditing(null)}
+        />
+      )}
+      {sending && (
+        <SendDocumentEmailModal
+          doc={sending.doc}
+          lastSent={sending.lastSent}
+          company={company || null}
+          brand={brand || null}
+          onClose={() => setSending(null)}
+        />
+      )}
+      {previewing && (
+        <PdfPreviewModal
+          doc={previewing}
+          company={company || null}
+          brand={brand || null}
+          onClose={() => setPreviewing(null)}
         />
       )}
       {ConfirmDialog}

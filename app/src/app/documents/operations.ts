@@ -7,9 +7,12 @@ import type {
   SetDocumentType,
   DeleteDocument,
   DuplicateDocument,
+  SendDocumentEmail,
 } from 'wasp/server/operations';
 import type { Document, DocumentItem, Client, Project, Payment } from 'wasp/entities';
 import { computeTotals, nextDocNumber } from '../../server/tenant';
+import { logActivity } from '../activity/operations';
+import { sendEmailWithAttachment } from '../../server/mail';
 
 function ensureCompany(user: any): string {
   if (!user) throw new HttpError(401);
@@ -32,7 +35,17 @@ export const getDocuments: GetDocuments<void, DocumentWithDetails[]> = async (_a
   const companyId = ensureCompany(context.user);
   return context.entities.Document.findMany({
     where: { companyId },
-    include: { client: true, project: true, items: true, payments: true },
+    include: {
+      client: true,
+      project: true,
+      items: true,
+      payments: true,
+      activities: {
+        where: { type: 'document.email_sent' },
+        orderBy: { createdAt: 'desc' },
+        take: 1,
+      },
+    },
     orderBy: { createdAt: 'desc' },
   });
 };
@@ -99,7 +112,19 @@ export const updateDocumentStatus: UpdateDocumentStatus<{ id: string; status: st
   const companyId = ensureCompany(context.user);
   const existing = await context.entities.Document.findUnique({ where: { id } });
   if (!existing || existing.companyId !== companyId) throw new HttpError(404);
-  return context.entities.Document.update({ where: { id }, data: { status } });
+  const updated = await context.entities.Document.update({ where: { id }, data: { status } });
+  if (existing.status !== status) {
+    await logActivity(context.entities, {
+      companyId,
+      userId: context.user!.id,
+      clientId: existing.clientId,
+      documentId: existing.id,
+      type: 'document.status_changed',
+      message: `Statut de ${existing.type === 'invoice' ? 'la facture' : 'la soumission'} ${existing.number} : ${existing.status} → ${status}`,
+      metadata: { from: existing.status, to: status },
+    });
+  }
+  return updated;
 };
 
 type UpdateDocumentArgs = {
@@ -175,7 +200,7 @@ export const setDocumentType: SetDocumentType<
   const allowedStatuses = ['brouillon', 'actif', 'expire'];
   const status = allowedStatuses.includes(existing.status) ? existing.status : 'actif';
 
-  return context.entities.Document.update({
+  const updated = await context.entities.Document.update({
     where: { id },
     data: {
       type,
@@ -184,6 +209,19 @@ export const setDocumentType: SetDocumentType<
       dueDate: type === 'invoice' && dueDate ? new Date(dueDate) : type === 'quote' ? null : existing.dueDate,
     },
   });
+  await logActivity(context.entities, {
+    companyId,
+    userId: context.user!.id,
+    clientId: existing.clientId,
+    documentId: existing.id,
+    type: type === 'invoice' ? 'document.converted_to_invoice' : 'document.reverted_to_quote',
+    message:
+      type === 'invoice'
+        ? `Soumission ${existing.number} convertie en facture ${number}`
+        : `Facture ${existing.number} repassée en soumission ${number}`,
+    metadata: { fromType: existing.type, toType: type, fromNumber: existing.number, toNumber: number },
+  });
+  return updated;
 };
 
 export const deleteDocument: DeleteDocument<{ id: string }, { id: string }> = async ({ id }, context) => {
@@ -236,4 +274,72 @@ export const duplicateDocument: DuplicateDocument<{ id: string }, Document> = as
       },
     } as any,
   });
+};
+
+type SendDocumentEmailArgs = {
+  id: string;
+  to: string;
+  cc?: string | null;
+  subject: string;
+  message: string;
+  /** Base64-encoded PDF (without data URL prefix). */
+  pdfBase64: string;
+  filename?: string;
+};
+
+export const sendDocumentEmail: SendDocumentEmail<SendDocumentEmailArgs, { ok: true }> = async (
+  args,
+  context,
+) => {
+  const companyId = ensureCompany(context.user);
+  const doc = await context.entities.Document.findUnique({
+    where: { id: args.id },
+    include: { client: true },
+  });
+  if (!doc || (doc as any).companyId !== companyId) throw new HttpError(404);
+
+  const to = (args.to || '').trim();
+  if (!to) throw new HttpError(400, 'Destinataire requis');
+  if (!args.subject?.trim()) throw new HttpError(400, 'Objet requis');
+  if (!args.pdfBase64) throw new HttpError(400, 'PDF manquant');
+
+  const message = args.message || '';
+  const html = `<div style="font-family: Arial, sans-serif; font-size: 14px; color:#1a1a1a; white-space: pre-wrap;">${message
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/\n/g, '<br/>')}</div>`;
+
+  await sendEmailWithAttachment({
+    to,
+    cc: args.cc?.trim() || undefined,
+    subject: args.subject,
+    text: message,
+    html,
+    replyTo: context.user?.email || undefined,
+    attachments: [
+      {
+        filename: args.filename || `${doc.number}.pdf`,
+        contentBase64: args.pdfBase64,
+        contentType: 'application/pdf',
+      },
+    ],
+  });
+
+  await logActivity(context.entities, {
+    companyId,
+    userId: context.user!.id,
+    clientId: (doc as any).clientId,
+    documentId: doc.id,
+    type: 'document.email_sent',
+    message: `Courriel envoy\u00e9 \u00e0 ${to}${args.cc?.trim() ? ` (cc ${args.cc.trim()})` : ''} \u2014 ${doc.type === 'invoice' ? 'Facture' : 'Soumission'} ${doc.number}`,
+    metadata: {
+      to,
+      cc: args.cc || null,
+      subject: args.subject,      body: message,      number: doc.number,
+      type: doc.type,
+    },
+  });
+
+  return { ok: true } as const;
 };
