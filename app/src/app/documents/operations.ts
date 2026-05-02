@@ -6,6 +6,7 @@ import type {
   UpdateDocumentStatus,
   SetDocumentType,
   DeleteDocument,
+  DuplicateDocument,
 } from 'wasp/server/operations';
 import type { Document, DocumentItem, Client, Project, Payment } from 'wasp/entities';
 import { computeTotals, nextDocNumber } from '../../server/tenant';
@@ -191,4 +192,48 @@ export const deleteDocument: DeleteDocument<{ id: string }, { id: string }> = as
   if (!existing || existing.companyId !== companyId) throw new HttpError(404);
   await context.entities.Document.delete({ where: { id } });
   return { id };
+};
+
+export const duplicateDocument: DuplicateDocument<{ id: string }, Document> = async ({ id }, context) => {
+  const companyId = ensureCompany(context.user);
+  const existing = await context.entities.Document.findUnique({
+    where: { id },
+    include: { items: true },
+  });
+  if (!existing || existing.companyId !== companyId) throw new HttpError(404);
+
+  const type = existing.type as DocumentType;
+  const number = await nextDocNumber(context.entities as any, type, companyId, PREFIX[type]);
+
+  return context.entities.Document.create({
+    data: {
+      companyId,
+      clientId: existing.clientId,
+      projectId: existing.projectId,
+      type: existing.type,
+      number,
+      title: existing.title ? `${existing.title} (copie)` : null,
+      description: existing.description,
+      validUntil: existing.validUntil,
+      dueDate: existing.dueDate,
+      notes: existing.notes,
+      status: 'brouillon',
+      discountType: existing.discountType,
+      discountValue: existing.discountValue,
+      subtotal: existing.subtotal,
+      taxGst: existing.taxGst,
+      taxQst: existing.taxQst,
+      total: existing.total,
+      amountPaid: 0,
+      items: {
+        create: (existing as any).items.map((it: any) => ({
+          description: it.description,
+          note: it.note,
+          quantity: it.quantity,
+          unitPrice: it.unitPrice,
+          amount: it.amount,
+        })),
+      },
+    } as any,
+  });
 };

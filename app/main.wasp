@@ -239,6 +239,10 @@ action deleteDocument {
   fn: import { deleteDocument } from "@src/app/documents/operations",
   entities: [User, Document]
 }
+action duplicateDocument {
+  fn: import { duplicateDocument } from "@src/app/documents/operations",
+  entities: [User, Document, DocumentItem]
+}
 
 query getPayments {
   fn: import { getPayments } from "@src/app/payments/operations",

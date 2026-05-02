@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { LuFileCheck, LuUndo2, LuPencil, LuDownload } from 'react-icons/lu';
+import { LuFileCheck, LuUndo2, LuPencil, LuDownload, LuCopy, LuLoader } from 'react-icons/lu';
 import toast from 'react-hot-toast';
 import {
   useQuery,
@@ -7,6 +7,7 @@ import {
   getCompanyBrandAssets,
   setDocumentType,
   deleteDocument,
+  duplicateDocument,
 } from 'wasp/client/operations';
 import { useConfirm, IconBtn, TrashIcon } from '../../client/ui';
 import { formatCurrency, formatDate } from '../../shared/format';
@@ -55,6 +56,7 @@ export function DocumentTable({
   const { data: company } = useQuery(getCurrentCompany);
   const { data: brand } = useQuery(getCompanyBrandAssets);
   const [editing, setEditing] = useState<any | null>(null);
+  const [duplicating, setDuplicating] = useState<string | null>(null);
   const { ask, Dialog: ConfirmDialog } = useConfirm();
 
   return (
@@ -123,6 +125,25 @@ export function DocumentTable({
                         }}
                       >
                         <LuDownload size={14} />
+                      </IconBtn>
+                      <IconBtn
+                        title='Dupliquer'
+                        disabled={duplicating === d.id}
+                        onClick={async () => {
+                          setDuplicating(d.id);
+                          try {
+                            await duplicateDocument({ id: d.id });
+                            toast.success('Document dupliqué');
+                          } catch (err: any) {
+                            toast.error(err?.message || 'Erreur lors de la duplication');
+                          } finally {
+                            setDuplicating(null);
+                          }
+                        }}
+                      >
+                        {duplicating === d.id
+                          ? <LuLoader size={14} className='animate-spin' />
+                          : <LuCopy size={14} />}
                       </IconBtn>
                       {d.type === 'quote' ? (
                         <IconBtn title='Convertir en facture' onClick={async () => {
