@@ -1,16 +1,11 @@
 import { useState } from 'react';
 import { useParams, useNavigate } from 'react-router';
-import { LuArrowLeft, LuPencil, LuFileCheck, LuUndo2, LuDownload } from 'react-icons/lu';
+import { LuArrowLeft, LuPencil } from 'react-icons/lu';
 import toast from 'react-hot-toast';
 import {
   useQuery,
   getClientDetail,
   getProjects,
-  getCurrentCompany,
-  getCompanyBrandAssets,
-  deleteDocument,
-  updateDocumentStatus,
-  setDocumentType,
   deleteMeeting,
   updateClient,
 } from 'wasp/client/operations';
@@ -20,30 +15,11 @@ import { formatCurrency, formatDate } from '../../shared/format';
 import type { Client } from 'wasp/entities';
 import type { ClientDetail } from './operations';
 import { DocumentForm } from '../shared/DocumentForm';
+import { DocumentTable } from '../shared/DocumentTable';
 import { MeetingForm } from '../meetings/MeetingForm';
 import { downloadDocumentPdf } from '../documents/pdf';
 
 // ─── Status maps ──────────────────────────────────────────────────────────────
-const QUOTE_STATUS: Record<string, { label: string; className: string }> = {
-  brouillon: { label: 'Brouillon', className: 'badge-neutral' },
-  envoyee: { label: 'Envoyée', className: 'badge-info' },
-  acceptee: { label: 'Acceptée', className: 'badge-success' },
-  refusee: { label: 'Refusée', className: 'badge-danger' },
-  expiree: { label: 'Expirée', className: 'badge-warning' },
-};
-
-const INVOICE_STATUS: Record<string, { label: string; className: string }> = {
-  brouillon: { label: 'Brouillon', className: 'badge-neutral' },
-  envoyee: { label: 'Envoyée', className: 'badge-info' },
-  payee: { label: 'Payée', className: 'badge-success' },
-  en_retard: { label: 'En retard', className: 'badge-danger' },
-  annulee: { label: 'Annulée', className: 'badge-neutral' },
-};
-
-function statusFor(doc: { type: string; status: string }) {
-  const map = doc.type === 'invoice' ? INVOICE_STATUS : QUOTE_STATUS;
-  return map[doc.status] || { label: doc.status, className: 'badge-neutral' };
-}
 
 const CLIENT_STATUS: Record<string, { label: string; className: string }> = {
   actif: { label: 'Actif', className: 'badge-success' },
@@ -191,11 +167,8 @@ function InfoRow({ label, value }: { label: string; value: string }) {
 
 // ─── Documents (soumissions + factures) ──────────────────────────────────────
 function DocumentsTab({ client, projects }: { client: ClientDetail; projects: any[] }) {
-  const { ask, Dialog: ConfirmDialog } = useConfirm();
   const [creating, setCreating] = useState(false);
-  const [editing, setEditing] = useState<any | null>(null);
-  const [filter, setFilter] = useState<'all' | 'quote' | 'invoice'>('all');  const { data: company } = useQuery(getCurrentCompany);
-  const { data: brand } = useQuery(getCompanyBrandAssets);
+  const [filter, setFilter] = useState<'all' | 'quote' | 'invoice'>('all');
   const docs = filter === 'all'
     ? client.documents
     : client.documents.filter((d) => d.type === filter);
@@ -233,99 +206,14 @@ function DocumentsTab({ client, projects }: { client: ClientDetail; projects: an
           {filter === 'invoice' ? 'Aucune facture.' : filter === 'quote' ? 'Aucune soumission.' : 'Aucune soumission ni facture.'}
         </p>
       ) : (
-        <div className='table-wrap'>
-          <table>
-            <thead>
-              <tr>
-                <th>Type</th>
-                <th>Numéro</th>
-                <th>Titre</th>
-                <th>Émis le</th>
-                <th>Statut</th>
-                <th className='text-right'>Total</th>
-                <th className='text-right'>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {docs.map((d) => {
-                const st = statusFor(d);
-                return (
-                  <tr key={d.id}>
-                    <td>
-                      <span className={d.type === 'invoice' ? 'badge-info' : 'badge-neutral'}>
-                        {d.type === 'invoice' ? 'Facture' : 'Soumission'}
-                      </span>
-                    </td>
-                    <td className='font-mono text-sm'>{d.number}</td>
-                    <td>{d.title || '—'}</td>
-                    <td className='text-muted'>{formatDate(d.issueDate)}</td>
-                    <td><span className={st.className}>{st.label}</span></td>
-                    <td className='text-right font-medium'>{formatCurrency(d.total)}</td>
-                    <td className='text-right'>
-                      <div className='flex items-center justify-end gap-1'>
-                        <IconBtn title='Modifier' onClick={() => setEditing(d)}>
-                          <LuPencil size={14} />
-                        </IconBtn>
-                        <IconBtn
-                          title='Télécharger en PDF'
-                          onClick={() => {
-                            try {
-                              downloadDocumentPdf({ ...d, client } as any, company || null, brand || null);
-                            } catch (err: any) {
-                              toast.error(err?.message || 'Erreur lors de la génération du PDF');
-                            }
-                          }}
-                        >
-                          <LuDownload size={14} />
-                        </IconBtn>
-                        {d.type === 'quote' ? (
-                          <IconBtn title='Convertir en facture' onClick={async () => {
-                            if (await ask(`Convertir la soumission ${d.number} en facture ?`, { confirmLabel: 'Convertir', variant: 'primary' })) {
-                              try {
-                                await setDocumentType({ id: d.id, type: 'invoice' });
-                                toast.success('Converti en facture');
-                              } catch (err: any) {
-                                toast.error(err?.message || 'Erreur lors de la conversion');
-                              }
-                            }
-                          }}>
-                            <LuFileCheck size={14} />
-                          </IconBtn>
-                        ) : (
-                          <IconBtn title='Repasser en soumission' onClick={async () => {
-                            if (await ask(`Repasser la facture ${d.number} en soumission ?`, { confirmLabel: 'Repasser en soumission', variant: 'primary' })) {
-                              try {
-                                await setDocumentType({ id: d.id, type: 'quote' });
-                                toast.success('Repassé en soumission');
-                              } catch (err: any) {
-                                toast.error(err?.message || 'Erreur lors de la conversion');
-                              }
-                            }
-                          }}>
-                            <LuUndo2 size={14} />
-                          </IconBtn>
-                        )}
-                        <IconBtn variant='danger' title='Supprimer' onClick={async () => {
-                          if (await ask(`Supprimer ${d.number} ?`)) {
-                            try {
-                              await deleteDocument({ id: d.id });
-                              toast.success('Document supprimé');
-                            } catch (err: any) {
-                              toast.error(err?.message || 'Erreur lors de la suppression');
-                            }
-                          }
-                        }}>
-                          <TrashIcon />
-                        </IconBtn>
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
+        <DocumentTable
+          docs={docs}
+          clientId={client.id}
+          clientForPdf={client}
+          projects={projects}
+        />
       )}
+
       {creating && (
         <DocumentForm
           defaultMode='quote'
@@ -334,16 +222,6 @@ function DocumentsTab({ client, projects }: { client: ClientDetail; projects: an
           onClose={() => setCreating(false)}
         />
       )}
-      {editing && (
-        <DocumentForm
-          clientId={client.id}
-          projects={projects}
-          document={editing}
-          allowModeToggle={false}
-          onClose={() => setEditing(null)}
-        />
-      )}
-      {ConfirmDialog}
     </>
   );
 }

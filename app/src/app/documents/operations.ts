@@ -171,10 +171,8 @@ export const setDocumentType: SetDocumentType<
   if (existing.type === type) return existing;
 
   const number = await nextDocNumber(context.entities as any, type, companyId, PREFIX[type]);
-  const invoiceStatuses = ['brouillon', 'envoyee', 'payee', 'en_retard', 'annulee'];
-  const quoteStatuses = ['brouillon', 'envoyee', 'acceptee', 'refusee', 'expiree'];
-  const allowed = type === 'invoice' ? invoiceStatuses : quoteStatuses;
-  const status = allowed.includes(existing.status) ? existing.status : 'brouillon';
+  const allowedStatuses = ['brouillon', 'actif', 'expire'];
+  const status = allowedStatuses.includes(existing.status) ? existing.status : 'actif';
 
   return context.entities.Document.update({
     where: { id },

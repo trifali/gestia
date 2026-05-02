@@ -96,8 +96,14 @@ function joinAddress(p: {
   return [p.address, line2, p.country].filter(Boolean).join(' • ');
 }
 
-function isDraft(status: string): boolean {
-  return status === 'brouillon';
+function watermarkForStatus(status: string): { text: string; lightColor: string; darkColor: string; opacity: number } | null {
+  if (status === 'brouillon') {
+    return { text: 'BROUILLON', lightColor: '#FFFFFF', darkColor: '#1A1A1A', opacity: 0.18 };
+  }
+  if (status === 'expire') {
+    return { text: 'EXPIRÉ', lightColor: '#FF6B6B', darkColor: '#C0392B', opacity: 0.22 };
+  }
+  return null;
 }
 
 function docKindLabel(type: string): { word: string; titre: string; refLabel: string } {
@@ -481,7 +487,7 @@ function closingCard(doc: DocForPdf, company: CompanyForPdf, t: Theme): Content 
 // ---------- Build full doc definition ----------
 function buildDocDefinition(doc: DocForPdf, company: CompanyForPdf, brand: BrandAssets): TDocumentDefinitions {
   const kind = docKindLabel(doc.type);
-  const draft = isDraft(doc.status);
+  const watermark = watermarkForStatus(doc.status);
   const t = buildTheme(brand);
 
   const cover = buildCover(doc, company, brand, t);
@@ -547,29 +553,29 @@ function buildDocDefinition(doc: DocForPdf, company: CompanyForPdf, brand: Brand
       subject: doc.title || `${kind.word} ${doc.number}`,
     },
     background,
-    ...(draft
-      ? {
-          watermark: {
-            text: 'BROUILLON',
-            color: t.accent,
-            opacity: 0.18,
-            bold: true,
-            fontSize: 110,
-            angle: -30,
-          },
-        }
-      : {}),
-    header: (currentPage: number) => {
-      if (currentPage === 1) return null as any;
-      return {
-        text: headerLabel,
-        alignment: 'right',
-        color: t.accent,
-        bold: true,
-        fontSize: 8,
-        characterSpacing: 2,
-        margin: [54, 24, 54, 0],
-      };
+    header: (currentPage: number, _pageCount: number, pageSize: ContextPageSize) => {
+      const items: any[] = [];
+      if (watermark) {
+        const color = currentPage === 1 ? watermark.lightColor : watermark.darkColor;
+        const cx = pageSize.width / 2;
+        const cy = pageSize.height / 2;
+        const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${pageSize.width}" height="${pageSize.height}"><text x="${cx}" y="${cy}" font-family="Helvetica, Arial, sans-serif" font-size="90" font-weight="bold" letter-spacing="6" fill="${color}" fill-opacity="${watermark.opacity}" text-anchor="middle" dominant-baseline="middle" transform="rotate(-30 ${cx} ${cy})">${watermark.text}</text></svg>`;
+        items.push({ svg, width: pageSize.width, absolutePosition: { x: 0, y: 0 } });
+      }
+      if (currentPage > 1) {
+        items.push({
+          text: headerLabel,
+          alignment: 'right',
+          color: t.accent,
+          bold: true,
+          fontSize: 8,
+          characterSpacing: 2,
+          margin: [54, 24, 54, 0],
+        });
+      }
+      if (items.length === 0) return null as any;
+      if (items.length === 1) return items[0];
+      return { stack: items };
     },
     footer: (currentPage: number, pageCount: number) => {
       if (currentPage === 1) return null as any;
@@ -599,6 +605,6 @@ export function downloadDocumentPdf(
 ): void {
   const def = buildDocDefinition(doc, company, brand);
   const fileBase = doc.type === 'invoice' ? 'Facture' : 'Devis';
-  const name = `${fileBase}-${doc.number}${isDraft(doc.status) ? '-BROUILLON' : ''}.pdf`;
+  const name = `${fileBase}-${doc.number}${doc.status === 'brouillon' ? '-BROUILLON' : doc.status === 'expire' ? '-EXPIRE' : ''}.pdf`;
   pdfMake.createPdf(def).download(name);
 }

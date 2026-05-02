@@ -1,6 +1,6 @@
 import { useMemo, useState, useRef, useEffect } from 'react';
 import toast from 'react-hot-toast';
-import { createDocument, updateDocument, useQuery, getPriceItems, createPriceItem } from 'wasp/client/operations';
+import { createDocument, updateDocument, updateDocumentStatus, useQuery, getPriceItems, createPriceItem } from 'wasp/client/operations';
 import { Modal } from '../../client/ui';
 import { MagicInput, MagicTextarea } from '../../client/magic';
 import {
@@ -12,6 +12,12 @@ import {
 } from './ItemsEditor';
 
 export type DocumentMode = 'quote' | 'invoice';
+
+const DOCUMENT_STATUSES = [
+  { value: 'brouillon', label: 'Brouillon' },
+  { value: 'actif', label: 'Actif' },
+  { value: 'expire', label: 'Expiré' },
+];
 
 type Props = {
   /** Initial mode of the form. Defaults to `'quote'`. Ignored when editing. */
@@ -27,6 +33,7 @@ type Props = {
   document?: {
     id: string;
     type: DocumentMode;
+    status?: string;
     clientId: string;
     projectId?: string | null;
     title?: string | null;
@@ -96,6 +103,7 @@ export function DocumentForm({
   const [discountValue, setDiscountValue] = useState<number>(
     document?.discountValue ?? 0,
   );
+  const [status, setStatus] = useState<string>(document?.status || 'actif');
   const [items, setItems] = useState<LineItem[]>(
     document?.items?.length
       ? document.items.map((i) => ({
@@ -160,6 +168,9 @@ export function DocumentForm({
           discountType,
           discountValue: discountValue || 0,
         });
+        if (status !== document.status) {
+          await updateDocumentStatus({ id: document.id, status });
+        }
         toast.success('Document modifié');
       } else {
         await createDocument({
@@ -278,6 +289,20 @@ export function DocumentForm({
               onChange={(e) => setDueDate(e.target.value)}
             />
           </div>
+          {isEdit && (
+            <div>
+              <label className='label'>Statut</label>
+              <select
+                className='input'
+                value={status}
+                onChange={(e) => setStatus(e.target.value)}
+              >
+                {DOCUMENT_STATUSES.map((s) => (
+                  <option key={s.value} value={s.value}>{s.label}</option>
+                ))}
+              </select>
+            </div>
+          )}
         </div>
 
         <div className='mt-6 pt-4 border-t border-line'>
