@@ -4,6 +4,10 @@ import {
   useQuery,
   getCurrentCompany,
   updateCompany,
+  uploadCompanyLogo,
+  removeCompanyLogo,
+  updateCompanyBrand,
+  getCompanyBrandAssets,
   getPriceItems,
   createPriceItem,
   updatePriceItem,
@@ -21,7 +25,7 @@ import { formatCurrency } from '../../shared/format';
 export default function SettingsPage() {
   const { data: user } = useAuth();
   const { data: company, isLoading } = useQuery(getCurrentCompany);
-  const [tab, setTab] = useState<'entreprise' | 'catalogue' | 'compte' | 'localisation'>('entreprise');
+  const [tab, setTab] = useState<'entreprise' | 'marque' | 'catalogue' | 'compte' | 'localisation'>('entreprise');
 
   if (isLoading) return <div className='text-muted'>Chargement…</div>;
   if (!company) return <div className='text-muted'>Aucune entreprise associée.</div>;
@@ -34,12 +38,14 @@ export default function SettingsPage() {
 
       <div className='flex gap-2 border-b border-line mb-6'>
         <TabButton active={tab === 'entreprise'} onClick={() => setTab('entreprise')}>Entreprise</TabButton>
+        <TabButton active={tab === 'marque'} onClick={() => setTab('marque')}>Marque</TabButton>
         <TabButton active={tab === 'catalogue'} onClick={() => setTab('catalogue')}>Catalogue</TabButton>
         <TabButton active={tab === 'compte'} onClick={() => setTab('compte')}>Compte</TabButton>
         <TabButton active={tab === 'localisation'} onClick={() => setTab('localisation')}>Localisation</TabButton>
       </div>
 
       {tab === 'entreprise' && <CompanyForm company={company} canEdit={!!isAdmin} />}
+      {tab === 'marque' && <BrandForm company={company} canEdit={!!isAdmin} />}
       {tab === 'catalogue' && <PriceList canEdit={!!isAdmin} />}
       {tab === 'compte' && <AccountInfo user={user} role={(user as any)?.role || 'client'} />}
       {tab === 'localisation' && <LocalizationInfo />}
@@ -132,6 +138,223 @@ function CompanyForm({ company, canEdit }: { company: any; canEdit: boolean }) {
         </div>
       )}
     </form>
+  );
+}
+
+function BrandForm({ company, canEdit }: { company: any; canEdit: boolean }) {
+  const { data: assets, refetch } = useQuery(getCompanyBrandAssets);
+  const [primary, setPrimary] = useState<string>(company.brandPrimaryColor || '#0E0E0E');
+  const [accent, setAccent] = useState<string>(company.brandAccentColor || '#D4A24C');
+  const [textColor, setTextColor] = useState<string>(company.brandTextColor || '#1A1A1A');
+  const [tagline, setTagline] = useState<string>(company.brandTagline || '');
+  const [saving, setSaving] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    setPrimary(company.brandPrimaryColor || '#0E0E0E');
+    setAccent(company.brandAccentColor || '#D4A24C');
+    setTextColor(company.brandTextColor || '#1A1A1A');
+    setTagline(company.brandTagline || '');
+  }, [company?.id]);
+
+  const onSave = async () => {
+    if (!canEdit) return;
+    setSaving(true);
+    try {
+      await updateCompanyBrand({
+        brandPrimaryColor: primary,
+        brandAccentColor: accent,
+        brandTextColor: textColor,
+        brandTagline: tagline,
+      });
+      toast.success('Identité visuelle enregistrée');
+    } catch (err: any) {
+      toast.error(err?.message || 'Une erreur est survenue');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const onPickFile = () => fileRef.current?.click();
+
+  const onFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    if (file.size > 8 * 1024 * 1024) {
+      toast.error('Image trop volumineuse (max 8 Mo)');
+      return;
+    }
+    if (!/^image\//.test(file.type)) {
+      toast.error('Veuillez sélectionner une image');
+      return;
+    }
+    setUploading(true);
+    try {
+      const dataUrl = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result as string);
+        reader.onerror = () => reject(reader.error);
+        reader.readAsDataURL(file);
+      });
+      await uploadCompanyLogo({ dataUrl });
+      await refetch();
+      toast.success('Logo téléversé');
+    } catch (err: any) {
+      toast.error(err?.message || 'Échec du téléversement');
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const onRemoveLogo = async () => {
+    setUploading(true);
+    try {
+      await removeCompanyLogo();
+      await refetch();
+      toast.success('Logo retiré');
+    } catch (err: any) {
+      toast.error(err?.message || 'Erreur');
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  return (
+    <div className='space-y-6'>
+      {!canEdit && (
+        <p className='text-sm text-muted bg-canvas-200 px-3 py-2 rounded-lg'>
+          Seul un administrateur peut modifier ces paramètres.
+        </p>
+      )}
+
+      <div className='card p-6'>
+        <h3 className='font-semibold text-base mb-1'>Logo de l’entreprise</h3>
+        <p className='text-sm text-muted mb-4'>
+          Le logo est optimisé et converti en JPG avant d’être enregistré. Il apparaît sur les soumissions et factures PDF.
+        </p>
+
+        <div className='flex items-start gap-6'>
+          <div
+            className='w-40 h-40 rounded-lg border border-line flex items-center justify-center overflow-hidden'
+            style={{ backgroundColor: primary }}
+          >
+            {assets?.logoDataUrl ? (
+              <img src={assets.logoDataUrl} alt='Logo' className='max-w-full max-h-full object-contain' />
+            ) : (
+              <span className='text-xs' style={{ color: accent }}>Aucun logo</span>
+            )}
+          </div>
+
+          <div className='flex flex-col gap-2'>
+            <input
+              ref={fileRef}
+              type='file'
+              accept='image/*'
+              className='hidden'
+              onChange={onFileChange}
+            />
+            <button
+              type='button'
+              className='btn-secondary'
+              onClick={onPickFile}
+              disabled={!canEdit || uploading}
+            >
+              {uploading ? 'Téléversement…' : assets?.logoDataUrl ? 'Remplacer le logo' : 'Téléverser un logo'}
+            </button>
+            {assets?.logoDataUrl && canEdit && (
+              <button type='button' className='btn-ghost text-danger' onClick={onRemoveLogo} disabled={uploading}>
+                Retirer le logo
+              </button>
+            )}
+            <p className='text-xs text-muted max-w-xs'>
+              Formats acceptés : PNG, JPG, WebP. Recommandation : fond transparent ou clair, ≤ 2 Mo.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <div className='card p-6'>
+        <h3 className='font-semibold text-base mb-1'>Couleurs de la marque</h3>
+        <p className='text-sm text-muted mb-4'>
+          Utilisées pour la couverture des PDF, les accents et le filigrane « brouillon ».
+        </p>
+
+        <div className='grid md:grid-cols-3 gap-4'>
+          <ColorField label='Couleur principale' value={primary} onChange={setPrimary} disabled={!canEdit} hint='Fond foncé de la couverture' />
+          <ColorField label='Couleur d’accent' value={accent} onChange={setAccent} disabled={!canEdit} hint='Lignes, titres, totaux' />
+          <ColorField label='Couleur du texte' value={textColor} onChange={setTextColor} disabled={!canEdit} hint='Texte courant' />
+        </div>
+
+        <div className='mt-6'>
+          <label className='label'>Slogan / signature (optionnel)</label>
+          <MagicInput
+            type='text'
+            className='input'
+            value={tagline}
+            onChange={(e) => setTagline(e.target.value)}
+            placeholder='Ex. Gestion intelligente pour entreprises québécoises'
+            disabled={!canEdit}
+          />
+        </div>
+
+        {canEdit && (
+          <div className='mt-6 flex items-center gap-3'>
+            <button type='button' className='btn-primary' onClick={onSave} disabled={saving}>
+              {saving ? 'Enregistrement…' : 'Enregistrer'}
+            </button>
+          </div>
+        )}
+      </div>
+
+      <div className='card p-6'>
+        <h3 className='font-semibold text-base mb-3'>Aperçu</h3>
+        <div className='rounded-lg overflow-hidden border border-line' style={{ backgroundColor: primary }}>
+          <div className='p-8'>
+            {assets?.logoDataUrl && (
+              <img src={assets.logoDataUrl} alt='' className='h-12 mb-6 object-contain' />
+            )}
+            <div className='text-xs font-bold uppercase tracking-widest mb-2' style={{ color: accent }}>
+              Devis · Aperçu
+            </div>
+            <div className='text-3xl font-bold text-white leading-tight'>
+              Proposition
+              <br />
+              <span style={{ color: accent }}>commerciale.</span>
+            </div>
+            {tagline && <div className='mt-3 italic text-sm' style={{ color: '#F5EFE1' }}>{tagline}</div>}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ColorField({
+  label, value, onChange, disabled, hint,
+}: { label: string; value: string; onChange: (v: string) => void; disabled?: boolean; hint?: string }) {
+  return (
+    <div>
+      <label className='label'>{label}</label>
+      <div className='flex items-center gap-2'>
+        <input
+          type='color'
+          className='h-10 w-12 rounded border border-line cursor-pointer disabled:cursor-not-allowed'
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          disabled={disabled}
+        />
+        <MagicInput
+          type='text'
+          className='input flex-1 font-mono text-sm'
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          disabled={disabled}
+        />
+      </div>
+      {hint && <p className='text-xs text-muted mt-1'>{hint}</p>}
+    </div>
   );
 }
 

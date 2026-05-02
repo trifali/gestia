@@ -43,5 +43,14 @@ export const updateCompany: UpdateCompany<UpdateCompanyArgs, Company> = async (a
   requireAdmin(context.user);
   const companyId = (context.user as any).companyId;
   if (!companyId) throw new HttpError(403);
-  return context.entities.Company.update({ where: { id: companyId }, data: args });
+  // Whitelist editable fields — the form may pass unrelated columns
+  // (brand fields, etc.) that are managed by other operations.
+  const allowed: (keyof UpdateCompanyArgs)[] = [
+    'name', 'legalName', 'email', 'phone',
+    'address', 'city', 'province', 'postalCode',
+    'country', 'website', 'neq', 'taxNumberGst', 'taxNumberQst',
+  ];
+  const data: any = {};
+  for (const k of allowed) if (k in args) data[k] = (args as any)[k];
+  return context.entities.Company.update({ where: { id: companyId }, data });
 };

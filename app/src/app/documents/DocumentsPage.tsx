@@ -1,12 +1,14 @@
 import { useMemo, useState } from 'react';
 import { useLocation } from 'react-router';
-import { LuFileCheck, LuUndo2, LuPencil } from 'react-icons/lu';
+import { LuFileCheck, LuUndo2, LuPencil, LuDownload } from 'react-icons/lu';
 import toast from 'react-hot-toast';
 import {
   useQuery,
   getDocuments,
   getClients,
   getProjects,
+  getCurrentCompany,
+  getCompanyBrandAssets,
   updateDocumentStatus,
   setDocumentType,
   deleteDocument,
@@ -14,6 +16,7 @@ import {
 import { PageHeader, EmptyState, useConfirm, IconBtn, TrashIcon } from '../../client/ui';
 import { formatCurrency, formatDate } from '../../shared/format';
 import { DocumentForm } from '../shared/DocumentForm';
+import { downloadDocumentPdf } from './pdf';
 
 const QUOTE_STATUS: Record<string, { label: string; className: string }> = {
   brouillon: { label: 'Brouillon', className: 'badge-neutral' },
@@ -43,6 +46,8 @@ export default function DocumentsPage() {
   const { data: documents, isLoading } = useQuery(getDocuments);
   const { data: clients } = useQuery(getClients);
   const { data: projects } = useQuery(getProjects);
+  const { data: company } = useQuery(getCurrentCompany);
+  const { data: brand } = useQuery(getCompanyBrandAssets);
   const [creating, setCreating] = useState<{ mode: 'quote' | 'invoice' } | null>(null);
   const [editing, setEditing] = useState<any | null>(null);
   const { ask, Dialog: ConfirmDialog } = useConfirm();
@@ -161,6 +166,18 @@ export default function DocumentsPage() {
                       <div className='flex items-center justify-end gap-1'>
                         <IconBtn title='Modifier' onClick={() => setEditing(d)}>
                           <LuPencil size={14} />
+                        </IconBtn>
+                        <IconBtn
+                          title='Télécharger en PDF'
+                          onClick={() => {
+                            try {
+                              downloadDocumentPdf(d, company || null, brand || null);
+                            } catch (err: any) {
+                              toast.error(err?.message || 'Erreur lors de la génération du PDF');
+                            }
+                          }}
+                        >
+                          <LuDownload size={14} />
                         </IconBtn>
                         {d.type === 'quote' ? (
                           <IconBtn title='Convertir en facture' onClick={async () => {

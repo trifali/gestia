@@ -160,6 +160,23 @@ action createCompany {
   entities: [User, Company]
 }
 
+query getCompanyBrandAssets {
+  fn: import { getCompanyBrandAssets } from "@src/app/company/brand",
+  entities: [User, Company]
+}
+action uploadCompanyLogo {
+  fn: import { uploadCompanyLogo } from "@src/app/company/brand",
+  entities: [User, Company]
+}
+action removeCompanyLogo {
+  fn: import { removeCompanyLogo } from "@src/app/company/brand",
+  entities: [User, Company]
+}
+action updateCompanyBrand {
+  fn: import { updateCompanyBrand } from "@src/app/company/brand",
+  entities: [User, Company]
+}
+
 query getClients {
   fn: import { getClients } from "@src/app/clients/operations",
   entities: [User, Client]

@@ -42,6 +42,13 @@ model Company {
   currency     String  @default("CAD")
   locale       String  @default("fr-CA")
 
+  // Branding (used in generated PDFs / public docs).
+  brandLogoKey      String?
+  brandPrimaryColor String? @default("#0E0E0E")
+  brandAccentColor  String? @default("#D4A24C")
+  brandTextColor    String? @default("#1A1A1A")
+  brandTagline      String?
+
   users           User[]
   clients         Client[]
   projects        Project[]
