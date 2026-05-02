@@ -35,6 +35,8 @@ type Props = {
     dueDate?: string | Date | null;
     notes?: string | null;
     items: LineItem[];
+    discountType?: 'percent' | 'amount' | null;
+    discountValue?: number | null;
   };
   /** Optional initial values used when prefilling a new document. */
   initial?: {
@@ -88,6 +90,12 @@ export function DocumentForm({
   const [validUntil, setValidUntil] = useState(toDateInput(document?.validUntil));
   const [dueDate, setDueDate] = useState(toDateInput(document?.dueDate));
   const [notes, setNotes] = useState(document?.notes || initial?.notes || '');
+  const [discountType, setDiscountType] = useState<'percent' | 'amount'>(
+    (document?.discountType as 'percent' | 'amount') || 'percent',
+  );
+  const [discountValue, setDiscountValue] = useState<number>(
+    document?.discountValue ?? 0,
+  );
   const [items, setItems] = useState<LineItem[]>(
     document?.items?.length
       ? document.items.map((i) => ({
@@ -140,6 +148,8 @@ export function DocumentForm({
           dueDate: dueDate || null,
           notes,
           items: safeItems,
+          discountType,
+          discountValue: discountValue || 0,
         });
         toast.success('Document modifié');
       } else {
@@ -153,6 +163,8 @@ export function DocumentForm({
           dueDate: dueDate || null,
           notes,
           items: safeItems,
+          discountType,
+          discountValue: discountValue || 0,
         });
         toast.success(mode === 'invoice' ? 'Facture créée' : 'Soumission créée');
       }
@@ -275,7 +287,33 @@ export function DocumentForm({
             }
           }}
         />
-        <TotalsDisplay items={items} />
+
+        {/* Discount */}
+        <div className='flex items-center gap-3 pt-1'>
+          <label className='label mb-0 whitespace-nowrap'>Rabais</label>
+          <select
+            className='input w-28 shrink-0'
+            value={discountType}
+            onChange={(e) => setDiscountType(e.target.value as 'percent' | 'amount')}
+          >
+            <option value='percent'>%</option>
+            <option value='amount'>$</option>
+          </select>
+          <input
+            type='number'
+            min='0'
+            step='0.01'
+            className='input flex-1'
+            placeholder={discountType === 'percent' ? 'ex. 10' : 'ex. 50.00'}
+            value={discountValue || ''}
+            onChange={(e) => setDiscountValue(parseFloat(e.target.value) || 0)}
+          />
+        </div>
+
+        <TotalsDisplay
+          items={items}
+          discount={discountValue > 0 ? { type: discountType, value: discountValue } : undefined}
+        />
 
         <div>
           <label className='label'>Notes</label>

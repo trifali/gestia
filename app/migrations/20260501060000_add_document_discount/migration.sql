@@ -1,0 +1,3 @@
+-- AlterTable
+ALTER TABLE "Document" ADD COLUMN "discountType" TEXT NOT NULL DEFAULT 'percent';
+ALTER TABLE "Document" ADD COLUMN "discountValue" DOUBLE PRECISION NOT NULL DEFAULT 0;

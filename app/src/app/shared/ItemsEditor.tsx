@@ -279,15 +279,43 @@ export function ItemsEditor({
   );
 }
 
-export function TotalsDisplay({ items }: { items: LineItem[] }) {
+export function TotalsDisplay({
+  items,
+  discount,
+}: {
+  items: LineItem[];
+  discount?: { type: 'percent' | 'amount'; value: number };
+}) {
   const totals = useMemo(() => {
-    const sub = items.reduce((s, it) => s + (it.quantity || 0) * (it.unitPrice || 0), 0);
-    return { sub, gst: sub * TPS, qst: sub * TVQ, total: sub * (1 + TPS + TVQ) };
-  }, [items]);
+    const itemsTotal = items.reduce((s, it) => s + (it.quantity || 0) * (it.unitPrice || 0), 0);
+    let discountAmount = 0;
+    if (discount && discount.value > 0) {
+      if (discount.type === 'percent') {
+        discountAmount = itemsTotal * Math.min(discount.value, 100) / 100;
+      } else {
+        discountAmount = Math.min(discount.value, itemsTotal);
+      }
+    }
+    const sub = itemsTotal - discountAmount;
+    return { itemsTotal, discountAmount, sub, gst: sub * TPS, qst: sub * TVQ, total: sub * (1 + TPS + TVQ) };
+  }, [items, discount]);
+
+  const showDiscount = totals.discountAmount > 0;
 
   return (
     <div className='border-t border-line pt-4 grid grid-cols-2 gap-2 text-sm'>
-      <div className='text-muted'>Sous-total</div>
+      {showDiscount && (
+        <>
+          <div className='text-muted'>Sous-total items</div>
+          <div className='text-right'>{formatCurrency(totals.itemsTotal)}</div>
+          <div className='text-muted'>
+            Rabais
+            {discount?.type === 'percent' ? ` (${discount.value} %)` : ''}
+          </div>
+          <div className='text-right text-success'>−{formatCurrency(totals.discountAmount)}</div>
+        </>
+      )}
+      <div className='text-muted'>{showDiscount ? 'Sous-total après rabais' : 'Sous-total'}</div>
       <div className='text-right'>{formatCurrency(totals.sub)}</div>
       <div className='text-muted'>TPS (5 %)</div>
       <div className='text-right'>{formatCurrency(totals.gst)}</div>

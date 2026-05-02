@@ -113,20 +113,22 @@ model Document {
   projectId String?
 
   // 'quote' | 'invoice' — same record can be promoted from quote to invoice.
-  type        String    @default("quote")
-  number      String
-  title       String?
-  description String?
-  status      String    @default("brouillon")
-  issueDate   DateTime  @default(now())
-  validUntil  DateTime?
-  dueDate     DateTime?
-  subtotal    Float     @default(0)
-  taxGst      Float     @default(0)
-  taxQst      Float     @default(0)
-  total       Float     @default(0)
-  amountPaid  Float     @default(0)
-  notes       String?
+  type          String    @default("quote")
+  number        String
+  title         String?
+  description   String?
+  status        String    @default("brouillon")
+  issueDate     DateTime  @default(now())
+  validUntil    DateTime?
+  dueDate       DateTime?
+  discountType  String    @default("percent")
+  discountValue Float     @default(0)
+  subtotal      Float     @default(0)
+  taxGst        Float     @default(0)
+  taxQst        Float     @default(0)
+  total         Float     @default(0)
+  amountPaid    Float     @default(0)
+  notes         String?
 
   items    DocumentItem[]
   payments Payment[]

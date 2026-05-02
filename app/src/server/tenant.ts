@@ -22,12 +22,24 @@ export function requireAdmin(user: any) {
 export const TAX_GST = 0.05;        // TPS
 export const TAX_QST = 0.09975;     // TVQ
 
-export function computeTotals(items: { quantity: number; unitPrice: number }[]) {
-  const subtotal = items.reduce((s, it) => s + (it.quantity || 0) * (it.unitPrice || 0), 0);
+export function computeTotals(
+  items: { quantity: number; unitPrice: number }[],
+  discount?: { type: 'percent' | 'amount'; value: number },
+) {
+  const itemsTotal = items.reduce((s, it) => s + (it.quantity || 0) * (it.unitPrice || 0), 0);
+  let discountAmount = 0;
+  if (discount && discount.value > 0) {
+    if (discount.type === 'percent') {
+      discountAmount = +(itemsTotal * Math.min(discount.value, 100) / 100).toFixed(2);
+    } else {
+      discountAmount = +Math.min(discount.value, itemsTotal).toFixed(2);
+    }
+  }
+  const subtotal = +(itemsTotal - discountAmount).toFixed(2);
   const taxGst = +(subtotal * TAX_GST).toFixed(2);
   const taxQst = +(subtotal * TAX_QST).toFixed(2);
   const total = +(subtotal + taxGst + taxQst).toFixed(2);
-  return { subtotal: +subtotal.toFixed(2), taxGst, taxQst, total };
+  return { subtotal, taxGst, taxQst, total };
 }
 
 export async function nextDocNumber(

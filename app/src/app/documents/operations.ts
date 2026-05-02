@@ -47,6 +47,8 @@ type CreateDocumentArgs = {
   dueDate?: string | null;
   notes?: string | null;
   items: ItemInput[];
+  discountType?: 'percent' | 'amount';
+  discountValue?: number;
 };
 
 export const createDocument: CreateDocument<CreateDocumentArgs, Document> = async (args, context) => {
@@ -56,7 +58,9 @@ export const createDocument: CreateDocument<CreateDocumentArgs, Document> = asyn
   if (args.type === 'quote' && !args.title?.trim()) throw new HttpError(400, 'Titre requis');
   if (!args.items?.length) throw new HttpError(400, 'Au moins un item est requis');
 
-  const totals = computeTotals(args.items);
+  const discountType = args.discountType ?? 'percent';
+  const discountValue = args.discountValue ?? 0;
+  const totals = computeTotals(args.items, { type: discountType, value: discountValue });
   const number = await nextDocNumber(context.entities as any, args.type, companyId, PREFIX[args.type]);
 
   return context.entities.Document.create({
@@ -71,6 +75,8 @@ export const createDocument: CreateDocument<CreateDocumentArgs, Document> = asyn
       validUntil: args.validUntil ? new Date(args.validUntil) : null,
       dueDate: args.dueDate ? new Date(args.dueDate) : null,
       notes: args.notes || null,
+      discountType,
+      discountValue,
       ...totals,
       items: {
         create: args.items.map((it) => ({
@@ -105,6 +111,8 @@ type UpdateDocumentArgs = {
   dueDate?: string | null;
   notes?: string | null;
   items?: ItemInput[];
+  discountType?: 'percent' | 'amount';
+  discountValue?: number;
 };
 
 export const updateDocument: UpdateDocument<UpdateDocumentArgs, Document> = async (args, context) => {
@@ -123,9 +131,14 @@ export const updateDocument: UpdateDocument<UpdateDocumentArgs, Document> = asyn
   if (args.dueDate !== undefined)
     data.dueDate = args.dueDate ? new Date(args.dueDate) : null;
 
+  if (args.discountType !== undefined) data.discountType = args.discountType;
+  if (args.discountValue !== undefined) data.discountValue = args.discountValue;
+
   if (args.items) {
     if (!args.items.length) throw new HttpError(400, 'Au moins un item est requis');
-    const totals = computeTotals(args.items);
+    const discountType = args.discountType ?? (existing.discountType as 'percent' | 'amount') ?? 'percent';
+    const discountValue = args.discountValue ?? existing.discountValue ?? 0;
+    const totals = computeTotals(args.items, { type: discountType, value: discountValue });
     Object.assign(data, totals);
     await context.entities.DocumentItem.deleteMany({ where: { documentId: args.id } });
     data.items = {
