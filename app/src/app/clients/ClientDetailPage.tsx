@@ -1,11 +1,13 @@
 import { useState } from 'react';
 import { useParams, useNavigate } from 'react-router';
-import { LuArrowLeft, LuPencil, LuFileCheck, LuUndo2 } from 'react-icons/lu';
+import { LuArrowLeft, LuPencil, LuFileCheck, LuUndo2, LuDownload } from 'react-icons/lu';
 import toast from 'react-hot-toast';
 import {
   useQuery,
   getClientDetail,
   getProjects,
+  getCurrentCompany,
+  getCompanyBrandAssets,
   deleteDocument,
   updateDocumentStatus,
   setDocumentType,
@@ -19,6 +21,7 @@ import type { Client } from 'wasp/entities';
 import type { ClientDetail } from './operations';
 import { DocumentForm } from '../shared/DocumentForm';
 import { MeetingForm } from '../meetings/MeetingForm';
+import { downloadDocumentPdf } from '../documents/pdf';
 
 // ─── Status maps ──────────────────────────────────────────────────────────────
 const QUOTE_STATUS: Record<string, { label: string; className: string }> = {
@@ -191,8 +194,8 @@ function DocumentsTab({ client, projects }: { client: ClientDetail; projects: an
   const { ask, Dialog: ConfirmDialog } = useConfirm();
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState<any | null>(null);
-  const [filter, setFilter] = useState<'all' | 'quote' | 'invoice'>('all');
-
+  const [filter, setFilter] = useState<'all' | 'quote' | 'invoice'>('all');  const { data: company } = useQuery(getCurrentCompany);
+  const { data: brand } = useQuery(getCompanyBrandAssets);
   const docs = filter === 'all'
     ? client.documents
     : client.documents.filter((d) => d.type === filter);
@@ -262,6 +265,18 @@ function DocumentsTab({ client, projects }: { client: ClientDetail; projects: an
                       <div className='flex items-center justify-end gap-1'>
                         <IconBtn title='Modifier' onClick={() => setEditing(d)}>
                           <LuPencil size={14} />
+                        </IconBtn>
+                        <IconBtn
+                          title='Télécharger en PDF'
+                          onClick={() => {
+                            try {
+                              downloadDocumentPdf({ ...d, client } as any, company || null, brand || null);
+                            } catch (err: any) {
+                              toast.error(err?.message || 'Erreur lors de la génération du PDF');
+                            }
+                          }}
+                        >
+                          <LuDownload size={14} />
                         </IconBtn>
                         {d.type === 'quote' ? (
                           <IconBtn title='Convertir en facture' onClick={async () => {

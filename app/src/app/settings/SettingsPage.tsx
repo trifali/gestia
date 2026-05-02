@@ -310,20 +310,52 @@ function BrandForm({ company, canEdit }: { company: any; canEdit: boolean }) {
 
       <div className='card p-6'>
         <h3 className='font-semibold text-base mb-3'>Aperçu</h3>
-        <div className='rounded-lg overflow-hidden border border-line' style={{ backgroundColor: primary }}>
-          <div className='p-8'>
-            {assets?.logoDataUrl && (
-              <img src={assets.logoDataUrl} alt='' className='h-12 mb-6 object-contain' />
-            )}
-            <div className='text-xs font-bold uppercase tracking-widest mb-2' style={{ color: accent }}>
-              Devis · Aperçu
+        <div className='rounded-lg overflow-hidden border border-line'>
+          {/* Cover (primary background, white + accent) */}
+          <div style={{ backgroundColor: primary }}>
+            <div className='p-8'>
+              {assets?.logoDataUrl && (
+                <img src={assets.logoDataUrl} alt='' className='h-12 mb-6 object-contain' />
+              )}
+              <div className='text-xs font-bold uppercase tracking-widest mb-2' style={{ color: accent }}>
+                Devis · Aperçu
+              </div>
+              <div className='text-3xl font-bold text-white leading-tight'>
+                Proposition
+                <br />
+                <span style={{ color: accent }}>commerciale.</span>
+              </div>
+              {tagline && <div className='mt-3 italic text-sm' style={{ color: '#F5EFE1' }}>{tagline}</div>}
             </div>
-            <div className='text-3xl font-bold text-white leading-tight'>
-              Proposition
-              <br />
-              <span style={{ color: accent }}>commerciale.</span>
+          </div>
+          {/* Body preview (white background, uses textColor) */}
+          <div className='bg-white p-8 border-t border-line'>
+            <div className='text-[10px] font-bold uppercase tracking-widest mb-1' style={{ color: accent }}>
+              Détails
             </div>
-            {tagline && <div className='mt-3 italic text-sm' style={{ color: '#F5EFE1' }}>{tagline}</div>}
+            <div className='text-lg font-bold mb-2' style={{ color: textColor }}>
+              Émetteur & destinataire
+            </div>
+            <div className='h-0.5 w-12 mb-4' style={{ backgroundColor: accent }} />
+            <p className='text-sm leading-relaxed' style={{ color: textColor }}>
+              Voici un aperçu du texte courant tel qu’il apparaîtra dans vos
+              soumissions et factures. La <strong>couleur du texte</strong> s’applique
+              aux titres de section, aux noms d’articles et aux montants.
+            </p>
+            <div className='mt-4 grid grid-cols-3 text-xs'>
+              <div className='py-2 px-3 font-bold' style={{ backgroundColor: primary, color: '#FFFFFF' }}>
+                Description
+              </div>
+              <div className='py-2 px-3 font-bold text-right' style={{ backgroundColor: primary, color: '#FFFFFF' }}>
+                Qté
+              </div>
+              <div className='py-2 px-3 font-bold text-right' style={{ backgroundColor: primary, color: '#FFFFFF' }}>
+                Total
+              </div>
+              <div className='py-2 px-3' style={{ color: textColor }}>Service exemple</div>
+              <div className='py-2 px-3 text-right' style={{ color: textColor }}>1</div>
+              <div className='py-2 px-3 text-right font-bold' style={{ color: textColor }}>1 250,00 $</div>
+            </div>
           </div>
         </div>
       </div>
@@ -346,11 +378,16 @@ function ColorField({
           disabled={disabled}
         />
         <MagicInput
+          magic={false}
           type='text'
           className='input flex-1 font-mono text-sm'
           value={value}
           onChange={(e) => onChange(e.target.value)}
           disabled={disabled}
+          spellCheck={false}
+          autoComplete='off'
+          autoCorrect='off'
+          autoCapitalize='off'
         />
       </div>
       {hint && <p className='text-xs text-muted mt-1'>{hint}</p>}

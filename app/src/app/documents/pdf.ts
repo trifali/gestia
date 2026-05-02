@@ -147,10 +147,11 @@ function buildCover(doc: DocForPdf, company: CompanyForPdf, brand: BrandAssets, 
   meta.push([doc.type === 'invoice' ? 'Facturé à' : 'Préparé pour', doc.client.name]);
   if (doc.client.contactName) meta.push(['Contact', doc.client.contactName]);
   meta.push(['Date', formatDate(doc.issueDate)]);
-  if (doc.type === 'invoice' && doc.dueDate) {
-    meta.push(['Échéance', formatDate(doc.dueDate)]);
-  } else if (doc.type !== 'invoice' && doc.validUntil) {
+  if (doc.validUntil) {
     meta.push(['Valide jusqu’au', formatDate(doc.validUntil)]);
+  }
+  if (doc.dueDate) {
+    meta.push(['Échéance', formatDate(doc.dueDate)]);
   }
   meta.push([kind.refLabel, doc.number]);
 
@@ -385,16 +386,25 @@ function cellWith(content: Content, fill: string): any {
 // ---------- Totals card ----------
 function totalsCard(doc: DocForPdf, t: Theme): Content {
   const rows: Array<[string, string, boolean]> = [];
-  rows.push(['Sous-total', formatCurrency(doc.subtotal), false]);
-  if (doc.discountValue && doc.discountValue > 0) {
+  // Items total = sum of line amounts. doc.subtotal is already AFTER discount,
+  // so we recompute the pre-discount figure to display the discount clearly.
+  const itemsTotal = +doc.items.reduce((s, it) => s + (it.amount || 0), 0).toFixed(2);
+  const hasDiscount = !!doc.discountValue && doc.discountValue > 0;
+  const discountAmount = hasDiscount ? +(itemsTotal - doc.subtotal).toFixed(2) : 0;
+
+  if (hasDiscount) {
+    rows.push(['Sous-total avant remise', formatCurrency(itemsTotal), false]);
     const label =
       doc.discountType === 'percent'
-        ? `Remise (${formatNumber(doc.discountValue, 2)} %)`
+        ? `Remise (${formatNumber(doc.discountValue, 2)} %)`
         : 'Remise';
-    rows.push([label, '—', false]);
+    rows.push([label, '− ' + formatCurrency(discountAmount), false]);
+    rows.push(['Sous-total après remise', formatCurrency(doc.subtotal), false]);
+  } else {
+    rows.push(['Sous-total', formatCurrency(doc.subtotal), false]);
   }
-  if (doc.taxGst > 0) rows.push(['TPS (5 %)', formatCurrency(doc.taxGst), false]);
-  if (doc.taxQst > 0) rows.push(['TVQ (9,975 %)', formatCurrency(doc.taxQst), false]);
+  if (doc.taxGst > 0) rows.push(['TPS (5 %)', formatCurrency(doc.taxGst), false]);
+  if (doc.taxQst > 0) rows.push(['TVQ (9,975 %)', formatCurrency(doc.taxQst), false]);
   rows.push([doc.type === 'invoice' ? 'Total à payer' : 'Total estimé', formatCurrency(doc.total), true]);
   if (doc.type === 'invoice' && doc.amountPaid > 0) {
     rows.push(['Déjà payé', formatCurrency(doc.amountPaid), false]);
