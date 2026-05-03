@@ -343,3 +343,20 @@ action magicCorrect {
   fn: import { magicCorrect } from "@src/app/ai/operations",
   entities: []
 }
+
+// Hourly background sweep that advances document statuses based on time
+// (quotes → expiree after validUntil, invoices → en_retard after dueDate).
+// `getDocuments` also performs the same transitions lazily on read so the UI
+// is never stale, but this job ensures the DB itself stays current even when
+// nobody is browsing — a prerequisite for triggering future status-based
+// emails / automations.
+job documentLifecycleSweep {
+  executor: PgBoss,
+  perform: {
+    fn: import { sweepDocumentLifecycles } from "@src/server/jobs/documentLifecycle"
+  },
+  schedule: {
+    cron: "0 * * * *"
+  },
+  entities: [Document, ActivityLog]
+}

@@ -32,9 +32,34 @@ export type DocumentWithDetails = Document & {
 
 const PREFIX: Record<DocumentType, string> = { quote: 'S', invoice: 'F' };
 
+// Allowed statuses per document type. Used for client-side dropdowns and
+// server-side validation.
+export const QUOTE_STATUSES = ['brouillon', 'envoyee', 'acceptee', 'refusee', 'expiree'] as const;
+export const INVOICE_STATUSES = [
+  'brouillon',
+  'envoyee',
+  'acompte_recu',
+  'payee',
+  'en_retard',
+  'annulee',
+] as const;
+
+// Map legacy values created before the lifecycle refactor onto the new set,
+// keeping read paths backwards-compatible.
+function normalizeStatus(type: string, status: string): string {
+  if (type === 'quote') {
+    if (status === 'actif') return 'envoyee';
+    if (status === 'expire') return 'expiree';
+    return status;
+  }
+  if (status === 'actif') return 'envoyee';
+  if (status === 'expire') return 'en_retard';
+  return status;
+}
+
 export const getDocuments: GetDocuments<void, DocumentWithDetails[]> = async (_args, context) => {
   const companyId = ensureCompany(context.user);
-  return context.entities.Document.findMany({
+  const docs = await context.entities.Document.findMany({
     where: { companyId },
     include: {
       client: true,
@@ -49,6 +74,34 @@ export const getDocuments: GetDocuments<void, DocumentWithDetails[]> = async (_a
     },
     orderBy: { createdAt: 'desc' },
   });
+
+  // Lazy lifecycle transitions:
+  //   - quote 'envoyee' past dueDate           → 'expiree'
+  //   - invoice 'envoyee'/'acompte_recu' past dueDate → 'en_retard'
+  // Both document types now use the single "date d'échéance" field as the
+  // expiry trigger. Also normalize any legacy status values still in the DB.
+  const now = Date.now();
+  const updates: Promise<unknown>[] = [];
+  for (const d of docs) {
+    const normalized = normalizeStatus(d.type, d.status);
+    let next = normalized;
+    if (d.type === 'quote' && next === 'envoyee' && d.dueDate && new Date(d.dueDate).getTime() < now) {
+      next = 'expiree';
+    } else if (
+      d.type === 'invoice' &&
+      (next === 'envoyee' || next === 'acompte_recu') &&
+      d.dueDate &&
+      new Date(d.dueDate).getTime() < now
+    ) {
+      next = 'en_retard';
+    }
+    if (next !== d.status) {
+      d.status = next;
+      updates.push(context.entities.Document.update({ where: { id: d.id }, data: { status: next } }));
+    }
+  }
+  if (updates.length) await Promise.all(updates);
+  return docs;
 };
 
 type ItemInput = { description: string; note?: string | null; quantity: number; unitPrice: number };
@@ -58,7 +111,6 @@ type CreateDocumentArgs = {
   projectId?: string | null;
   title?: string | null;
   description?: string | null;
-  validUntil?: string | null;
   dueDate?: string | null;
   notes?: string | null;
   items: ItemInput[];
@@ -87,7 +139,7 @@ export const createDocument: CreateDocument<CreateDocumentArgs, Document> = asyn
       number,
       title: args.title || null,
       description: args.description || null,
-      validUntil: args.validUntil ? new Date(args.validUntil) : null,
+      status: 'brouillon',
       dueDate: args.dueDate ? new Date(args.dueDate) : null,
       notes: args.notes || null,
       discountType,
@@ -113,6 +165,9 @@ export const updateDocumentStatus: UpdateDocumentStatus<{ id: string; status: st
   const companyId = ensureCompany(context.user);
   const existing = await context.entities.Document.findUnique({ where: { id } });
   if (!existing || existing.companyId !== companyId) throw new HttpError(404);
+  const allowed: readonly string[] =
+    existing.type === 'invoice' ? INVOICE_STATUSES : QUOTE_STATUSES;
+  if (!allowed.includes(status)) throw new HttpError(400, 'Statut invalide');
   const updated = await context.entities.Document.update({ where: { id }, data: { status } });
   if (existing.status !== status) {
     await logActivity(context.entities, {
@@ -134,7 +189,6 @@ type UpdateDocumentArgs = {
   projectId?: string | null;
   title?: string | null;
   description?: string | null;
-  validUntil?: string | null;
   dueDate?: string | null;
   notes?: string | null;
   items?: ItemInput[];
@@ -153,8 +207,6 @@ export const updateDocument: UpdateDocument<UpdateDocumentArgs, Document> = asyn
   if (args.title !== undefined) data.title = args.title || null;
   if (args.description !== undefined) data.description = args.description || null;
   if (args.notes !== undefined) data.notes = args.notes || null;
-  if (args.validUntil !== undefined)
-    data.validUntil = args.validUntil ? new Date(args.validUntil) : null;
   if (args.dueDate !== undefined)
     data.dueDate = args.dueDate ? new Date(args.dueDate) : null;
 
@@ -198,8 +250,8 @@ export const setDocumentType: SetDocumentType<
   if (existing.type === type) return existing;
 
   const number = await nextDocNumber(context.entities as any, type, companyId, PREFIX[type]);
-  const allowedStatuses = ['brouillon', 'actif', 'expire'];
-  const status = allowedStatuses.includes(existing.status) ? existing.status : 'actif';
+  // Converting starts a new lifecycle on the new type, so reset to draft.
+  const status = 'brouillon';
 
   const updated = await context.entities.Document.update({
     where: { id },
@@ -329,13 +381,18 @@ export const sendDocumentEmail: SendDocumentEmail<SendDocumentEmailArgs, { ok: t
     ],
   });
 
-  await context.entities.Document.update({
-    where: { id: doc.id },
-    data:
-      args.type === 'invoice'
-        ? { emailSubjectInvoice: args.subject, emailBodyInvoice: message }
-        : { emailSubjectQuote: args.subject, emailBodyQuote: message },
-  });
+  // Sending the email always transitions the document to 'envoyee' (unless it
+  // already is). The PDF generated client-side reflects this same status.
+  const docAny = doc as any;
+  const currentStatus = docAny.status as string;
+  const updateData: any =
+    args.type === 'invoice'
+      ? { emailSubjectInvoice: args.subject, emailBodyInvoice: args.message }
+      : { emailSubjectQuote: args.subject, emailBodyQuote: args.message };
+  if (currentStatus !== 'envoyee') {
+    updateData.status = 'envoyee';
+  }
+  await context.entities.Document.update({ where: { id: doc.id }, data: updateData });
 
   await logActivity(context.entities, {
     companyId,

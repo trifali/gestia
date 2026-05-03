@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { LuFileCheck, LuUndo2, LuPencil, LuDownload, LuCopy, LuLoader, LuMail, LuEye } from 'react-icons/lu';
+import { LuFileCheck, LuUndo2, LuPencil, LuDownload, LuCopy, LuLoader, LuMail, LuEye, LuWallet } from 'react-icons/lu';
 import toast from 'react-hot-toast';
 import {
   useQuery,
@@ -8,6 +8,7 @@ import {
   setDocumentType,
   deleteDocument,
   duplicateDocument,
+  updateDocumentStatus,
 } from 'wasp/client/operations';
 import { useConfirm, IconBtn, TrashIcon } from '../../client/ui';
 import { formatCurrency, formatDate } from '../../shared/format';
@@ -15,20 +16,57 @@ import { DocumentForm } from './DocumentForm';
 import { downloadDocumentPdf } from '../documents/pdf';
 import { SendDocumentEmailModal } from './SendDocumentEmailModal';
 import { PdfPreviewModal } from './PdfPreviewModal';
+import { PaymentModal } from './PaymentModal';
 
-export const DOCUMENT_STATUS: Record<string, { label: string; className: string }> = {
+type StatusMeta = { label: string; className: string };
+
+// Quote lifecycle.
+export const QUOTE_STATUS: Record<string, StatusMeta> = {
   brouillon: { label: 'Brouillon', className: 'badge-neutral' },
-  actif: { label: 'Actif', className: 'badge-success' },
-  expire: { label: 'Expiré', className: 'badge-warning' },
+  envoyee: { label: 'Envoyée', className: 'badge-info' },
+  acceptee: { label: 'Acceptée', className: 'badge-success' },
+  refusee: { label: 'Refusée', className: 'badge-danger' },
+  expiree: { label: 'Expirée', className: 'badge-warning' },
 };
 
-export function statusLabel(status: string) {
-  return DOCUMENT_STATUS[status]?.label ?? status.charAt(0).toUpperCase() + status.slice(1);
+// Invoice lifecycle.
+export const INVOICE_STATUS: Record<string, StatusMeta> = {
+  brouillon: { label: 'Brouillon', className: 'badge-neutral' },
+  envoyee: { label: 'Envoyée', className: 'badge-info' },
+  acompte_recu: { label: 'Acompte reçu', className: 'badge-accent' },
+  payee: { label: 'Payée', className: 'badge-success' },
+  en_retard: { label: 'En retard', className: 'badge-danger' },
+  annulee: { label: 'Annulée', className: 'badge-neutral' },
+};
+
+// Map legacy values still surfacing from old rows onto the new vocabulary.
+function normalizeStatus(type: string, status: string): string {
+  if (type === 'invoice') {
+    if (status === 'actif') return 'envoyee';
+    if (status === 'expire') return 'en_retard';
+    return status;
+  }
+  if (status === 'actif') return 'envoyee';
+  if (status === 'expire') return 'expiree';
+  return status;
 }
 
-export function statusClassName(status: string) {
-  return DOCUMENT_STATUS[status]?.className ?? 'badge-neutral';
+function statusMap(type: string) {
+  return type === 'invoice' ? INVOICE_STATUS : QUOTE_STATUS;
 }
+
+export function statusLabel(type: string, status: string) {
+  const norm = normalizeStatus(type, status);
+  return statusMap(type)[norm]?.label ?? norm.charAt(0).toUpperCase() + norm.slice(1);
+}
+
+export function statusClassName(type: string, status: string) {
+  const norm = normalizeStatus(type, status);
+  return statusMap(type)[norm]?.className ?? 'badge-neutral';
+}
+
+// Backwards-compatible alias for any caller still importing the old name.
+export const DOCUMENT_STATUS = QUOTE_STATUS;
 
 type Props = {
   docs: any[];
@@ -61,6 +99,7 @@ export function DocumentTable({
   const [duplicating, setDuplicating] = useState<string | null>(null);
   const [sending, setSending] = useState<any | null>(null);
   const [previewing, setPreviewing] = useState<any | null>(null);
+  const [recordingPayment, setRecordingPayment] = useState<{ doc: any; preset?: 'deposit' | 'final' } | null>(null);
   const { ask, Dialog: ConfirmDialog } = useConfirm();
 
   return (
@@ -100,9 +139,7 @@ export function DocumentTable({
                   {showClient && <td className='text-muted'>{d.client?.name ?? '—'}</td>}
                   <td className='text-muted'>{formatDate(d.issueDate)}</td>
                   <td>
-                    <span className={statusClassName(d.status)}>
-                      {statusLabel(d.status)}
-                    </span>
+                    <StatusSelect doc={d} />
                   </td>
                   <td className='text-right font-medium'>{formatCurrency(d.total)}</td>
                   {showBalance && (
@@ -144,8 +181,19 @@ export function DocumentTable({
                         onClick={() => setSending({ doc: docForPdf, activities: sentActivities })}
                       >
                         <LuMail size={14} className={wasSent ? 'text-success' : ''} />
-                      </IconBtn>
-                      <IconBtn
+                      </IconBtn>                      {d.type === 'invoice' && d.amountPaid < d.total && (
+                        <IconBtn
+                          title={d.amountPaid > 0 ? 'Enregistrer le solde' : 'Enregistrer un acompte ou un paiement'}
+                          onClick={() =>
+                            setRecordingPayment({
+                              doc: d,
+                              preset: d.amountPaid > 0 ? 'final' : 'deposit',
+                            })
+                          }
+                        >
+                          <LuWallet size={14} />
+                        </IconBtn>
+                      )}                      <IconBtn
                         title='Dupliquer'
                         disabled={duplicating === d.id}
                         onClick={async () => {
@@ -239,7 +287,61 @@ export function DocumentTable({
           onClose={() => setPreviewing(null)}
         />
       )}
+      {recordingPayment && (
+        <PaymentModal
+          doc={recordingPayment.doc}
+          preset={recordingPayment.preset}
+          onClose={() => setRecordingPayment(null)}
+        />
+      )}
       {ConfirmDialog}
     </>
+  );
+}
+
+// Inline status pill that doubles as a dropdown for changing the lifecycle
+// state. Options depend on the document type. Auto-derived states
+// (`expiree`, `en_retard`, `payee`, `acompte_recu`) are still listed so the
+// user can manually override when needed.
+function StatusSelect({ doc }: { doc: any }) {
+  const [saving, setSaving] = useState(false);
+  const map = doc.type === 'invoice' ? INVOICE_STATUS : QUOTE_STATUS;
+  const norm = normalizeStatus(doc.type, doc.status);
+  const className = (map[norm]?.className ?? 'badge-neutral') + ' cursor-pointer pr-1';
+
+  const onChange = async (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const next = e.target.value;
+    if (next === norm) return;
+    setSaving(true);
+    try {
+      await updateDocumentStatus({ id: doc.id, status: next });
+      toast.success('Statut mis \u00e0 jour');
+    } catch (err: any) {
+      toast.error(err?.message || 'Erreur');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <select
+      value={norm}
+      onChange={onChange}
+      disabled={saving}
+      className={className}
+      style={{
+        appearance: 'none',
+        WebkitAppearance: 'none',
+        MozAppearance: 'none',
+        border: 'none',
+        outline: 'none',
+      }}
+    >
+      {Object.entries(map).map(([value, meta]) => (
+        <option key={value} value={value}>
+          {meta.label}
+        </option>
+      ))}
+    </select>
   );
 }

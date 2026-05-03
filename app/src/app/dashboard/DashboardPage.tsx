@@ -9,6 +9,7 @@ import { formatCurrency, formatDate, formatTime } from '../../shared/format';
 const INVOICE_STATUS: Record<string, { label: string; className: string }> = {
   brouillon: { label: 'Brouillon', className: 'badge-neutral' },
   envoyee: { label: 'Envoyée', className: 'badge-info' },
+  acompte_recu: { label: 'Acompte reçu', className: 'badge-accent' },
   payee: { label: 'Payée', className: 'badge-success' },
   en_retard: { label: 'En retard', className: 'badge-danger' },
   annulee: { label: 'Annulée', className: 'badge-neutral' },

@@ -100,8 +100,17 @@ function watermarkForStatus(status: string): { text: string; lightColor: string;
   if (status === 'brouillon') {
     return { text: 'BROUILLON', lightColor: '#FFFFFF', darkColor: '#1A1A1A', opacity: 0.18 };
   }
-  if (status === 'expire') {
+  if (status === 'expire' || status === 'expiree') {
     return { text: 'EXPIRÉ', lightColor: '#FF6B6B', darkColor: '#C0392B', opacity: 0.22 };
+  }
+  if (status === 'refusee') {
+    return { text: 'REFUSÉ', lightColor: '#FF6B6B', darkColor: '#C0392B', opacity: 0.22 };
+  }
+  if (status === 'payee') {
+    return { text: 'PAYÉE', lightColor: '#3CB371', darkColor: '#1E8449', opacity: 0.22 };
+  }
+  if (status === 'annulee') {
+    return { text: 'ANNULÉ', lightColor: '#9CA3AF', darkColor: '#4B5563', opacity: 0.22 };
   }
   return null;
 }
@@ -153,11 +162,8 @@ function buildCover(doc: DocForPdf, company: CompanyForPdf, brand: BrandAssets, 
   meta.push([doc.type === 'invoice' ? 'Facturé à' : 'Préparé pour', doc.client.name]);
   if (doc.client.contactName) meta.push(['Contact', doc.client.contactName]);
   meta.push(['Date', formatDate(doc.issueDate)]);
-  if (doc.validUntil) {
-    meta.push(['Valide jusqu’au', formatDate(doc.validUntil)]);
-  }
   if (doc.dueDate) {
-    meta.push(['Échéance', formatDate(doc.dueDate)]);
+    meta.push([doc.type === 'invoice' ? 'Échéance' : 'Valide jusqu’au', formatDate(doc.dueDate)]);
   }
   meta.push([kind.refLabel, doc.number]);
 
@@ -511,10 +517,10 @@ function buildDocDefinition(doc: DocForPdf, company: CompanyForPdf, brand: Brand
     content.push({ text: doc.notes, color: t.grey, fontSize: 10, lineHeight: 1.4 });
   }
 
-  if (doc.type !== 'invoice' && doc.validUntil) {
+  if (doc.type !== 'invoice' && doc.dueDate) {
     content.push(subheading('Validité', t));
     content.push({
-      text: `Cette proposition est valide jusqu’au ${formatDate(doc.validUntil)}.`,
+      text: `Cette proposition est valide jusqu’au ${formatDate(doc.dueDate)}.`,
       color: t.grey,
       fontSize: 10,
     });
@@ -605,13 +611,13 @@ export function downloadDocumentPdf(
 ): void {
   const def = buildDocDefinition(doc, company, brand);
   const fileBase = doc.type === 'invoice' ? 'Facture' : 'Devis';
-  const name = `${fileBase}-${doc.number}${doc.status === 'brouillon' ? '-BROUILLON' : doc.status === 'expire' ? '-EXPIRE' : ''}.pdf`;
+  const name = `${fileBase}-${doc.number}${doc.status === 'brouillon' ? '-BROUILLON' : doc.status === 'expire' || doc.status === 'expiree' ? '-EXPIRE' : ''}.pdf`;
   pdfMake.createPdf(def).download(name);
 }
 
 export function buildDocumentPdfFilename(doc: DocForPdf): string {
   const fileBase = doc.type === 'invoice' ? 'Facture' : 'Devis';
-  return `${fileBase}-${doc.number}${doc.status === 'brouillon' ? '-BROUILLON' : doc.status === 'expire' ? '-EXPIRE' : ''}.pdf`;
+  return `${fileBase}-${doc.number}${doc.status === 'brouillon' ? '-BROUILLON' : doc.status === 'expire' || doc.status === 'expiree' ? '-EXPIRE' : ''}.pdf`;
 }
 
 /**

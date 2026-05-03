@@ -204,6 +204,12 @@ function DocumentsTab({ client, projects }: { client: ClientDetail; projects: an
         </button>
       </div>
 
+      <p className='text-xs text-muted mb-3'>
+        Astuce : cliquez sur le statut pour le changer. À l'envoi du courriel, le document passe à « Envoyée ».
+        Après la date d'échéance, les soumissions deviennent « Expirée » et les factures impayées passent « En retard ». Sur une facture, utilisez l'icône
+        portefeuille pour enregistrer un acompte ou le solde — le statut suit automatiquement.
+      </p>
+
       {docs.length === 0 ? (
         <p className='text-muted text-sm'>
           {filter === 'invoice' ? 'Aucune facture.' : filter === 'quote' ? 'Aucune soumission.' : 'Aucune soumission ni facture.'}

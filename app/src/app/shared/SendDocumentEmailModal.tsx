@@ -147,6 +147,11 @@ export function SendDocumentEmailModal({ doc, company, brand, activities, onClos
     }
   };
 
+  const willTransitionToSent = isCurrentType && docAny.status !== 'envoyee';
+  const docForOutput = isCurrentType
+    ? ({ ...doc, status: 'envoyee' } as typeof doc)
+    : doc;
+
   const submit = async () => {
     if (!to.trim()) {
       toast.error('Adresse du destinataire requise');
@@ -154,7 +159,10 @@ export function SendDocumentEmailModal({ doc, company, brand, activities, onClos
     }
     setSending(true);
     try {
-      const pdfBase64 = await getDocumentPdfBase64(doc, company, brand);
+      // If the document is still a draft, generate the PDF as if it had already
+      // been sent so that the watermark / title reflect the new status. The
+      // server persists the same transition right after the email is sent.
+      const pdfBase64 = await getDocumentPdfBase64(docForOutput, company, brand);
       await sendDocumentEmail({
         id: doc.id,
         type: activeType,
@@ -163,7 +171,7 @@ export function SendDocumentEmailModal({ doc, company, brand, activities, onClos
         subject: subject.trim() || activeDefaults.subject,
         message: body,
         pdfBase64,
-        filename: buildDocumentPdfFilename(doc),
+        filename: buildDocumentPdfFilename(docForOutput),
       });
       toast.success('Courriel envoyé');
       onClose();
@@ -258,6 +266,16 @@ export function SendDocumentEmailModal({ doc, company, brand, activities, onClos
               Déjà envoyé le {new Date(activeLastSent.createdAt).toLocaleString('fr-CA')}. Le contenu précédent est repris ci-dessous.
             </div>
           )}
+          {willTransitionToSent && (
+            <div className='text-xs bg-blue-50 border border-blue-200 rounded-md px-3 py-2 text-blue-800'>
+              L'envoi fera passer le statut à <strong>Envoyée</strong>. Le PDF joint sera généré avec ce nouveau statut.
+            </div>
+          )}
+          {isCurrentType && !willTransitionToSent && (
+            <div className='text-xs bg-blue-50 border border-blue-200 rounded-md px-3 py-2 text-blue-800'>
+              Le statut restera <strong>Envoyée</strong>. Le PDF joint sera généré avec ce statut.
+            </div>
+          )}
           {!isCurrentType && (
             <div className='text-xs bg-amber-50 border border-amber-200 rounded-md px-3 py-2 text-amber-700'>
               Ce document est une <strong>{TYPE_META[docType].label.toLowerCase()}</strong>. L'onglet {TYPE_META[activeType].label} est en lecture seule — l'envoi est désactivé pour ce type.
@@ -302,7 +320,7 @@ export function SendDocumentEmailModal({ doc, company, brand, activities, onClos
           </Field>
           {isCurrentType && (
             <p className='text-xs text-muted'>
-              Pièce jointe : <span className='font-mono'>{buildDocumentPdfFilename(doc)}</span>
+              Pièce jointe : <span className='font-mono'>{buildDocumentPdfFilename(docForOutput)}</span>
             </p>
           )}
         </div>

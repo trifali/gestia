@@ -13,10 +13,24 @@ import {
 
 export type DocumentMode = 'quote' | 'invoice';
 
-const DOCUMENT_STATUSES = [
+// Status options offered in the edit form, per document type. Auto-derived
+// states (`expiree`, `en_retard`, `payee`, `acompte_recu`) remain selectable
+// in case a user wants to override them manually.
+const QUOTE_STATUSES = [
   { value: 'brouillon', label: 'Brouillon' },
-  { value: 'actif', label: 'Actif' },
-  { value: 'expire', label: 'Expiré' },
+  { value: 'envoyee', label: 'Envoyée' },
+  { value: 'acceptee', label: 'Acceptée' },
+  { value: 'refusee', label: 'Refusée' },
+  { value: 'expiree', label: 'Expirée' },
+];
+
+const INVOICE_STATUSES = [
+  { value: 'brouillon', label: 'Brouillon' },
+  { value: 'envoyee', label: 'Envoyée' },
+  { value: 'acompte_recu', label: 'Acompte reçu' },
+  { value: 'payee', label: 'Payée' },
+  { value: 'en_retard', label: 'En retard' },
+  { value: 'annulee', label: 'Annulée' },
 ];
 
 type Props = {
@@ -38,7 +52,6 @@ type Props = {
     projectId?: string | null;
     title?: string | null;
     description?: string | null;
-    validUntil?: string | Date | null;
     dueDate?: string | Date | null;
     notes?: string | null;
     items: LineItem[];
@@ -94,7 +107,6 @@ export function DocumentForm({
   const [projectId, setProjectId] = useState(document?.projectId || initial?.projectId || '');
   const [title, setTitle] = useState(document?.title || initial?.title || '');
   const [description, setDescription] = useState(document?.description || initial?.description || '');
-  const [validUntil, setValidUntil] = useState(toDateInput(document?.validUntil));
   const [dueDate, setDueDate] = useState(toDateInput(document?.dueDate));
   const [notes, setNotes] = useState(document?.notes || initial?.notes || '');
   const [discountType, setDiscountType] = useState<'percent' | 'amount'>(
@@ -103,7 +115,7 @@ export function DocumentForm({
   const [discountValue, setDiscountValue] = useState<number>(
     document?.discountValue ?? 0,
   );
-  const [status, setStatus] = useState<string>(document?.status || 'actif');
+  const [status, setStatus] = useState<string>(document?.status || 'brouillon');
   const [items, setItems] = useState<LineItem[]>(
     document?.items?.length
       ? document.items.map((i) => ({
@@ -161,7 +173,6 @@ export function DocumentForm({
           projectId: projectId || null,
           title: title || null,
           description: description || null,
-          validUntil: validUntil || null,
           dueDate: dueDate || null,
           notes,
           items: safeItems,
@@ -179,7 +190,6 @@ export function DocumentForm({
           projectId: projectId || null,
           title: title || null,
           description: description || null,
-          validUntil: validUntil || null,
           dueDate: dueDate || null,
           notes,
           items: safeItems,
@@ -272,15 +282,6 @@ export function DocumentForm({
             />
           </div>
           <div>
-            <label className='label'>Valide jusqu'au</label>
-            <input
-              type='date'
-              className='input'
-              value={validUntil}
-              onChange={(e) => setValidUntil(e.target.value)}
-            />
-          </div>
-          <div>
             <label className='label'>Date d'échéance</label>
             <input
               type='date'
@@ -297,7 +298,7 @@ export function DocumentForm({
                 value={status}
                 onChange={(e) => setStatus(e.target.value)}
               >
-                {DOCUMENT_STATUSES.map((s) => (
+                {(mode === 'invoice' ? INVOICE_STATUSES : QUOTE_STATUSES).map((s) => (
                   <option key={s.value} value={s.value}>{s.label}</option>
                 ))}
               </select>

@@ -48,7 +48,15 @@ export const createPayment: CreatePayment<CreatePaymentArgs, Payment> = async (a
   });
 
   const newPaid = +(doc.amountPaid + args.amount).toFixed(2);
-  const status = newPaid >= doc.total ? 'payee' : doc.status;
+  // Recompute lifecycle status based on payment progress.
+  // Manual states ('annulee') are preserved; otherwise:
+  //   newPaid >= total           → 'payee'
+  //   0 < newPaid < total        → 'acompte_recu'
+  let status = doc.status;
+  if (status !== 'annulee') {
+    if (newPaid >= doc.total) status = 'payee';
+    else if (newPaid > 0) status = 'acompte_recu';
+  }
   await context.entities.Document.update({
     where: { id: doc.id },
     data: { amountPaid: newPaid, status },
@@ -65,7 +73,12 @@ export const deletePayment: DeletePayment<{ id: string }, { id: string }> = asyn
   await context.entities.Payment.delete({ where: { id } });
   if (doc) {
     const newPaid = +Math.max(0, doc.amountPaid - existing.amount).toFixed(2);
-    const status = doc.status === 'payee' && newPaid < doc.total ? 'envoyee' : doc.status;
+    let status = doc.status;
+    if (status !== 'annulee') {
+      if (newPaid >= doc.total && doc.total > 0) status = 'payee';
+      else if (newPaid > 0) status = 'acompte_recu';
+      else if (status === 'payee' || status === 'acompte_recu') status = 'envoyee';
+    }
     await context.entities.Document.update({ where: { id: doc.id }, data: { amountPaid: newPaid, status } });
   }
   return { id };

@@ -35,7 +35,7 @@ export default function DocumentsPage() {
     <>
       <PageHeader
         title='Facturation'
-        subtitle='Soumissions et factures regroupées. Convertissez une soumission en facture en un clic.'
+        subtitle="Soumissions et factures regroupées. Cliquez le statut pour le changer (Brouillon → Envoyée → Acceptée/Refusée pour les soumissions; Brouillon → Envoyée → Acompte reçu → Payée pour les factures). Une fois la date d'échéance dépassée, les soumissions envoyées passent « Expirée » et les factures impayées passent « En retard » automatiquement."
         actions={
           <div className='flex gap-2'>
             <button className='btn-secondary' onClick={() => setCreating({ mode: 'quote' })}>
@@ -71,7 +71,7 @@ export default function DocumentsPage() {
       ) : docs.length === 0 ? (
         <EmptyState
           title={filter === 'invoice' ? 'Aucune facture' : filter === 'quote' ? 'Aucune soumission' : 'Aucune soumission ni facture'}
-          description="Créez une soumission ou une facture pour commencer. La TPS (5 %) et la TVQ (9,975 %) sont calculées automatiquement."
+          description="Créez une soumission ou une facture pour commencer. Les statuts (Brouillon, Envoyée, Acceptée, Refusée, Acompte reçu, Payée…) avancent automatiquement à l'envoi du courriel et à l'enregistrement d'un paiement."
           action={<button className='btn-primary' onClick={() => setCreating({ mode: 'quote' })}>Créer une soumission</button>}
         />
       ) : (
