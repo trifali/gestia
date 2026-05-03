@@ -245,7 +245,11 @@ action duplicateDocument {
 }
 action sendDocumentEmail {
   fn: import { sendDocumentEmail } from "@src/app/documents/operations",
-  entities: [User, Document, Client, ActivityLog]
+  entities: [User, Document, Client, ActivityLog, Company]
+}
+action saveDocumentEmailDraft {
+  fn: import { saveDocumentEmailDraft } from "@src/app/documents/operations",
+  entities: [User, Document]
 }
 
 query getClientActivities {

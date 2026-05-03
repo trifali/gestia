@@ -8,6 +8,7 @@ import type {
   DeleteDocument,
   DuplicateDocument,
   SendDocumentEmail,
+  SaveDocumentEmailDraft,
 } from 'wasp/server/operations';
 import type { Document, DocumentItem, Client, Project, Payment } from 'wasp/entities';
 import { computeTotals, nextDocNumber } from '../../server/tenant';
@@ -43,7 +44,7 @@ export const getDocuments: GetDocuments<void, DocumentWithDetails[]> = async (_a
       activities: {
         where: { type: 'document.email_sent' },
         orderBy: { createdAt: 'desc' },
-        take: 1,
+        take: 10,
       },
     },
     orderBy: { createdAt: 'desc' },
@@ -278,6 +279,7 @@ export const duplicateDocument: DuplicateDocument<{ id: string }, Document> = as
 
 type SendDocumentEmailArgs = {
   id: string;
+  type: DocumentType;
   to: string;
   cc?: string | null;
   subject: string;
@@ -292,10 +294,10 @@ export const sendDocumentEmail: SendDocumentEmail<SendDocumentEmailArgs, { ok: t
   context,
 ) => {
   const companyId = ensureCompany(context.user);
-  const doc = await context.entities.Document.findUnique({
-    where: { id: args.id },
-    include: { client: true },
-  });
+  const [doc, company] = await Promise.all([
+    context.entities.Document.findUnique({ where: { id: args.id }, include: { client: true } }),
+    (context.entities as any).Company.findUnique({ where: { id: companyId }, select: { name: true } }),
+  ]);
   if (!doc || (doc as any).companyId !== companyId) throw new HttpError(404);
 
   const to = (args.to || '').trim();
@@ -316,6 +318,7 @@ export const sendDocumentEmail: SendDocumentEmail<SendDocumentEmailArgs, { ok: t
     subject: args.subject,
     text: message,
     html,
+    fromName: company?.name ? `${company.name} via Gestia` : 'Gestia',
     replyTo: context.user?.email || undefined,
     attachments: [
       {
@@ -326,20 +329,47 @@ export const sendDocumentEmail: SendDocumentEmail<SendDocumentEmailArgs, { ok: t
     ],
   });
 
+  await context.entities.Document.update({
+    where: { id: doc.id },
+    data:
+      args.type === 'invoice'
+        ? { emailSubjectInvoice: args.subject, emailBodyInvoice: message }
+        : { emailSubjectQuote: args.subject, emailBodyQuote: message },
+  });
+
   await logActivity(context.entities, {
     companyId,
     userId: context.user!.id,
     clientId: (doc as any).clientId,
     documentId: doc.id,
     type: 'document.email_sent',
-    message: `Courriel envoy\u00e9 \u00e0 ${to}${args.cc?.trim() ? ` (cc ${args.cc.trim()})` : ''} \u2014 ${doc.type === 'invoice' ? 'Facture' : 'Soumission'} ${doc.number}`,
+    message: `Courriel envoy\u00e9 \u00e0 ${to}${args.cc?.trim() ? ` (cc ${args.cc.trim()})` : ''} \u2014 ${args.type === 'invoice' ? 'Facture' : 'Soumission'} ${doc.number}`,
     metadata: {
       to,
       cc: args.cc || null,
       subject: args.subject,      body: message,      number: doc.number,
-      type: doc.type,
+      type: args.type,
     },
   });
 
+  return { ok: true } as const;
+};
+
+export const saveDocumentEmailDraft: SaveDocumentEmailDraft<
+  { id: string; type: DocumentType; subject?: string | null; body?: string | null },
+  { ok: true }
+> = async ({ id, type, subject, body }, context) => {
+  const companyId = ensureCompany(context.user);
+  const existing = await context.entities.Document.findUnique({ where: { id } });
+  if (!existing || (existing as any).companyId !== companyId) throw new HttpError(404);
+  const cleanSubject = subject?.trim() || null;
+  const cleanBody = body ?? null;
+  await context.entities.Document.update({
+    where: { id },
+    data:
+      type === 'invoice'
+        ? { emailSubjectInvoice: cleanSubject, emailBodyInvoice: cleanBody }
+        : { emailSubjectQuote: cleanSubject, emailBodyQuote: cleanBody },
+  });
   return { ok: true } as const;
 };

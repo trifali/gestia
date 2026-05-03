@@ -26,7 +26,7 @@ export const getClientDetail = async ({ clientId }: { clientId: string }, contex
           activities: {
             where: { type: 'document.email_sent' },
             orderBy: { createdAt: 'desc' },
-            take: 1,
+            take: 10,
           },
         },
         orderBy: { createdAt: 'desc' },

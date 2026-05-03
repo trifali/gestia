@@ -1,60 +1,151 @@
 import { useMemo, useState } from 'react';
 import toast from 'react-hot-toast';
-import { LuEye } from 'react-icons/lu';
-import { sendDocumentEmail } from 'wasp/client/operations';
+import { LuEye, LuSave, LuRotateCcw } from 'react-icons/lu';
+import { sendDocumentEmail, saveDocumentEmailDraft } from 'wasp/client/operations';
 import { Modal } from '../../client/ui';
 import { MagicInput, MagicTextarea } from '../../client/magic';
 import { buildDocumentPdfFilename, getDocumentPdfBase64 } from '../documents/pdf';
 import type { DocForPdf, CompanyForPdf, BrandAssets } from '../documents/pdf';
 import { PdfPreviewModal } from './PdfPreviewModal';
 
-type LastSent = {
+type SentActivity = {
   createdAt: string | Date;
   metadata?: any;
-} | null;
+};
+
+type DocType = 'quote' | 'invoice';
 
 type Props = {
   doc: DocForPdf & { id: string };
   company: CompanyForPdf;
   brand: BrandAssets;
-  lastSent?: LastSent;
+  /** All `document.email_sent` activities for this doc, newest first. */
+  activities?: SentActivity[];
   onClose: () => void;
 };
 
-export function SendDocumentEmailModal({ doc, company, brand, lastSent, onClose }: Props) {
-  const isInvoice = doc.type === 'invoice';
-  const docLabel = isInvoice ? 'la facture' : 'la soumission';
-  const docLabelCap = isInvoice ? 'Facture' : 'Soumission';
+const TYPE_META: Record<DocType, { label: string; cap: string }> = {
+  quote: { label: 'la soumission', cap: 'Soumission' },
+  invoice: { label: 'la facture', cap: 'Facture' },
+};
 
-  const defaults = useMemo(() => {
-    const companyName = (company as any)?.name || 'notre entreprise';
-    const signature = (company as any)?.brandEmailSignature?.trim() || '';
-    const contactLine = doc.client.contactName ? `Bonjour ${doc.client.contactName},` : 'Bonjour,';
-    const subject = `${docLabelCap} ${doc.number}${doc.title ? ' — ' + doc.title : ''}`;
-    const closing = signature
-      ? signature
-      : ['Cordialement,', companyName].join('\n');
-    const body = [
-      contactLine,
-      '',
-      `Vous trouverez en pièce jointe ${docLabel} ${doc.number}${doc.title ? ` (${doc.title})` : ''}.`,
-      '',
-      isInvoice
-        ? "N'h\u00e9sitez pas \u00e0 nous \u00e9crire pour toute question concernant le paiement."
-        : "N'h\u00e9sitez pas \u00e0 nous contacter pour toute question ou ajustement.",
-      '',
-      closing,
-    ].join('\n');
-    return { subject, body };
-  }, [doc, company, isInvoice, docLabel, docLabelCap]);
+function buildDefaults(args: {
+  type: DocType;
+  doc: DocForPdf;
+  company: CompanyForPdf;
+}) {
+  const { type, doc, company } = args;
+  const { label, cap } = TYPE_META[type];
+  const isInvoice = type === 'invoice';
+  const companyName = (company as any)?.name || 'notre entreprise';
+  const signature = (company as any)?.brandEmailSignature?.trim() || '';
+  const contactLine = doc.client.contactName ? `Bonjour ${doc.client.contactName},` : 'Bonjour,';
+  const subject = `${cap} ${doc.number}${doc.title ? ' — ' + doc.title : ''}`;
+  const closing = signature ? signature : ['Cordialement,', companyName].join('\n');
+  const body = [
+    contactLine,
+    '',
+    `Vous trouverez en pièce jointe ${label} ${doc.number}${doc.title ? ` (${doc.title})` : ''}.`,
+    '',
+    isInvoice
+      ? "N'h\u00e9sitez pas \u00e0 nous \u00e9crire pour toute question concernant le paiement."
+      : "N'h\u00e9sitez pas \u00e0 nous contacter pour toute question ou ajustement.",
+    '',
+    closing,
+  ].join('\n');
+  return { subject, body };
+}
 
-  const previous = lastSent?.metadata || null;
-  const [to, setTo] = useState<string>(previous?.to || doc.client.email || '');
-  const [cc, setCc] = useState<string>(previous?.cc ?? ((company as any)?.email || ''));
-  const [subject, setSubject] = useState<string>(previous?.subject || defaults.subject);
-  const [body, setBody] = useState<string>(previous?.body || defaults.body);
+export function SendDocumentEmailModal({ doc, company, brand, activities, onClose }: Props) {
+  const docAny = doc as any;
+  const initialType: DocType = doc.type === 'invoice' ? 'invoice' : 'quote';
+
+  const lastSentByType = useMemo(() => {
+    const map: Record<DocType, SentActivity | null> = { quote: null, invoice: null };
+    for (const a of activities || []) {
+      const t = (a.metadata?.type === 'invoice' ? 'invoice' : 'quote') as DocType;
+      if (!map[t]) map[t] = a;
+    }
+    return map;
+  }, [activities]);
+
+  const defaultsQuote = useMemo(
+    () => buildDefaults({ type: 'quote', doc, company }),
+    [doc, company],
+  );
+  const defaultsInvoice = useMemo(
+    () => buildDefaults({ type: 'invoice', doc, company }),
+    [doc, company],
+  );
+
+  const [activeType, setActiveType] = useState<DocType>(initialType);
+
+  const [subjectQuote, setSubjectQuote] = useState<string>(
+    docAny.emailSubjectQuote ||
+      lastSentByType.quote?.metadata?.subject ||
+      defaultsQuote.subject,
+  );
+  const [bodyQuote, setBodyQuote] = useState<string>(
+    docAny.emailBodyQuote || lastSentByType.quote?.metadata?.body || defaultsQuote.body,
+  );
+  const [subjectInvoice, setSubjectInvoice] = useState<string>(
+    docAny.emailSubjectInvoice ||
+      lastSentByType.invoice?.metadata?.subject ||
+      defaultsInvoice.subject,
+  );
+  const [bodyInvoice, setBodyInvoice] = useState<string>(
+    docAny.emailBodyInvoice ||
+      lastSentByType.invoice?.metadata?.body ||
+      defaultsInvoice.body,
+  );
+
+  const initialPrev =
+    lastSentByType[initialType] || lastSentByType.quote || lastSentByType.invoice;
+  const [to, setTo] = useState<string>(initialPrev?.metadata?.to || doc.client.email || '');
+  const [cc, setCc] = useState<string>(
+    initialPrev?.metadata?.cc ?? ((company as any)?.email || ''),
+  );
   const [sending, setSending] = useState(false);
+  const [savingDraft, setSavingDraft] = useState(false);
   const [previewing, setPreviewing] = useState(false);
+
+  const subject = activeType === 'invoice' ? subjectInvoice : subjectQuote;
+  const setSubject = activeType === 'invoice' ? setSubjectInvoice : setSubjectQuote;
+  const body = activeType === 'invoice' ? bodyInvoice : bodyQuote;
+  const setBody = activeType === 'invoice' ? setBodyInvoice : setBodyQuote;
+  const activeDefaults = activeType === 'invoice' ? defaultsInvoice : defaultsQuote;
+  const activeLastSent = lastSentByType[activeType];
+  const activeTypeLabel = TYPE_META[activeType].label;
+  const docType: DocType = initialType;
+  const isCurrentType = activeType === docType;
+
+  const saveDraft = async () => {
+    setSavingDraft(true);
+    try {
+      await saveDocumentEmailDraft({ id: doc.id, type: activeType, subject, body });
+      toast.success('Brouillon enregistré');
+    } catch (err: any) {
+      toast.error(err?.message || "Erreur lors de l'enregistrement");
+    } finally {
+      setSavingDraft(false);
+    }
+  };
+
+  const resetTemplate = async () => {
+    setSubject(activeDefaults.subject);
+    setBody(activeDefaults.body);
+    try {
+      await saveDocumentEmailDraft({
+        id: doc.id,
+        type: activeType,
+        subject: null,
+        body: null,
+      });
+      toast.success(`Modèle réinitialisé (${TYPE_META[activeType].cap})`);
+    } catch (err: any) {
+      toast.error(err?.message || 'Erreur lors de la réinitialisation');
+    }
+  };
 
   const submit = async () => {
     if (!to.trim()) {
@@ -66,9 +157,10 @@ export function SendDocumentEmailModal({ doc, company, brand, lastSent, onClose 
       const pdfBase64 = await getDocumentPdfBase64(doc, company, brand);
       await sendDocumentEmail({
         id: doc.id,
+        type: activeType,
         to: to.trim(),
         cc: cc.trim() || null,
-        subject: subject.trim() || defaults.subject,
+        subject: subject.trim() || activeDefaults.subject,
         message: body,
         pdfBase64,
         filename: buildDocumentPdfFilename(doc),
@@ -84,77 +176,145 @@ export function SendDocumentEmailModal({ doc, company, brand, lastSent, onClose 
 
   return (
     <>
-    <Modal
-      open
-      onClose={onClose}
-      title={`Envoyer ${docLabel} ${doc.number}`}
-      footer={
-        <>
-          <button
-            type='button'
-            className='btn-ghost flex items-center gap-1.5'
-            disabled={sending}
-            onClick={() => setPreviewing(true)}
-          >
-            <LuEye size={14} /> Aperçu du PDF
-          </button>
-          <div className='flex-1' />
-          <button className='btn-secondary' disabled={sending} onClick={onClose}>
-            Annuler
-          </button>
-          <button className='btn-primary' disabled={sending} onClick={submit}>
-            {sending ? 'Envoi…' : lastSent ? 'Renvoyer' : 'Envoyer'}
-          </button>
-        </>
-      }
-    >
-      <div className='space-y-4'>
-        {lastSent && (
-          <div className='text-xs bg-canvas-200 border border-line rounded-md px-3 py-2 text-muted'>
-            Déjà envoyé le {new Date(lastSent.createdAt).toLocaleString('fr-CA')}. Le contenu précédent est repris ci-dessous.
+      <Modal
+        open
+        onClose={onClose}
+        title={`Envoyer ${isCurrentType ? activeTypeLabel : TYPE_META[docType].label} ${doc.number}`}
+        footer={
+          <>
+            {isCurrentType && (
+              <>
+                <button
+                  type='button'
+                  className='btn-ghost p-2'
+                  disabled={sending}
+                  onClick={() => setPreviewing(true)}
+                  title='Aperçu du PDF'
+                  aria-label='Aperçu du PDF'
+                >
+                  <LuEye size={16} />
+                </button>
+                <button
+                  type='button'
+                  className='btn-ghost p-2'
+                  disabled={sending || savingDraft}
+                  onClick={saveDraft}
+                  title={savingDraft ? 'Enregistrement…' : 'Enregistrer brouillon'}
+                  aria-label='Enregistrer brouillon'
+                >
+                  <LuSave size={16} />
+                </button>
+                <button
+                  type='button'
+                  className='btn-ghost p-2'
+                  disabled={sending || savingDraft}
+                  onClick={resetTemplate}
+                  title={`Réinitialiser le modèle ${TYPE_META[activeType].cap}`}
+                  aria-label='Réinitialiser le modèle'
+                >
+                  <LuRotateCcw size={16} />
+                </button>
+              </>
+            )}
+            <div className='flex-1' />
+            <button className='btn-secondary' disabled={sending} onClick={onClose}>
+              Annuler
+            </button>
+            {isCurrentType && (
+              <button className='btn-primary' disabled={sending} onClick={submit}>
+                {sending ? 'Envoi…' : activeLastSent ? 'Renvoyer' : 'Envoyer'}
+              </button>
+            )}
+          </>
+        }
+      >
+        <div className='space-y-4'>
+          <div className='flex border-b border-line -mt-1'>
+            {(['quote', 'invoice'] as DocType[]).map((t) => {
+              const isActive = activeType === t;
+              const sent = !!lastSentByType[t];
+              return (
+                <button
+                  key={t}
+                  type='button'
+                  onClick={() => setActiveType(t)}
+                  className={
+                    'px-4 py-2 text-sm font-medium border-b-2 -mb-px flex items-center gap-2 ' +
+                    (isActive
+                      ? 'border-primary text-ink'
+                      : 'border-transparent text-muted hover:text-ink')
+                  }
+                >
+                  {TYPE_META[t].cap}
+                  {sent && (
+                    <span className='inline-block w-1.5 h-1.5 rounded-full bg-success' />
+                  )}
+                </button>
+              );
+            })}
           </div>
-        )}
-        <Field label='À (destinataire)'>
-          <input
-            type='email'
-            className='input'
-            value={to}
-            onChange={(e) => setTo(e.target.value)}
-            placeholder='client@exemple.com'
-          />
-        </Field>
-        <Field label='Cc' hint='Séparez plusieurs adresses par des virgules.'>
-          <input
-            type='text'
-            className='input'
-            value={cc}
-            onChange={(e) => setCc(e.target.value)}
-            placeholder='nous@entreprise.com'
-          />
-        </Field>
-        <Field label='Objet'>
-          <MagicInput
-            type='text'
-            className='input'
-            value={subject}
-            onChange={(e) => setSubject(e.target.value)}
-          />
-        </Field>
-        <Field label='Message'>
-          <MagicTextarea
-            className='input min-h-[180px] resize-y'
-            value={body}
-            onChange={(e) => setBody(e.target.value)}
-          />
-        </Field>
-        <p className='text-xs text-muted'>
-          Pièce jointe : <span className='font-mono'>{buildDocumentPdfFilename(doc)}</span>
-        </p>
-      </div>
-    </Modal>
-    {previewing && (
-      <PdfPreviewModal doc={doc} company={company} brand={brand} onClose={() => setPreviewing(false)} />
-    )}
+          {activeLastSent && (
+            <div className='text-xs bg-canvas-200 border border-line rounded-md px-3 py-2 text-muted'>
+              Déjà envoyé le {new Date(activeLastSent.createdAt).toLocaleString('fr-CA')}. Le contenu précédent est repris ci-dessous.
+            </div>
+          )}
+          {!isCurrentType && (
+            <div className='text-xs bg-amber-50 border border-amber-200 rounded-md px-3 py-2 text-amber-700'>
+              Ce document est une <strong>{TYPE_META[docType].label.toLowerCase()}</strong>. L'onglet {TYPE_META[activeType].label} est en lecture seule — l'envoi est désactivé pour ce type.
+            </div>
+          )}
+          <Field label='À (destinataire)'>
+            <input
+              type='email'
+              className='input'
+              value={to}
+              readOnly={!isCurrentType}
+              onChange={(e) => isCurrentType && setTo(e.target.value)}
+              placeholder='client@exemple.com'
+            />
+          </Field>
+          <Field label='Cc' hint={isCurrentType ? 'Séparez plusieurs adresses par des virgules.' : undefined}>
+            <input
+              type='text'
+              className='input'
+              value={cc}
+              readOnly={!isCurrentType}
+              onChange={(e) => isCurrentType && setCc(e.target.value)}
+              placeholder='nous@entreprise.com'
+            />
+          </Field>
+          <Field label='Objet'>
+            <MagicInput
+              type='text'
+              className='input'
+              value={subject}
+              readOnly={!isCurrentType}
+              onChange={(e) => isCurrentType && setSubject(e.target.value)}
+            />
+          </Field>
+          <Field label='Message'>
+            <MagicTextarea
+              className='input min-h-[180px] resize-y'
+              value={body}
+              readOnly={!isCurrentType}
+              onChange={(e) => isCurrentType && setBody(e.target.value)}
+            />
+          </Field>
+          {isCurrentType && (
+            <p className='text-xs text-muted'>
+              Pièce jointe : <span className='font-mono'>{buildDocumentPdfFilename(doc)}</span>
+            </p>
+          )}
+        </div>
+      </Modal>
+      {previewing && (
+        <PdfPreviewModal
+          doc={doc}
+          company={company}
+          brand={brand}
+          onClose={() => setPreviewing(false)}
+        />
+      )}
     </>
   );
 }

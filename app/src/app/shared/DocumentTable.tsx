@@ -77,15 +77,16 @@ export function DocumentTable({
               <th>Statut</th>
               <th className='text-right'>Total</th>
               {showBalance && <th className='text-right'>Solde</th>}
-              <th className='text-right'>Actions</th>
+              <th className='text-right whitespace-nowrap w-px'>Actions</th>
             </tr>
           </thead>
           <tbody>
             {docs.map((d: any) => {
               const balance = d.type === 'invoice' ? +(d.total - d.amountPaid).toFixed(2) : null;
               const docForPdf = clientForPdf ? { ...d, client: clientForPdf } : d;
-              const lastSent = (d as any).activities?.[0] || null;
-              const wasSent = !!lastSent;
+              const sentActivities = ((d as any).activities || []) as Array<{ createdAt: string | Date; metadata?: any }>;
+              const lastSentForType = sentActivities.find((a) => (a.metadata?.type === 'invoice' ? 'invoice' : 'quote') === d.type) || null;
+              const wasSent = !!lastSentForType;
 
               return (
                 <tr key={d.id}>
@@ -115,7 +116,7 @@ export function DocumentTable({
                       )}
                     </td>
                   )}
-                  <td className='text-right'>
+                  <td className='text-right whitespace-nowrap w-px'>
                     <div className='flex items-center justify-end gap-1'>
                       <IconBtn title='Modifier' onClick={() => setEditing(d)}>
                         <LuPencil size={14} />
@@ -139,8 +140,8 @@ export function DocumentTable({
                         <LuDownload size={14} />
                       </IconBtn>
                       <IconBtn
-                        title={wasSent ? `Renvoyer (envoyé le ${formatDate(lastSent.createdAt)})` : 'Envoyer par courriel'}
-                        onClick={() => setSending({ doc: docForPdf, lastSent })}
+                        title={wasSent ? `Renvoyer (envoyé le ${formatDate(lastSentForType.createdAt)})` : 'Envoyer par courriel'}
+                        onClick={() => setSending({ doc: docForPdf, activities: sentActivities })}
                       >
                         <LuMail size={14} className={wasSent ? 'text-success' : ''} />
                       </IconBtn>
@@ -224,7 +225,7 @@ export function DocumentTable({
       {sending && (
         <SendDocumentEmailModal
           doc={sending.doc}
-          lastSent={sending.lastSent}
+          activities={sending.activities}
           company={company || null}
           brand={brand || null}
           onClose={() => setSending(null)}
