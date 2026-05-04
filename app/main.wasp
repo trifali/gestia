@@ -269,6 +269,10 @@ action createPayment {
   fn: import { createPayment } from "@src/app/payments/operations",
   entities: [User, Payment, Document]
 }
+action updatePayment {
+  fn: import { updatePayment } from "@src/app/payments/operations",
+  entities: [User, Payment, Document]
+}
 action deletePayment {
   fn: import { deletePayment } from "@src/app/payments/operations",
   entities: [User, Payment, Document]

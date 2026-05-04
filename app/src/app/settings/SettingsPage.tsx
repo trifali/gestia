@@ -18,6 +18,7 @@ import {
   deletePriceCategory,
 } from 'wasp/client/operations';
 import { useAuth } from 'wasp/client/auth';
+import { PAYMENT_METHOD_OPTIONS } from '../payments/PaymentForm';
 import { LuPlus } from 'react-icons/lu';
 import { PageHeader, IconBtn, EditIcon, TrashIcon, useConfirm, Modal, EmptyState } from '../../client/ui';
 import { MagicInput, MagicTextarea } from '../../client/magic';
@@ -829,15 +830,6 @@ function CategoryCombobox({
 }
 
 // ─── Modalités ─────────────────────────────────────────────────────────────
-
-const PAYMENT_METHOD_OPTIONS: { value: string; label: string }[] = [
-  { value: 'interac', label: 'Interac' },
-  { value: 'virement', label: 'Virement bancaire' },
-  { value: 'stripe', label: 'Carte de crédit (Stripe)' },
-  { value: 'cheque', label: 'Chèque' },
-  { value: 'cash', label: 'Argent comptant' },
-  { value: 'financement', label: 'Financement' },
-];
 
 function ModalitesForm({ company, canEdit }: { company: any; canEdit: boolean }) {
   const [depositRequired, setDepositRequired] = useState<boolean>(company.modalityDepositRequired ?? false);

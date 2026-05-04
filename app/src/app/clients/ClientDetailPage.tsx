@@ -18,6 +18,9 @@ import type { ClientDetail } from './operations';
 import { DocumentForm } from '../shared/DocumentForm';
 import { DocumentTable } from '../shared/DocumentTable';
 import { MeetingForm } from '../meetings/MeetingForm';
+import { PaymentsSection } from '../payments/PaymentsSection';
+import type { PaymentRow } from '../payments/PaymentsSection';
+import type { InvoiceLite } from '../payments/PaymentForm';
 import { downloadDocumentPdf } from '../documents/pdf';
 
 // ─── Status maps ──────────────────────────────────────────────────────────────
@@ -237,54 +240,48 @@ function DocumentsTab({ client, projects }: { client: ClientDetail; projects: an
 
 // ─── Paiements ────────────────────────────────────────────────────────────────
 function PaiementsTab({ client }: { client: ClientDetail }) {
-  const payments = client.documents
+  const invoices: InvoiceLite[] = client.documents
     .filter((d) => d.type === 'invoice')
-    .flatMap((inv) => inv.payments.map((p) => ({ ...p, invoiceNumber: inv.number })))
-    .sort((a, b) => new Date(b.paidAt).getTime() - new Date(a.paidAt).getTime());
+    .map((d) => ({
+      id: d.id,
+      number: d.number,
+      total: d.total,
+      amountPaid: d.amountPaid,
+      status: d.status,
+      client: { name: client.name },
+    }));
 
-  const METHOD: Record<string, string> = {
-    virement: 'Virement',
-    cheque: 'Chèque',
-    comptant: 'Comptant',
-    carte: 'Carte',
-    autre: 'Autre',
-  };
+  const rows: PaymentRow[] = client.documents
+    .filter((d) => d.type === 'invoice')
+    .flatMap((inv) =>
+      inv.payments.map((p) => ({
+        id: p.id,
+        documentId: inv.id,
+        amount: p.amount,
+        method: p.method,
+        paidAt: p.paidAt,
+        reference: p.reference,
+        notes: p.notes,
+        document: {
+          id: inv.id,
+          number: inv.number,
+          total: inv.total,
+          subtotal: inv.subtotal,
+          taxGst: inv.taxGst,
+          taxQst: inv.taxQst,
+          client: { name: client.name },
+        },
+      }))
+    )
+    .sort((a, b) => new Date(b.paidAt as any).getTime() - new Date(a.paidAt as any).getTime());
 
   return (
-    <>
-      <div className='flex items-center justify-between mb-4'>
-        <p className='text-sm text-muted'>{payments.length} paiement(s)</p>
-      </div>
-
-      {payments.length === 0 ? (
-        <p className='text-muted text-sm'>Aucun paiement enregistré pour ce client.</p>
-      ) : (
-        <div className='table-wrap'>
-          <table>
-            <thead>
-              <tr>
-                <th>Facture</th>
-                <th>Date</th>
-                <th>Méthode</th>
-                <th>Référence</th>
-                <th className='text-right'>Montant</th>
-              </tr>
-            </thead>
-            <tbody>
-              {payments.map((p) => (
-                <tr key={p.id}>
-                  <td className='font-mono text-sm'>{p.invoiceNumber}</td>
-                  <td className='text-muted'>{formatDate(p.paidAt)}</td>
-                  <td className='text-muted'>{METHOD[p.method] || p.method}</td>
-                  <td className='text-muted'>{p.reference || '—'}</td>
-                  <td className='text-right font-medium'>{formatCurrency(p.amount)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-    </>
+    <PaymentsSection
+      payments={rows}
+      invoices={invoices}
+      scopeLabel={`${rows.length} paiement(s) pour ${client.name}`}
+      emptyMessage='Aucun paiement enregistré pour ce client.'
+    />
   );
 }
 
