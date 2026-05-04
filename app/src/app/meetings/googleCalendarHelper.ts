@@ -154,6 +154,15 @@ export async function deleteCalendarEvent(
   calendar: Awaited<ReturnType<typeof getCalendarClient>>,
   eventId: string,
 ): Promise<void> {
+  // First cancel the event so attendees receive a proper "Meeting cancelled"
+  // notification email. events.delete alone does not reliably notify attendees.
+  await calendar.events.patch({
+    calendarId: 'primary',
+    eventId,
+    sendUpdates: 'all',
+    requestBody: { status: 'cancelled' },
+  });
+  // Then remove the event from the calendar entirely.
   await calendar.events.delete({
     calendarId: 'primary',
     eventId,
