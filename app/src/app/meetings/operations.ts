@@ -6,6 +6,7 @@ import {
   createCalendarEvent,
   updateCalendarEvent,
   deleteCalendarEvent,
+  getBusySlots,
 } from './googleCalendarHelper';
 
 function ensureCompany(user: any): string {
@@ -27,6 +28,29 @@ async function loadUserWithCalendar(context: any) {
 }
 
 export type MeetingWithClient = Meeting & { client: Client | null };
+
+// ─── getCalendarBusySlots ─────────────────────────────────────────────────────
+export const getCalendarBusySlots = async (
+  { date }: { date: string },
+  context: any,
+): Promise<{ busy: Array<{ start: string; end: string }> }> => {
+  ensureCompany(context.user);
+  const userCal = await loadUserWithCalendar(context);
+  if (!userCal?.googleCalendarAccessToken) return { busy: [] };
+
+  try {
+    const calendar = await getCalendarClient(userCal, async (accessToken, expiry) => {
+      await context.entities.User.update({
+        where: { id: context.user.id },
+        data: { googleCalendarAccessToken: accessToken, googleCalendarTokenExpiry: expiry } as any,
+      });
+    });
+    const busy = await getBusySlots(calendar, date);
+    return { busy };
+  } catch {
+    return { busy: [] }; // Non-fatal: show all slots as available
+  }
+};
 
 export const getMeetings: GetMeetings<void, MeetingWithClient[]> = async (_args, context) => {
   const companyId = ensureCompany(context.user);

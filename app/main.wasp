@@ -288,6 +288,10 @@ query getMeetings {
   fn: import { getMeetings } from "@src/app/meetings/operations",
   entities: [User, Meeting, Client]
 }
+query getCalendarBusySlots {
+  fn: import { getCalendarBusySlots } from "@src/app/meetings/operations",
+  entities: [User]
+}
 action createMeeting {
   fn: import { createMeeting } from "@src/app/meetings/operations",
   entities: [User, Meeting]

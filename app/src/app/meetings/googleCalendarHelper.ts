@@ -29,6 +29,7 @@ export function getAuthUrl(): string {
     prompt: 'consent',
     scope: [
       'https://www.googleapis.com/auth/calendar.events',
+      'https://www.googleapis.com/auth/calendar.readonly',
       'https://www.googleapis.com/auth/userinfo.email',
     ],
   });
@@ -149,4 +150,69 @@ export async function deleteCalendarEvent(
     eventId,
     sendUpdates: 'all',
   });
+}
+
+/**
+ * Returns the busy time slots for the given date (YYYY-MM-DD) from the user's primary calendar.
+ *
+ * Two sources are combined:
+ * 1. freebusy API — timed events marked as Busy (gives exact start/end datetimes)
+ * 2. events.list  — all-day events (freebusy omits them or misses timezone edge cases)
+ *    All-day events cover the full day (00:00 – 23:59).
+ */
+export async function getBusySlots(
+  calendar: Awaited<ReturnType<typeof getCalendarClient>>,
+  date: string,
+): Promise<Array<{ start: string; end: string }>> {
+  // ── 1. Resolve the calendar's timezone ──────────────────────────────────
+  let tz = 'UTC';
+  try {
+    const cal = await calendar.calendars.get({ calendarId: 'primary' });
+    tz = cal.data.timeZone ?? 'UTC';
+  } catch { /* fallback to UTC */ }
+
+  // Midnight-to-midnight in the calendar's local timezone
+  const dayStart = new Date(`${date}T00:00:00`);
+  const dayEnd   = new Date(`${date}T23:59:59`);
+
+  // For freebusy we use a slightly padded UTC window to avoid off-by-one at DST boundaries
+  const base     = new Date(`${date}T00:00:00.000Z`);
+  const timeMin  = new Date(base.getTime() - 14 * 60 * 60_000).toISOString();
+  const timeMax  = new Date(base.getTime() + 38 * 60 * 60_000).toISOString();
+
+  // ── 2. Timed busy slots via freebusy API ─────────────────────────────────
+  const fbRes = await calendar.freebusy.query({
+    requestBody: { timeMin, timeMax, items: [{ id: 'primary' }] },
+  });
+  const timedBusy: Array<{ start: string; end: string }> =
+    (fbRes.data.calendars?.primary?.busy as Array<{ start: string; end: string }>) ?? [];
+
+  // ── 3. All-day events via events.list ────────────────────────────────────
+  // singleEvents: true expands recurring all-day events; timeMin/timeMax in ISO
+  const evRes = await calendar.events.list({
+    calendarId: 'primary',
+    timeMin: `${date}T00:00:00Z`,
+    timeMax: `${date}T23:59:59Z`,
+    singleEvents: true,
+    orderBy: 'startTime',
+  });
+
+  const allDayBusy: Array<{ start: string; end: string }> = [];
+  for (const ev of evRes.data.items ?? []) {
+    // All-day events have ev.start.date but no ev.start.dateTime.
+    // Google returns the event if it overlaps the UTC query window, so we must
+    // explicitly verify the event actually covers the selected date using the
+    // date fields (not the UTC window) to avoid false positives in non-UTC timezones.
+    const startDate = ev.start?.date;   // "YYYY-MM-DD"
+    const endDate   = ev.end?.date;     // exclusive end, e.g. next day for single-day events
+    if (startDate && !ev.start?.dateTime && startDate <= date && (!endDate || endDate > date)) {
+      allDayBusy.push({
+        start: `${date}T00:00:00.000Z`,
+        end:   `${date}T23:59:59.000Z`,
+      });
+      break; // one all-day event is enough to block the whole day
+    }
+  }
+
+  return [...timedBusy, ...allDayBusy];
 }

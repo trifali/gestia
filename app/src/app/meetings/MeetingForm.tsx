@@ -4,6 +4,7 @@ import { createMeeting, updateMeeting } from 'wasp/client/operations';
 import { Modal } from '../../client/ui';
 import { MagicInput, MagicTextarea } from '../../client/magic';
 import { formatDateTimeForInput } from '../../shared/format';
+import { DayTimePicker } from './DayTimePicker';
 
 type Props = {
   /** When provided, edits this meeting; otherwise creates a new one. */
@@ -138,12 +139,15 @@ export function MeetingForm({ meeting, clientId: presetClientId, clientName, cli
         durationMinutes: Number(form.durationMinutes) || 60,
         attendeeEmails: JSON.stringify(emails),
       };
+      const inviteMsg = emails.length > 0
+        ? ` — ${emails.length} invité${emails.length > 1 ? 's' : ''} notifié${emails.length > 1 ? 's' : ''} par courriel`
+        : '';
       if (meeting) {
         await updateMeeting({ id: meeting.id, ...payload });
-        toast.success('Rencontre modifiée');
+        toast.success(`Rencontre modifiée${inviteMsg}`);
       } else {
         await createMeeting(payload);
-        toast.success('Rencontre créée — lien Google Meet généré');
+        toast.success(`Rencontre créée — lien Google Meet généré${inviteMsg}`);
       }
       onClose();
     } catch (err: any) {
@@ -162,7 +166,7 @@ export function MeetingForm({ meeting, clientId: presetClientId, clientName, cli
         <>
           <button className='btn-secondary' onClick={onClose}>Annuler</button>
           <button form='meeting-form' type='submit' className='btn-primary' disabled={saving}>
-            {saving ? 'Enregistrement…' : (meeting ? 'Enregistrer' : 'Créer & générer le lien Meet')}
+            {saving ? 'Envoi en cours…' : (meeting ? 'Sauvegarder & envoyer' : 'Créer & envoyer les invitations')}
           </button>
         </>
       }
@@ -207,29 +211,14 @@ export function MeetingForm({ meeting, clientId: presetClientId, clientName, cli
           </div>
         )}
 
-        {/* Date */}
-        <div>
-          <label className='label'>Date et heure *</label>
-          <input
-            type='datetime-local'
-            className='input'
-            required
+        {/* Date & time */}
+        <div className='col-span-2'>
+          <label className='label mb-1.5 block'>Date et heure *</label>
+          <DayTimePicker
             value={form.startsAt}
-            onChange={(e) => setForm({ ...form, startsAt: e.target.value })}
-          />
-        </div>
-
-        {/* Duration */}
-        <div>
-          <label className='label'>Durée (minutes) *</label>
-          <input
-            type='number'
-            className='input'
-            required
-            min={5}
-            step={5}
-            value={form.durationMinutes}
-            onChange={(e) => setForm({ ...form, durationMinutes: e.target.value })}
+            onChange={(v) => setForm({ ...form, startsAt: v })}
+            duration={Number(form.durationMinutes) || 60}
+            onDurationChange={(d) => setForm({ ...form, durationMinutes: String(d) })}
           />
         </div>
 

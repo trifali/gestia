@@ -123,7 +123,9 @@ export default function MeetingsPage() {
                     if (await ask('Supprimer cette rencontre ?')) {
                       try {
                         await deleteMeeting({ id: m.id });
-                        toast.success('Rencontre supprimée');
+                        const attendees: string[] = (() => { try { return JSON.parse(m.attendeeEmails || '[]'); } catch { return []; } })();
+                        const msg = attendees.length > 0 ? ` — ${attendees.length} invité${attendees.length > 1 ? 's' : ''} notifié${attendees.length > 1 ? 's' : ''}` : '';
+                        toast.success(`Rencontre supprimée${msg}`);
                       } catch (err: any) {
                         toast.error(err?.message || 'Erreur lors de la suppression');
                       }
