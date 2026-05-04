@@ -178,7 +178,7 @@ export default function MeetingsPage() {
                   <MeetingCard key={m.id} m={m}
                     onEdit={() => setEditing(m)}
                     onDelete={async () => {
-                      if (await ask('Supprimer cette rencontre ?')) {
+                      if (await ask('Supprimer cette rencontre ?', { description: 'Les invités recevront automatiquement un email d\'annulation.' })) {
                         try {
                           await deleteMeeting({ id: m.id });
                           const att = parseEmails(m.attendeeEmails);
@@ -204,7 +204,7 @@ export default function MeetingsPage() {
                         <MeetingCard key={m.id} m={m} past
                           onEdit={() => setEditing(m)}
                           onDelete={async () => {
-                            if (await ask('Supprimer cette rencontre ?')) {
+                            if (await ask('Supprimer cette rencontre ?', { description: 'Les invités recevront automatiquement un email d\'annulation.' })) {
                               try { await deleteMeeting({ id: m.id }); toast.success('Rencontre supprimée'); }
                               catch (err: any) { toast.error(err?.message || 'Erreur'); }
                             }

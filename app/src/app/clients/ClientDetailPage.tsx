@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useParams, useNavigate, Link } from 'react-router';
-import { LuArrowLeft, LuPencil } from 'react-icons/lu';
+import { LuArrowLeft, LuPencil, LuArchive } from 'react-icons/lu';
 import toast from 'react-hot-toast';
 import {
   useQuery,
@@ -306,7 +306,7 @@ function RencontresTab({ client }: { client: ClientDetail }) {
                       <div className='flex items-center justify-end gap-1'>
                         <IconBtn title='Modifier' onClick={() => setEditing(m)}><LuPencil size={14} /></IconBtn>
                         <IconBtn variant='danger' title='Supprimer' onClick={async () => {
-                          if (await ask(`Supprimer la rencontre « ${m.title} » ?`)) {
+                          if (await ask(`Supprimer la rencontre « ${m.title} » ?`, { description: 'Les invités recevront automatiquement un email d\'annulation.' })) {
                             try {
                               await deleteMeeting({ id: m.id });
                               const att: string[] = (() => { try { return JSON.parse((m as any).attendeeEmails || '[]'); } catch { return []; } })();
@@ -377,13 +377,13 @@ function RencontresTab({ client }: { client: ClientDetail }) {
                                 try { await archiveMeeting({ id: m.id }); toast.success('Rencontre archivée'); }
                                 catch (err: any) { toast.error(err?.message || 'Erreur'); }
                               }}
-                              className='px-2 py-1 text-xs rounded border border-canvas-300 text-muted hover:bg-canvas-100 transition-colors'
+                              className='inline-flex items-center gap-1 px-2 py-1 text-xs rounded border border-canvas-300 text-muted hover:bg-canvas-100 transition-colors'
                             >
-                              📦 Archiver
+                              <LuArchive size={12} /> Archiver
                             </button>
                             <IconBtn title='Modifier' onClick={() => setEditing(m)}><LuPencil size={14} /></IconBtn>
                             <IconBtn variant='danger' title='Supprimer' onClick={async () => {
-                              if (await ask(`Supprimer la rencontre « ${m.title} » ?`)) {
+                              if (await ask(`Supprimer la rencontre « ${m.title} » ?`, { description: 'Les invités recevront automatiquement un email d\'annulation.' })) {
                                 try {
                                   await deleteMeeting({ id: m.id });
                                   toast.success('Rencontre supprimée');

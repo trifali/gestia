@@ -42,6 +42,7 @@ export const TrashIcon = () => <LuTrash2 size={16} />;
 type ConfirmVariant = 'danger' | 'primary';
 type ConfirmState = {
   message: string;
+  description?: string;
   confirmLabel?: string;
   variant?: ConfirmVariant;
   resolve: (v: boolean) => void;
@@ -60,7 +61,10 @@ function ConfirmDialog({ state, onAnswer }: { state: ConfirmState; onAnswer: (v:
           <div className={`shrink-0 w-10 h-10 rounded-full flex items-center justify-center ${isDanger ? 'bg-red-50 text-danger' : 'bg-blue-50 text-blue-600'}`}>
             <LuTriangleAlert size={20} />
           </div>
-          <p className='text-ink text-sm leading-relaxed pt-1'>{state.message}</p>
+          <div className='pt-1'>
+            <p className='text-ink text-sm leading-relaxed'>{state.message}</p>
+            {state.description && <p className='text-muted text-xs mt-1.5 leading-relaxed'>{state.description}</p>}
+          </div>
         </div>
         <div className='flex justify-end gap-2'>
           <button className='btn-secondary' onClick={() => onAnswer(false)}>Annuler</button>
@@ -79,7 +83,7 @@ export function useConfirm() {
 
   const ask = (
     message: string,
-    opts?: string | { confirmLabel?: string; variant?: ConfirmVariant },
+    opts?: string | { confirmLabel?: string; variant?: ConfirmVariant; description?: string },
   ): Promise<boolean> =>
     new Promise((resolve) => {
       const normalized = typeof opts === 'string' ? { confirmLabel: opts } : opts || {};
