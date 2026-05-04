@@ -115,7 +115,9 @@ function MiniCalendar({
                 'text-[11px] py-1 rounded transition-colors mx-px',
                 isSel    ? 'bg-accent text-white font-semibold' : '',
                 isToday && !isSel ? 'font-bold text-accent' : '',
-                past     ? 'text-muted/25 cursor-not-allowed' : (!isSel ? 'hover:bg-canvas-100' : ''),
+                past && !isSel ? 'text-muted/25 cursor-not-allowed' : '',
+                past &&  isSel ? 'opacity-60 cursor-not-allowed' : '',
+                !past && !isSel ? 'hover:bg-canvas-100' : '',
               ].filter(Boolean).join(' ')}
             >
               {day}
@@ -156,8 +158,18 @@ export function DayTimePicker({ value, onChange, duration, onDurationChange }: P
   );
   const busy: BusySlot[] = (busyData as any)?.busy ?? [];
 
+  // Track whether this is the very first busy-data load so we don't
+  // accidentally clear a pre-selected time when editing an existing meeting
+  // (the meeting's own slot shows up as "busy" in the calendar).
+  const firstLoadRef = useRef(true);
+
   // Clear the selected time if busy data has loaded and the current slot is unavailable
   useEffect(() => {
+    if (firstLoadRef.current) {
+      // Skip the check on first load — preserve whatever was pre-selected.
+      if (!busyLoading) firstLoadRef.current = false;
+      return;
+    }
     if (!busyLoading && selectedTime && !slotStartable(selectedTime, selectedDate, busy, duration)) {
       onChange(selectedDate); // date only, no time
     }

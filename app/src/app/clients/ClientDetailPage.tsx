@@ -13,7 +13,7 @@ import {
 } from 'wasp/client/operations';
 import { Modal, useConfirm, IconBtn, TrashIcon } from '../../client/ui';
 import { MagicInput, MagicTextarea } from '../../client/magic';
-import { formatCurrency, formatDate } from '../../shared/format';
+import { formatCurrency, formatDate, formatDateTime } from '../../shared/format';
 import type { Client } from 'wasp/entities';
 import type { ClientDetail } from './operations';
 import { DocumentForm } from '../shared/DocumentForm';
@@ -268,7 +268,7 @@ function RencontresTab({ client }: { client: ClientDetail }) {
                 return (
                   <tr key={m.id}>
                     <td className='font-medium'>{m.title}</td>
-                    <td className='text-muted'>{formatDate(m.startsAt)}</td>
+                    <td className='text-muted'>{formatDateTime(m.startsAt)}</td>
                     <td className='text-muted text-sm'>
                       {attendees.length > 0
                         ? <span title={attendees.join(', ')}>{attendees.length} invité{attendees.length > 1 ? 's' : ''}</span>

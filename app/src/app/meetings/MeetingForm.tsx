@@ -3,7 +3,7 @@ import toast from 'react-hot-toast';
 import { createMeeting, updateMeeting } from 'wasp/client/operations';
 import { Modal } from '../../client/ui';
 import { MagicInput, MagicTextarea } from '../../client/magic';
-import { formatDateTimeForInput } from '../../shared/format';
+import { formatDateTimeForInput, formatDate, formatTime } from '../../shared/format';
 import { DayTimePicker } from './DayTimePicker';
 
 type Props = {
@@ -220,6 +220,20 @@ export function MeetingForm({ meeting, clientId: presetClientId, clientName, cli
             duration={Number(form.durationMinutes) || 60}
             onDurationChange={(d) => setForm({ ...form, durationMinutes: String(d) })}
           />
+          {/* Summary of selected date + time */}
+          <div className='mt-2 flex items-center gap-2 text-sm'>
+            <span className='text-muted'>📅</span>
+            {form.startsAt.includes('T') ? (
+              <span className='font-medium'>
+                {formatDate(form.startsAt)}
+                <span className='text-muted'> à </span>
+                {formatTime(form.startsAt)}
+                <span className='text-muted ml-1.5'>({Number(form.durationMinutes) || 60} min)</span>
+              </span>
+            ) : (
+              <span className='text-muted italic'>Sélectionnez une heure</span>
+            )}
+          </div>
         </div>
 
         {/* Invited emails */}
