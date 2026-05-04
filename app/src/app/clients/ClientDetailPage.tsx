@@ -19,8 +19,6 @@ import { DocumentForm } from '../shared/DocumentForm';
 import { DocumentTable } from '../shared/DocumentTable';
 import { MeetingForm } from '../meetings/MeetingForm';
 import { PaymentsSection } from '../payments/PaymentsSection';
-import type { PaymentRow } from '../payments/PaymentsSection';
-import type { InvoiceLite } from '../payments/PaymentForm';
 import { downloadDocumentPdf } from '../documents/pdf';
 
 // ─── Status maps ──────────────────────────────────────────────────────────────
@@ -174,57 +172,25 @@ function InfoRow({ label, value }: { label: string; value: string }) {
 // ─── Documents (soumissions + factures) ──────────────────────────────────────
 function DocumentsTab({ client, projects }: { client: ClientDetail; projects: any[] }) {
   const [creating, setCreating] = useState(false);
-  const [filter, setFilter] = useState<'all' | 'quote' | 'invoice'>('all');
-  const docs = filter === 'all'
-    ? client.documents
-    : client.documents.filter((d) => d.type === filter);
 
   return (
     <>
       <div className='flex items-center justify-between mb-4 gap-3 flex-wrap'>
-        <div className='flex items-center gap-2'>
-          <p className='text-sm text-muted'>{client.documents.length} soumission(s) / facture(s)</p>
-          <div className='inline-flex rounded-lg border border-line p-0.5 bg-canvas ml-2'>
-            {([
-              { v: 'all', l: 'Tous' },
-              { v: 'quote', l: 'Soumissions' },
-              { v: 'invoice', l: 'Factures' },
-            ] as const).map((opt) => (
-              <button
-                key={opt.v}
-                onClick={() => setFilter(opt.v)}
-                className={`px-3 py-1 text-xs rounded-md transition-colors ${
-                  filter === opt.v ? 'bg-white text-ink shadow-sm' : 'text-muted hover:text-ink'
-                }`}
-              >
-                {opt.l}
-              </button>
-            ))}
-          </div>
-        </div>
-        <button className='btn-primary' onClick={() => setCreating(true)}>
+        <p className='text-xs text-muted'>
+          Astuce : cliquez sur le statut pour le changer. À l'envoi du courriel, le document passe à « Envoyée ».
+          Après la date d'échéance, les soumissions deviennent « Expirée » et les factures impayées passent « En retard ». Sur une facture, utilisez l'icône
+          portefeuille pour enregistrer un acompte ou le solde — le statut suit automatiquement.
+        </p>
+        <button className='btn-primary shrink-0' onClick={() => setCreating(true)}>
           Nouvelle soumission / facture
         </button>
       </div>
 
-      <p className='text-xs text-muted mb-3'>
-        Astuce : cliquez sur le statut pour le changer. À l'envoi du courriel, le document passe à « Envoyée ».
-        Après la date d'échéance, les soumissions deviennent « Expirée » et les factures impayées passent « En retard ». Sur une facture, utilisez l'icône
-        portefeuille pour enregistrer un acompte ou le solde — le statut suit automatiquement.
-      </p>
-
-      {docs.length === 0 ? (
-        <p className='text-muted text-sm'>
-          {filter === 'invoice' ? 'Aucune facture.' : filter === 'quote' ? 'Aucune soumission.' : 'Aucune soumission ni facture.'}
-        </p>
-      ) : (
-        <DocumentTable
-          docs={docs}
-          clientId={client.id}
-          clientForPdf={client}
-          projects={projects}
-        />
-      )}
+      <DocumentTable
+        clientId={client.id}
+        clientForPdf={client}
+        projects={projects}
+      />
 
       {creating && (
         <DocumentForm
@@ -240,48 +206,9 @@ function DocumentsTab({ client, projects }: { client: ClientDetail; projects: an
 
 // ─── Paiements ────────────────────────────────────────────────────────────────
 function PaiementsTab({ client }: { client: ClientDetail }) {
-  const invoices: InvoiceLite[] = client.documents
-    .filter((d) => d.type === 'invoice')
-    .map((d) => ({
-      id: d.id,
-      number: d.number,
-      total: d.total,
-      amountPaid: d.amountPaid,
-      status: d.status,
-      client: { name: client.name },
-    }));
-
-  const rows: PaymentRow[] = client.documents
-    .filter((d) => d.payments.length > 0)
-    .flatMap((inv) =>
-      inv.payments.map((p) => ({
-        id: p.id,
-        documentId: inv.id,
-        amount: p.amount,
-        method: p.method,
-        paidAt: p.paidAt,
-        reference: p.reference,
-        notes: p.notes,
-        document: {
-          id: inv.id,
-          number: inv.number,
-          type: inv.type,
-          total: inv.total,
-          amountPaid: inv.amountPaid,
-          subtotal: inv.subtotal,
-          taxGst: inv.taxGst,
-          taxQst: inv.taxQst,
-          client: { name: client.name },
-        },
-      }))
-    )
-    .sort((a, b) => new Date(b.paidAt as any).getTime() - new Date(a.paidAt as any).getTime());
-
   return (
     <PaymentsSection
-      payments={rows}
-      invoices={invoices}
-      scopeLabel={`${rows.length} paiement(s) pour ${client.name}`}
+      clientId={client.id}
       emptyMessage='Aucun paiement enregistré pour ce client.'
     />
   );

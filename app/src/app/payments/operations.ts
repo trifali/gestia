@@ -10,13 +10,78 @@ function ensureCompany(user: any): string {
 
 export type PaymentWithDocument = Payment & { document: Document & { client: Client } };
 
-export const getPayments: GetPayments<void, PaymentWithDocument[]> = async (_args, context) => {
+export type GetPaymentsArgs = {
+  search?: string;
+  method?: string;
+  sortKey?: 'date' | 'amount';
+  sortDir?: 'asc' | 'desc';
+  page?: number;
+  pageSize?: number;
+  clientId?: string;
+};
+export type GetPaymentsResult = {
+  data: PaymentWithDocument[];
+  total: number;
+  totals: { amount: number; sub: number; gst: number; qst: number };
+};
+
+export const getPayments: GetPayments<GetPaymentsArgs, GetPaymentsResult> = async (args, context) => {
   const companyId = ensureCompany(context.user);
-  return context.entities.Payment.findMany({
-    where: { companyId },
-    include: { document: { include: { client: true } } },
-    orderBy: { paidAt: 'desc' },
-  });
+  const {
+    search, method, sortKey = 'date', sortDir = 'desc',
+    page = 1, pageSize = 25, clientId,
+  } = args || {};
+
+  const and: any[] = [{ companyId }];
+  if (clientId) and.push({ document: { clientId } });
+  if (method) and.push({ method });
+  if (search) {
+    and.push({
+      OR: [
+        { document: { number: { contains: search, mode: 'insensitive' } } },
+        { document: { client: { name: { contains: search, mode: 'insensitive' } } } },
+        { reference: { contains: search, mode: 'insensitive' } },
+      ],
+    });
+  }
+  const where = and.length === 1 ? and[0] : { AND: and };
+  const orderBy = sortKey === 'amount'
+    ? { amount: sortDir as 'asc' | 'desc' }
+    : { paidAt: sortDir as 'asc' | 'desc' };
+
+  const [data, total, allForTotals] = await Promise.all([
+    context.entities.Payment.findMany({
+      where,
+      include: { document: { include: { client: true } } },
+      orderBy,
+      skip: (page - 1) * pageSize,
+      take: pageSize,
+    }),
+    context.entities.Payment.count({ where }),
+    context.entities.Payment.findMany({
+      where,
+      select: {
+        amount: true,
+        document: { select: { total: true, subtotal: true, taxGst: true, taxQst: true } },
+      },
+    }),
+  ]);
+
+  const totals = allForTotals.reduce(
+    (acc, p) => {
+      const doc = p.document as any;
+      const ratio = doc.total ? p.amount / doc.total : 0;
+      return {
+        amount: acc.amount + p.amount,
+        sub: acc.sub + doc.subtotal * ratio,
+        gst: acc.gst + doc.taxGst * ratio,
+        qst: acc.qst + doc.taxQst * ratio,
+      };
+    },
+    { amount: 0, sub: 0, gst: 0, qst: 0 },
+  );
+
+  return { data, total, totals };
 };
 
 type CreatePaymentArgs = {

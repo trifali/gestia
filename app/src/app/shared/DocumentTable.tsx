@@ -1,10 +1,11 @@
-import { useState } from 'react';
-import { LuFileCheck, LuUndo2, LuPencil, LuCopy, LuLoader, LuMail, LuEye, LuWallet } from 'react-icons/lu';
+import { useEffect, useMemo, useState } from 'react';
+import { LuFileCheck, LuUndo2, LuPencil, LuCopy, LuLoader, LuMail, LuEye, LuWallet, LuArrowUpDown, LuArrowUp, LuArrowDown, LuChevronLeft, LuChevronRight } from 'react-icons/lu';
 import toast from 'react-hot-toast';
 import {
   useQuery,
   getCurrentCompany,
   getCompanyBrandAssets,
+  getDocuments,
   setDocumentType,
   deleteDocument,
   duplicateDocument,
@@ -67,14 +68,18 @@ export function statusClassName(type: string, status: string) {
 // Backwards-compatible alias for any caller still importing the old name.
 export const DOCUMENT_STATUS = QUOTE_STATUS;
 
+const DOC_PAGE_SIZE = 25;
+type DocSortKey = 'date' | 'number';
+
 type Props = {
-  docs: any[];
   /** Show the "Client" column (DocumentsPage). Hidden on client detail page. */
   showClient?: boolean;
   /** @deprecated no longer used — Total and Solde columns were removed. */
   showBalance?: boolean;
-  /** When editing, lock the doc to this clientId (ClientDetailPage). */
+  /** Scope to a specific client. */
   clientId?: string;
+  /** Initial type filter (from URL param). */
+  initialType?: 'quote' | 'invoice' | '';
   /** When the doc objects don't embed a `client` field, supply it here for PDF generation. */
   clientForPdf?: any;
   /** Available clients for the edit form. */
@@ -84,9 +89,9 @@ type Props = {
 };
 
 export function DocumentTable({
-  docs,
   showClient = false,
   clientId,
+  initialType = '',
   clientForPdf,
   clients,
   projects,
@@ -97,20 +102,117 @@ export function DocumentTable({
   const [duplicating, setDuplicating] = useState<string | null>(null);
   const [sending, setSending] = useState<any | null>(null);
   const [previewing, setPreviewing] = useState<any | null>(null);
+
+  // Filter / sort / page state
+  const [search, setSearch] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
+  const [filterType, setFilterType] = useState(initialType);
+  const [filterStatus, setFilterStatus] = useState('');
+  const [sortKey, setSortKey] = useState<DocSortKey>('date');
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
+  const [page, setPage] = useState(1);
+
+  useEffect(() => {
+    const t = setTimeout(() => { setDebouncedSearch(search); setPage(1); }, 350);
+    return () => clearTimeout(t);
+  }, [search]);
+  useEffect(() => { setPage(1); }, [filterType, filterStatus, sortKey, sortDir]);
+  // Reset status filter when type changes (avoid invalid combo)
+  useEffect(() => { setFilterStatus(''); }, [filterType]);
+
+  const docQueryArgs = useMemo(() => ({
+    search: debouncedSearch || undefined,
+    type: filterType || undefined,
+    status: filterStatus || undefined,
+    sortKey, sortDir,
+    page, pageSize: DOC_PAGE_SIZE,
+    clientId,
+  }), [debouncedSearch, filterType, filterStatus, sortKey, sortDir, page, clientId]);
+
+  const { data: docResult, isLoading: docsLoading }: { data: any; isLoading: boolean } = useQuery(getDocuments, docQueryArgs) as any;
+  const docs = docResult?.data ?? [];
+  const totalDocCount = docResult?.total ?? 0;
+  const totalDocPages = Math.max(1, Math.ceil(totalDocCount / DOC_PAGE_SIZE));
+
+  // Status options depend on selected type filter
+  const statusOptions = useMemo(() => {
+    if (filterType === 'invoice') return Object.entries(INVOICE_STATUS);
+    if (filterType === 'quote') return Object.entries(QUOTE_STATUS);
+    const combined = { ...QUOTE_STATUS, ...INVOICE_STATUS };
+    return Object.entries(combined);
+  }, [filterType]);
+
+  function toggleDocSort(key: DocSortKey) {
+    if (sortKey === key) setSortDir((d) => (d === 'desc' ? 'asc' : 'desc'));
+    else { setSortKey(key); setSortDir('desc'); }
+  }
+  function SortIcon({ k }: { k: DocSortKey }) {
+    if (sortKey !== k) return <LuArrowUpDown size={12} className='ml-0.5 text-muted/60 inline' />;
+    return sortDir === 'desc'
+      ? <LuArrowDown size={12} className='ml-0.5 inline' />
+      : <LuArrowUp size={12} className='ml-0.5 inline' />;
+  }
   const [recordingPayment, setRecordingPayment] = useState<{ doc: any; preset?: 'deposit' | 'final' } | null>(null);
   const { ask, Dialog: ConfirmDialog } = useConfirm();
 
   return (
     <>
+      {/* Toolbar */}
+      <div className='flex flex-wrap items-center gap-2 mb-4'>
+        <input
+          type='text'
+          className='input h-9 text-sm !w-64 shrink-0'
+          placeholder='Rechercher…'
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+        />
+        {/* Type — pill tabs */}
+        <div className='inline-flex rounded-lg border border-line p-0.5 bg-canvas shrink-0'>
+          {(['', 'quote', 'invoice'] as const).map((t) => (
+            <button
+              key={t}
+              onClick={() => setFilterType(t)}
+              className={`px-3 py-1 text-xs rounded-md transition-colors ${
+                filterType === t ? 'bg-white text-ink shadow-sm font-medium' : 'text-muted hover:text-ink'
+              }`}
+            >
+              {t === '' ? 'Tous' : t === 'quote' ? 'Soumissions' : 'Factures'}
+            </button>
+          ))}
+        </div>
+        {/* Status */}
+        <select
+          className='input h-9 text-sm !w-auto shrink-0'
+          value={filterStatus}
+          onChange={(e) => setFilterStatus(e.target.value)}
+        >
+          <option value=''>Tous les statuts</option>
+          {statusOptions.map(([k, v]) => (
+            <option key={k} value={k}>{v.label}</option>
+          ))}
+        </select>
+      </div>
+
+      {docsLoading ? (
+        <p className='text-muted text-sm py-4'>Chargement…</p>
+      ) : docs.length === 0 ? (
+        <p className='text-muted text-sm py-4'>
+          {search || filterType || filterStatus ? 'Aucun résultat pour ces filtres.' : 'Aucun document.'}
+        </p>
+      ) : (
       <div className='table-wrap'>
         <table>
           <thead>
             <tr>
               <th>Type</th>
-              <th>Numéro</th>
+              <th className='cursor-pointer select-none whitespace-nowrap' onClick={() => toggleDocSort('number')}>
+                Numéro <SortIcon k='number' />
+              </th>
               <th>Titre</th>
               {showClient && <th>Client</th>}
-              <th>Émis</th>
+              <th className='cursor-pointer select-none whitespace-nowrap' onClick={() => toggleDocSort('date')}>
+                Émis <SortIcon k='date' />
+              </th>
               <th>Statut</th>
               <th className='text-right whitespace-nowrap w-px'>Actions</th>
             </tr>
@@ -235,6 +337,27 @@ export function DocumentTable({
           </tbody>
         </table>
       </div>
+      )}
+
+      {totalDocPages > 1 && (
+        <div className='flex items-center justify-center gap-3 mt-4 text-sm text-muted'>
+          <button
+            className='btn-secondary h-7 w-7 p-0 flex items-center justify-center disabled:opacity-40'
+            disabled={page <= 1}
+            onClick={() => setPage((p) => p - 1)}
+          >
+            <LuChevronLeft size={15} />
+          </button>
+          <span>Page {page} / {totalDocPages} <span className='text-muted/60'>({totalDocCount})</span></span>
+          <button
+            className='btn-secondary h-7 w-7 p-0 flex items-center justify-center disabled:opacity-40'
+            disabled={page >= totalDocPages}
+            onClick={() => setPage((p) => p + 1)}
+          >
+            <LuChevronRight size={15} />
+          </button>
+        </div>
+      )}
 
       {editing && (
         <DocumentForm

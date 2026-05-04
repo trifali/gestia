@@ -57,29 +57,72 @@ function normalizeStatus(type: string, status: string): string {
   return status;
 }
 
-export const getDocuments: GetDocuments<void, DocumentWithDetails[]> = async (_args, context) => {
-  const companyId = ensureCompany(context.user);
-  const docs = await context.entities.Document.findMany({
-    where: { companyId },
-    include: {
-      client: true,
-      project: true,
-      items: true,
-      payments: true,
-      activities: {
-        where: { type: 'document.email_sent' },
-        orderBy: { createdAt: 'desc' },
-        take: 10,
-      },
-    },
-    orderBy: { createdAt: 'desc' },
-  });
+export type GetDocumentsArgs = {
+  search?: string;
+  type?: string;
+  status?: string;
+  sortKey?: 'date' | 'number';
+  sortDir?: 'asc' | 'desc';
+  page?: number;
+  pageSize?: number;
+  clientId?: string;
+};
+export type GetDocumentsResult = { data: DocumentWithDetails[]; total: number };
 
-  // Lazy lifecycle transitions:
-  //   - quote 'envoyee' past dueDate           → 'expiree'
-  //   - invoice 'envoyee'/'acompte_recu' past dueDate → 'en_retard'
-  // Both document types now use the single "date d'échéance" field as the
-  // expiry trigger. Also normalize any legacy status values still in the DB.
+export const getDocuments: GetDocuments<GetDocumentsArgs, GetDocumentsResult> = async (args, context) => {
+  const companyId = ensureCompany(context.user);
+  const {
+    search, type, status, sortKey = 'date', sortDir = 'desc',
+    page = 1, pageSize = 25, clientId,
+  } = args || {};
+
+  const and: any[] = [{ companyId }];
+  if (clientId) and.push({ clientId });
+  if (type) and.push({ type });
+  if (status) {
+    const legacyMap: Record<string, string[]> = {
+      envoyee: ['envoyee', 'actif'],
+      expiree: ['expiree', 'expire'],
+      en_retard: ['en_retard', 'expire'],
+    };
+    and.push({ status: { in: legacyMap[status] ?? [status] } });
+  }
+  if (search) {
+    and.push({
+      OR: [
+        { number: { contains: search, mode: 'insensitive' } },
+        { title: { contains: search, mode: 'insensitive' } },
+        { client: { name: { contains: search, mode: 'insensitive' } } },
+      ],
+    });
+  }
+  const where = and.length === 1 ? and[0] : { AND: and };
+  const orderBy = sortKey === 'number'
+    ? { number: sortDir as 'asc' | 'desc' }
+    : { createdAt: sortDir as 'asc' | 'desc' };
+
+  const [docs, total] = await Promise.all([
+    context.entities.Document.findMany({
+      where,
+      include: {
+        client: true,
+        project: true,
+        items: true,
+        payments: true,
+        activities: {
+          where: { type: 'document.email_sent' },
+          orderBy: { createdAt: 'desc' },
+          take: 10,
+        },
+      },
+      orderBy,
+      skip: (page - 1) * pageSize,
+      take: pageSize,
+    }),
+    context.entities.Document.count({ where }),
+  ]);
+
+  // Lazy lifecycle transitions — applied to the current page docs
   const now = Date.now();
   const updates: Promise<unknown>[] = [];
   for (const d of docs) {
@@ -101,7 +144,7 @@ export const getDocuments: GetDocuments<void, DocumentWithDetails[]> = async (_a
     }
   }
   if (updates.length) await Promise.all(updates);
-  return docs;
+  return { data: docs, total };
 };
 
 type ItemInput = { description: string; note?: string | null; quantity: number; unitPrice: number };
