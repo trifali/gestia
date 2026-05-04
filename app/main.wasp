@@ -176,6 +176,10 @@ action updateCompanyBrand {
   fn: import { updateCompanyBrand } from "@src/app/company/brand",
   entities: [User, Company]
 }
+action updateCompanyModalities {
+  fn: import { updateCompanyModalities } from "@src/app/company/operations",
+  entities: [User, Company]
+}
 
 query getClients {
   fn: import { getClients } from "@src/app/clients/operations",

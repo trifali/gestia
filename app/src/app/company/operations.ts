@@ -3,6 +3,7 @@ import type {
   GetCurrentCompany,
   CreateCompany,
   UpdateCompany,
+  UpdateCompanyModalities,
 } from 'wasp/server/operations';
 import type { Company } from 'wasp/entities';
 import { requireAdmin } from '../../server/tenant';
@@ -49,6 +50,32 @@ export const updateCompany: UpdateCompany<UpdateCompanyArgs, Company> = async (a
     'name', 'legalName', 'email', 'phone',
     'address', 'city', 'province', 'postalCode',
     'country', 'website', 'neq', 'taxNumberGst', 'taxNumberQst',
+  ];
+  const data: any = {};
+  for (const k of allowed) if (k in args) data[k] = (args as any)[k];
+  return context.entities.Company.update({ where: { id: companyId }, data });
+};
+
+type UpdateCompanyModalitiesArgs = Partial<{
+  modalityDownpaymentPercent: number | null;
+  modalityPaymentMethods: string | null;
+  modalityPaymentTermsDays: number | null;
+  modalityLateFeePercent: number | null;
+  modalityDepositRequired: boolean;
+  modalityWarrantyMonths: number | null;
+  modalityWarrantyDetails: string | null;
+  modalityCancellationPolicy: string | null;
+  modalityContractTerms: string | null;
+}>;
+export const updateCompanyModalities: UpdateCompanyModalities<UpdateCompanyModalitiesArgs, Company> = async (args, context) => {
+  if (!context.user) throw new HttpError(401);
+  requireAdmin(context.user);
+  const companyId = (context.user as any).companyId;
+  if (!companyId) throw new HttpError(403);
+  const allowed: (keyof UpdateCompanyModalitiesArgs)[] = [
+    'modalityDownpaymentPercent', 'modalityPaymentMethods', 'modalityPaymentTermsDays',
+    'modalityLateFeePercent', 'modalityDepositRequired', 'modalityWarrantyMonths',
+    'modalityWarrantyDetails', 'modalityCancellationPolicy', 'modalityContractTerms',
   ];
   const data: any = {};
   for (const k of allowed) if (k in args) data[k] = (args as any)[k];

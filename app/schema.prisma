@@ -52,6 +52,17 @@ model Company {
   brandTagline        String?
   brandEmailSignature String?
 
+  // Modalités (business terms & payment conditions)
+  modalityDownpaymentPercent Float?
+  modalityPaymentMethods     String? // JSON array: ["interac","virement","stripe","cheque","cash","financement"]
+  modalityPaymentTermsDays   Int?
+  modalityLateFeePercent     Float?
+  modalityDepositRequired    Boolean @default(false)
+  modalityWarrantyMonths     Int?
+  modalityWarrantyDetails    String?
+  modalityCancellationPolicy String?
+  modalityContractTerms      String?
+
   users           User[]
   clients         Client[]
   projects        Project[]

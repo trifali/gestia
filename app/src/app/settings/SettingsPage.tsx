@@ -7,6 +7,7 @@ import {
   uploadCompanyLogo,
   removeCompanyLogo,
   updateCompanyBrand,
+  updateCompanyModalities,
   getCompanyBrandAssets,
   getPriceItems,
   createPriceItem,
@@ -25,7 +26,7 @@ import { formatCurrency } from '../../shared/format';
 export default function SettingsPage() {
   const { data: user } = useAuth();
   const { data: company, isLoading } = useQuery(getCurrentCompany);
-  const [tab, setTab] = useState<'entreprise' | 'marque' | 'catalogue' | 'compte' | 'localisation'>('entreprise');
+  const [tab, setTab] = useState<'entreprise' | 'marque' | 'catalogue' | 'modalites' | 'compte' | 'localisation'>('entreprise');
 
   if (isLoading) return <div className='text-muted'>Chargement…</div>;
   if (!company) return <div className='text-muted'>Aucune entreprise associée.</div>;
@@ -40,6 +41,7 @@ export default function SettingsPage() {
         <TabButton active={tab === 'entreprise'} onClick={() => setTab('entreprise')}>Entreprise</TabButton>
         <TabButton active={tab === 'marque'} onClick={() => setTab('marque')}>Marque</TabButton>
         <TabButton active={tab === 'catalogue'} onClick={() => setTab('catalogue')}>Catalogue</TabButton>
+        <TabButton active={tab === 'modalites'} onClick={() => setTab('modalites')}>Modalités</TabButton>
         <TabButton active={tab === 'compte'} onClick={() => setTab('compte')}>Compte</TabButton>
         <TabButton active={tab === 'localisation'} onClick={() => setTab('localisation')}>Localisation</TabButton>
       </div>
@@ -47,6 +49,7 @@ export default function SettingsPage() {
       {tab === 'entreprise' && <CompanyForm company={company} canEdit={!!isAdmin} />}
       {tab === 'marque' && <BrandForm company={company} canEdit={!!isAdmin} />}
       {tab === 'catalogue' && <PriceList canEdit={!!isAdmin} />}
+      {tab === 'modalites' && <ModalitesForm company={company} canEdit={!!isAdmin} />}
       {tab === 'compte' && <AccountInfo user={user} role={(user as any)?.role || 'client'} />}
       {tab === 'localisation' && <LocalizationInfo />}
     </>
@@ -819,6 +822,277 @@ function CategoryCombobox({
           {filtered.length === 0 && !isNew && (
             <div className='px-3 py-2 text-sm text-muted italic'>Aucune catégorie disponible</div>
           )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Modalités ─────────────────────────────────────────────────────────────
+
+const PAYMENT_METHOD_OPTIONS: { value: string; label: string }[] = [
+  { value: 'interac', label: 'Interac' },
+  { value: 'virement', label: 'Virement bancaire' },
+  { value: 'stripe', label: 'Carte de crédit (Stripe)' },
+  { value: 'cheque', label: 'Chèque' },
+  { value: 'cash', label: 'Argent comptant' },
+  { value: 'financement', label: 'Financement' },
+];
+
+function ModalitesForm({ company, canEdit }: { company: any; canEdit: boolean }) {
+  const [depositRequired, setDepositRequired] = useState<boolean>(company.modalityDepositRequired ?? false);
+  const [downpaymentPercent, setDownpaymentPercent] = useState<string>(
+    company.modalityDownpaymentPercent != null ? String(company.modalityDownpaymentPercent) : ''
+  );
+  const [paymentMethods, setPaymentMethods] = useState<string[]>(() => {
+    try { return JSON.parse(company.modalityPaymentMethods || '[]'); } catch { return []; }
+  });
+  const [paymentTermsDays, setPaymentTermsDays] = useState<string>(
+    company.modalityPaymentTermsDays != null ? String(company.modalityPaymentTermsDays) : ''
+  );
+  const [lateFeePercent, setLateFeePercent] = useState<string>(
+    company.modalityLateFeePercent != null ? String(company.modalityLateFeePercent) : ''
+  );
+  const [warrantyMonths, setWarrantyMonths] = useState<string>(
+    company.modalityWarrantyMonths != null ? String(company.modalityWarrantyMonths) : ''
+  );
+  const [warrantyDetails, setWarrantyDetails] = useState<string>(company.modalityWarrantyDetails || '');
+  const [cancellationPolicy, setCancellationPolicy] = useState<string>(company.modalityCancellationPolicy || '');
+  const [contractTerms, setContractTerms] = useState<string>(company.modalityContractTerms || '');
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+
+  useEffect(() => {
+    setDepositRequired(company.modalityDepositRequired ?? false);
+    setDownpaymentPercent(company.modalityDownpaymentPercent != null ? String(company.modalityDownpaymentPercent) : '');
+    setPaymentMethods(() => {
+      try { return JSON.parse(company.modalityPaymentMethods || '[]'); } catch { return []; }
+    });
+    setPaymentTermsDays(company.modalityPaymentTermsDays != null ? String(company.modalityPaymentTermsDays) : '');
+    setLateFeePercent(company.modalityLateFeePercent != null ? String(company.modalityLateFeePercent) : '');
+    setWarrantyMonths(company.modalityWarrantyMonths != null ? String(company.modalityWarrantyMonths) : '');
+    setWarrantyDetails(company.modalityWarrantyDetails || '');
+    setCancellationPolicy(company.modalityCancellationPolicy || '');
+    setContractTerms(company.modalityContractTerms || '');
+  }, [company?.id]);
+
+  const toggleMethod = (value: string) => {
+    setPaymentMethods((prev) =>
+      prev.includes(value) ? prev.filter((m) => m !== value) : [...prev, value]
+    );
+  };
+
+  const onSave = async () => {
+    if (!canEdit) return;
+    setSaving(true);
+    try {
+      await updateCompanyModalities({
+        modalityDepositRequired: depositRequired,
+        modalityDownpaymentPercent: downpaymentPercent !== '' ? Number(downpaymentPercent) : null,
+        modalityPaymentMethods: JSON.stringify(paymentMethods),
+        modalityPaymentTermsDays: paymentTermsDays !== '' ? Number(paymentTermsDays) : null,
+        modalityLateFeePercent: lateFeePercent !== '' ? Number(lateFeePercent) : null,
+        modalityWarrantyMonths: warrantyMonths !== '' ? Number(warrantyMonths) : null,
+        modalityWarrantyDetails: warrantyDetails.trim() || null,
+        modalityCancellationPolicy: cancellationPolicy.trim() || null,
+        modalityContractTerms: contractTerms.trim() || null,
+      });
+      toast.success('Modalités enregistrées');
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2000);
+    } catch (err: any) {
+      toast.error(err?.message || 'Une erreur est survenue');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className='space-y-6'>
+      {!canEdit && (
+        <p className='text-sm text-muted bg-canvas-200 px-3 py-2 rounded-lg'>
+          Seul un administrateur peut modifier ces paramètres.
+        </p>
+      )}
+
+      {/* Acompte & conditions de paiement */}
+      <div className='card p-6 space-y-5'>
+        <div>
+          <h3 className='font-semibold text-base'>Acompte &amp; conditions de paiement</h3>
+          <p className='text-sm text-muted mt-0.5'>
+            Définissez vos exigences d'acompte et les délais de paiement appliqués à vos devis et factures.
+          </p>
+        </div>
+
+        <label className='flex items-center gap-3 text-sm cursor-pointer select-none'>
+          <input
+            type='checkbox'
+            className='h-4 w-4'
+            checked={depositRequired}
+            onChange={(e) => setDepositRequired(e.target.checked)}
+            disabled={!canEdit}
+          />
+          <span>Acompte requis avant le début des travaux</span>
+        </label>
+
+        <div className='grid md:grid-cols-3 gap-4'>
+          <div>
+            <label className='label'>Pourcentage d'acompte (%)</label>
+            <div className='relative'>
+              <input
+                type='number'
+                className='input pr-8'
+                min='0'
+                max='100'
+                step='1'
+                value={downpaymentPercent}
+                onChange={(e) => setDownpaymentPercent(e.target.value)}
+                placeholder='Ex. 25'
+                disabled={!canEdit || !depositRequired}
+              />
+              <span className='absolute right-3 top-1/2 -translate-y-1/2 text-muted text-sm pointer-events-none'>%</span>
+            </div>
+          </div>
+          <div>
+            <label className='label'>Délai de paiement (jours nets)</label>
+            <div className='relative'>
+              <input
+                type='number'
+                className='input pr-12'
+                min='0'
+                step='1'
+                value={paymentTermsDays}
+                onChange={(e) => setPaymentTermsDays(e.target.value)}
+                placeholder='Ex. 30'
+                disabled={!canEdit}
+              />
+              <span className='absolute right-3 top-1/2 -translate-y-1/2 text-muted text-sm pointer-events-none'>jours</span>
+            </div>
+          </div>
+          <div>
+            <label className='label'>Frais de retard (% par mois)</label>
+            <div className='relative'>
+              <input
+                type='number'
+                className='input pr-8'
+                min='0'
+                step='0.1'
+                value={lateFeePercent}
+                onChange={(e) => setLateFeePercent(e.target.value)}
+                placeholder='Ex. 1.5'
+                disabled={!canEdit}
+              />
+              <span className='absolute right-3 top-1/2 -translate-y-1/2 text-muted text-sm pointer-events-none'>%</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Modes de paiement acceptés */}
+      <div className='card p-6 space-y-4'>
+        <div>
+          <h3 className='font-semibold text-base'>Modes de paiement acceptés</h3>
+          <p className='text-sm text-muted mt-0.5'>
+            Cochez les modes de paiement que vous acceptez. Ces informations peuvent être affichées sur vos factures.
+          </p>
+        </div>
+        <div className='grid grid-cols-2 md:grid-cols-3 gap-3'>
+          {PAYMENT_METHOD_OPTIONS.map((opt) => (
+            <label key={opt.value} className='flex items-center gap-2.5 text-sm cursor-pointer select-none'>
+              <input
+                type='checkbox'
+                className='h-4 w-4'
+                checked={paymentMethods.includes(opt.value)}
+                onChange={() => toggleMethod(opt.value)}
+                disabled={!canEdit}
+              />
+              {opt.label}
+            </label>
+          ))}
+        </div>
+      </div>
+
+      {/* Garanties */}
+      <div className='card p-6 space-y-4'>
+        <div>
+          <h3 className='font-semibold text-base'>Garanties</h3>
+          <p className='text-sm text-muted mt-0.5'>
+            Définissez la durée et les conditions de vos garanties sur les travaux réalisés.
+          </p>
+        </div>
+        <div className='grid md:grid-cols-2 gap-4'>
+          <div>
+            <label className='label'>Durée de garantie (mois)</label>
+            <div className='relative'>
+              <input
+                type='number'
+                className='input pr-12'
+                min='0'
+                step='1'
+                value={warrantyMonths}
+                onChange={(e) => setWarrantyMonths(e.target.value)}
+                placeholder='Ex. 12'
+                disabled={!canEdit}
+              />
+              <span className='absolute right-3 top-1/2 -translate-y-1/2 text-muted text-sm pointer-events-none'>mois</span>
+            </div>
+          </div>
+        </div>
+        <div>
+          <label className='label'>Détails de la garantie</label>
+          <MagicTextarea
+            className='input min-h-[100px] resize-y'
+            rows={3}
+            value={warrantyDetails}
+            onChange={(e) => setWarrantyDetails(e.target.value)}
+            placeholder="Ex. La garantie couvre les défauts de main-d'œuvre et de matériaux pour une période de 12 mois à compter de la date de fin des travaux."
+            disabled={!canEdit}
+          />
+        </div>
+      </div>
+
+      {/* Politique d'annulation */}
+      <div className='card p-6 space-y-4'>
+        <div>
+          <h3 className='font-semibold text-base'>Politique d'annulation</h3>
+          <p className='text-sm text-muted mt-0.5'>
+            Décrivez les conditions d'annulation applicables à vos contrats.
+          </p>
+        </div>
+        <MagicTextarea
+          className='input min-h-[100px] resize-y'
+          rows={4}
+          value={cancellationPolicy}
+          onChange={(e) => setCancellationPolicy(e.target.value)}
+          placeholder="Ex. Toute annulation effectuée moins de 48 heures avant le début des travaux entraîne la retenue de l'acompte."
+          disabled={!canEdit}
+        />
+      </div>
+
+      {/* Conditions générales */}
+      <div className='card p-6 space-y-4'>
+        <div>
+          <h3 className='font-semibold text-base'>Conditions générales</h3>
+          <p className='text-sm text-muted mt-0.5'>
+            Clauses additionnelles incluses dans vos soumissions et contrats.
+          </p>
+        </div>
+        <MagicTextarea
+          className='input min-h-[140px] resize-y'
+          rows={6}
+          value={contractTerms}
+          onChange={(e) => setContractTerms(e.target.value)}
+          placeholder="Ex. Les prix sont en dollars canadiens et ne comprennent pas les taxes applicables. Le client est responsable de l'obtention des permis requis…"
+          disabled={!canEdit}
+        />
+      </div>
+
+      {canEdit && (
+        <div className='flex items-center gap-3 pb-2'>
+          <button type='button' className='btn-primary' onClick={onSave} disabled={saving}>
+            {saving ? 'Enregistrement…' : 'Enregistrer'}
+          </button>
+          {saved && <span className='text-sm text-success'>✓ Enregistré</span>}
         </div>
       )}
     </div>
