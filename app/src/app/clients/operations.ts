@@ -31,7 +31,7 @@ export const getClientDetail = async ({ clientId }: { clientId: string }, contex
         },
         orderBy: { createdAt: 'desc' },
       },
-      meetings: { orderBy: { startsAt: 'desc' } },
+      meetings: { orderBy: { startsAt: 'asc' } },
     },
   });
   if (!client || client.companyId !== companyId) throw new HttpError(404, 'Client introuvable');

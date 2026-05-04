@@ -57,7 +57,7 @@ export const getMeetings: GetMeetings<void, MeetingWithClient[]> = async (_args,
   return context.entities.Meeting.findMany({
     where: { companyId },
     include: { client: true },
-    orderBy: { startsAt: 'desc' },
+    orderBy: { startsAt: 'asc' },
   });
 };
 
