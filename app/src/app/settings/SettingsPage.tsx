@@ -954,7 +954,13 @@ function ModalitesForm({ company, canEdit }: { company: any; canEdit: boolean })
             </div>
           </div>
           <div>
-            <label className='label'>Délai de paiement (jours nets)</label>
+            <div className='flex items-center gap-1.5 mb-1'>
+              <label className='label mb-0'>Délai de paiement (jours nets)</label>
+              <span
+                className='inline-flex items-center justify-center w-4 h-4 rounded-full bg-canvas-200 text-muted text-[10px] font-bold cursor-default'
+                title='Nombre de jours accordés au client pour régler la facture, dès la fin des travaux.'
+              >?</span>
+            </div>
             <div className='relative'>
               <input
                 type='number'
@@ -970,7 +976,13 @@ function ModalitesForm({ company, canEdit }: { company: any; canEdit: boolean })
             </div>
           </div>
           <div>
-            <label className='label'>Frais de retard (% par mois)</label>
+            <div className='flex items-center gap-1.5 mb-1'>
+              <label className='label mb-0'>Frais de retard (% par mois)</label>
+              <span
+                className='inline-flex items-center justify-center w-4 h-4 rounded-full bg-canvas-200 text-muted text-[10px] font-bold cursor-default'
+                title='Taux appliqué mensuellemement sur le solde impayé après la date limite du paiement final.'
+              >?</span>
+            </div>
             <div className='relative'>
               <input
                 type='number'

@@ -74,6 +74,16 @@ export type CompanyForPdf = {
   website?: string | null;
   taxNumberGst?: string | null;
   taxNumberQst?: string | null;
+  // Modality fields
+  modalityDepositRequired?: boolean | null;
+  modalityDownpaymentPercent?: number | null;
+  modalityPaymentMethods?: string | null; // JSON array
+  modalityPaymentTermsDays?: number | null;
+  modalityLateFeePercent?: number | null;
+  modalityWarrantyMonths?: number | null;
+  modalityWarrantyDetails?: string | null;
+  modalityCancellationPolicy?: string | null;
+  modalityContractTerms?: string | null;
 } | null;
 
 export type BrandAssets = {
@@ -459,6 +469,133 @@ function totalsCard(doc: DocForPdf, t: Theme): Content {
   };
 }
 
+// ---------- Modalités section ----------
+const PAYMENT_METHOD_LABELS: Record<string, string> = {
+  interac: 'Interac',
+  virement: 'Virement bancaire',
+  stripe: 'Carte de crédit (Stripe)',
+  cheque: 'Chèque',
+  cash: 'Argent comptant',
+  financement: 'Financement',
+};
+
+function modalitiesSection(doc: DocForPdf, company: CompanyForPdf, t: Theme): Content[] {
+  if (!company) return [];
+
+  const {
+    modalityDepositRequired,
+    modalityDownpaymentPercent,
+    modalityPaymentMethods,
+    modalityPaymentTermsDays,
+    modalityLateFeePercent,
+    modalityWarrantyMonths,
+    modalityWarrantyDetails,
+    modalityCancellationPolicy,
+    modalityContractTerms,
+  } = company;
+
+  let methods: string[] = [];
+  try { methods = JSON.parse(modalityPaymentMethods || '[]'); } catch { methods = []; }
+
+  const hasPayment = modalityDepositRequired || modalityDownpaymentPercent != null
+    || methods.length > 0 || modalityPaymentTermsDays != null || modalityLateFeePercent != null;
+  const hasWarranty = modalityWarrantyMonths != null || (modalityWarrantyDetails || '').trim();
+  const hasCancellation = (modalityCancellationPolicy || '').trim();
+  const hasTerms = (modalityContractTerms || '').trim();
+
+  if (!hasPayment && !hasWarranty && !hasCancellation && !hasTerms) return [];
+
+  const sections: Content[] = [
+    sectionHeading('Conditions', 'Modalités & conditions', t),
+  ];
+
+  // ── Payment conditions ──────────────────────────────────────────────────
+  if (hasPayment) {
+    const rows: Content[] = [];
+
+    if (modalityDepositRequired) {
+      const depositText = modalityDownpaymentPercent != null
+        ? `Acompte de ${formatNumber(modalityDownpaymentPercent, 0)} % requis avant le début des travaux.`
+        : 'Un acompte est requis avant le début des travaux.';
+      rows.push(infoRow('Acompte', depositText, t));
+    }
+
+    if (methods.length > 0) {
+      const methodList = methods.map((m) => PAYMENT_METHOD_LABELS[m] || m).join(', ');
+      rows.push(infoRow('Modes de paiement', methodList, t));
+    }
+
+    if (modalityPaymentTermsDays != null) {
+      rows.push(infoRow('Délai de paiement', `Net ${modalityPaymentTermsDays} jours dès la fin des travaux`, t));
+    }
+
+    if (modalityLateFeePercent != null) {
+      rows.push(infoRow('Frais de retard', `${formatNumber(modalityLateFeePercent, 2)} % par mois après la date limite du paiement final`, t));
+    }
+
+    if (rows.length > 0) {
+      sections.push(subheading('Conditions de paiement', t));
+      sections.push(...rows);
+    }
+  }
+
+  // ── Warranty ─────────────────────────────────────────────────────────────
+  if (hasWarranty) {
+    sections.push(subheading('Garantie', t));
+    const warrantyParts: Content[] = [];
+    if (modalityWarrantyMonths != null) {
+      warrantyParts.push(infoRow('Durée', `${modalityWarrantyMonths} mois`, t));
+    }
+    if ((modalityWarrantyDetails || '').trim()) {
+      warrantyParts.push({
+        text: modalityWarrantyDetails!.trim(),
+        color: t.grey,
+        fontSize: 9,
+        lineHeight: 1.45,
+        margin: [0, 4, 0, 8],
+      });
+    }
+    sections.push(...warrantyParts);
+  }
+
+  // ── Cancellation ─────────────────────────────────────────────────────────
+  if (hasCancellation) {
+    sections.push(subheading('Politique d\'annulation', t));
+    sections.push({
+      text: hasCancellation,
+      color: t.grey,
+      fontSize: 9,
+      lineHeight: 1.45,
+      margin: [0, 4, 0, 8],
+    });
+  }
+
+  // ── General terms ────────────────────────────────────────────────────────
+  if (hasTerms) {
+    sections.push(subheading('Conditions générales', t));
+    sections.push({
+      text: hasTerms,
+      color: t.grey,
+      fontSize: 9,
+      lineHeight: 1.45,
+      margin: [0, 4, 0, 8],
+    });
+  }
+
+  return sections;
+}
+
+function infoRow(label: string, value: string, t: Theme): Content {
+  return {
+    columns: [
+      { text: label, width: 140, bold: true, fontSize: 9, color: t.text },
+      { text: value, width: '*', fontSize: 9, color: t.grey },
+    ],
+    columnGap: 8,
+    margin: [0, 2, 0, 4],
+  };
+}
+
 // ---------- Closing card ----------
 function closingCard(doc: DocForPdf, company: CompanyForPdf, t: Theme): Content {
   const isInvoice = doc.type === 'invoice';
@@ -525,7 +662,8 @@ function buildDocDefinition(doc: DocForPdf, company: CompanyForPdf, brand: Brand
       fontSize: 10,
     });
   }
-
+  const modalities = modalitiesSection(doc, company, t);
+  if (modalities.length > 0) content.push(...modalities);
   content.push(closingCard(doc, company, t));
 
   const background = (currentPage: number, pageSize: ContextPageSize) => {
