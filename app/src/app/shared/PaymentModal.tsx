@@ -1,8 +1,9 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import toast from 'react-hot-toast';
-import { createPayment } from 'wasp/client/operations';
+import { useQuery, createPayment, getCurrentCompany } from 'wasp/client/operations';
 import { Modal } from '../../client/ui';
 import { formatCurrency } from '../../shared/format';
+import { PAYMENT_METHOD_OPTIONS } from '../payments/PaymentForm';
 
 type Props = {
   doc: {
@@ -19,15 +20,17 @@ type Props = {
   onClose: () => void;
 };
 
-const METHODS: { value: string; label: string }[] = [
-  { value: 'virement', label: 'Virement' },
-  { value: 'cheque', label: 'Chèque' },
-  { value: 'comptant', label: 'Comptant' },
-  { value: 'carte', label: 'Carte' },
-  { value: 'autre', label: 'Autre' },
-];
+const METHODS = PAYMENT_METHOD_OPTIONS;
 
 export function PaymentModal({ doc, preset, onClose }: Props) {
+  const { data: company } = useQuery(getCurrentCompany);
+  const methodOptions = useMemo(() => {
+    try {
+      const keys: string[] = JSON.parse((company as any)?.modalityPaymentMethods || '[]');
+      if (keys.length > 0) return PAYMENT_METHOD_OPTIONS.filter((o) => keys.includes(o.value));
+    } catch {}
+    return PAYMENT_METHOD_OPTIONS;
+  }, [(company as any)?.modalityPaymentMethods]);
   const balance = +(doc.total - doc.amountPaid).toFixed(2);
   const defaultAmount =
     preset === 'deposit'
@@ -36,7 +39,7 @@ export function PaymentModal({ doc, preset, onClose }: Props) {
         ? balance
         : balance;
   const [amount, setAmount] = useState<string>(String(defaultAmount));
-  const [method, setMethod] = useState('virement');
+  const [method, setMethod] = useState(() => methodOptions[0]?.value || 'virement');
   const [paidAt, setPaidAt] = useState<string>(new Date().toISOString().slice(0, 10));
   const [reference, setReference] = useState('');
   const [notes, setNotes] = useState('');
@@ -103,7 +106,7 @@ export function PaymentModal({ doc, preset, onClose }: Props) {
         </div>
 
         <div>
-          <label className='block text-xs text-muted mb-1'>Montant *</label>
+          <label className='block text-xs text-muted mb-1'>Montant reçu du client *</label>
           <input
             type='number'
             step='0.01'
@@ -113,9 +116,11 @@ export function PaymentModal({ doc, preset, onClose }: Props) {
             className='input w-full'
             autoFocus
           />
-          {preset === 'deposit' && (
-            <p className='text-xs text-muted mt-1'>Pré-rempli à 30 % du total (acompte typique).</p>
-          )}
+          <p className='text-xs text-muted mt-1'>
+            {preset === 'deposit'
+              ? 'Pré-rempli à 30 % du total (acompte typique). Modifiez si nécessaire.'
+              : `Ce montant s'ajoute aux ${formatCurrency(doc.amountPaid)} déjà reçus pour cette facture.`}
+          </p>
         </div>
 
         <div className='grid grid-cols-2 gap-3'>
@@ -126,7 +131,7 @@ export function PaymentModal({ doc, preset, onClose }: Props) {
               onChange={(e) => setMethod(e.target.value)}
               className='input w-full'
             >
-              {METHODS.map((m) => (
+              {methodOptions.map((m) => (
                 <option key={m.value} value={m.value}>
                   {m.label}
                 </option>

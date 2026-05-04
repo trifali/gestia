@@ -11,7 +11,9 @@ export type PaymentRow = PaymentLite & {
   document: {
     id: string;
     number: string;
+    type: string;
     total: number;
+    amountPaid: number;
     subtotal: number;
     taxGst: number;
     taxQst: number;
@@ -121,35 +123,54 @@ export function PaymentsSection({
               </tr>
             </thead>
             <tbody>
-              {payments.map((p) => (
+              {payments.map((p) => {
+                  const isQuote = p.document.type !== 'invoice';
+                  const lockedTitle = 'Ce paiement est lié à un document repassé en soumission — convertissez-le à nouveau en facture pour le modifier.';
+                  return (
                 <tr key={p.id}>
                   <td className='text-muted'>{formatDate(p.paidAt)}</td>
-                  <td className='font-mono text-xs'>{p.document.number}</td>
+                  <td>
+                    <span className='font-mono text-xs'>{p.document.number}</span>
+                    <br />
+                    {isQuote
+                      ? <span className='text-xs text-warning'>Soumission (repassé)</span>
+                      : <span className='text-xs text-muted'>{formatCurrency(p.document.amountPaid)} sur {formatCurrency(p.document.total)} payé</span>
+                    }
+                  </td>
                   {showClientColumn && <td>{p.document.client?.name || '—'}</td>}
                   <td className='text-muted'>{PAYMENT_METHODS[p.method] || p.method}</td>
                   <td className='text-muted'>{p.reference || '—'}</td>
                   <td className='text-right font-medium'>{formatCurrency(p.amount)}</td>
                   <td className='text-right'>
                     <div className='flex items-center justify-end gap-1'>
-                      <IconBtn title='Modifier' onClick={() => setEditing(p)}>
+                      <IconBtn
+                        title={isQuote ? lockedTitle : 'Modifier'}
+                        disabled={isQuote}
+                        onClick={() => !isQuote && setEditing(p)}
+                      >
                         <LuPencil size={14} />
                       </IconBtn>
-                      <IconBtn variant='danger' title='Supprimer' onClick={async () => {
-                        if (await ask('Supprimer ce paiement ?')) {
-                          try {
-                            await deletePayment({ id: p.id });
-                            toast.success('Paiement supprimé');
-                          } catch (err: any) {
-                            toast.error(err?.message || 'Erreur lors de la suppression');
+                      <IconBtn variant='danger'
+                        title={isQuote ? lockedTitle : 'Supprimer'}
+                        disabled={isQuote}
+                        onClick={async () => {
+                          if (isQuote) return;
+                          if (await ask('Supprimer ce paiement ?')) {
+                            try {
+                              await deletePayment({ id: p.id });
+                              toast.success('Paiement supprimé');
+                            } catch (err: any) {
+                              toast.error(err?.message || 'Erreur lors de la suppression');
+                            }
                           }
-                        }
-                      }}>
+                        }}>
                         <TrashIcon />
                       </IconBtn>
                     </div>
                   </td>
                 </tr>
-              ))}
+                  );
+                })}
             </tbody>
           </table>
         </div>

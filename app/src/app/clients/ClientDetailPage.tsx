@@ -252,7 +252,7 @@ function PaiementsTab({ client }: { client: ClientDetail }) {
     }));
 
   const rows: PaymentRow[] = client.documents
-    .filter((d) => d.type === 'invoice')
+    .filter((d) => d.payments.length > 0)
     .flatMap((inv) =>
       inv.payments.map((p) => ({
         id: p.id,
@@ -265,7 +265,9 @@ function PaiementsTab({ client }: { client: ClientDetail }) {
         document: {
           id: inv.id,
           number: inv.number,
+          type: inv.type,
           total: inv.total,
+          amountPaid: inv.amountPaid,
           subtotal: inv.subtotal,
           taxGst: inv.taxGst,
           taxQst: inv.taxQst,

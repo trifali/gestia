@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { LuFileCheck, LuUndo2, LuPencil, LuDownload, LuCopy, LuLoader, LuMail, LuEye, LuWallet } from 'react-icons/lu';
+import { LuFileCheck, LuUndo2, LuPencil, LuCopy, LuLoader, LuMail, LuEye, LuWallet } from 'react-icons/lu';
 import toast from 'react-hot-toast';
 import {
   useQuery,
@@ -13,7 +13,6 @@ import {
 import { useConfirm, IconBtn, TrashIcon } from '../../client/ui';
 import { formatCurrency, formatDate } from '../../shared/format';
 import { DocumentForm } from './DocumentForm';
-import { downloadDocumentPdf } from '../documents/pdf';
 import { SendDocumentEmailModal } from './SendDocumentEmailModal';
 import { PdfPreviewModal } from './PdfPreviewModal';
 import { PaymentModal } from './PaymentModal';
@@ -72,7 +71,7 @@ type Props = {
   docs: any[];
   /** Show the "Client" column (DocumentsPage). Hidden on client detail page. */
   showClient?: boolean;
-  /** Show the "Solde" column (DocumentsPage). Hidden on client detail page. */
+  /** @deprecated no longer used — Total and Solde columns were removed. */
   showBalance?: boolean;
   /** When editing, lock the doc to this clientId (ClientDetailPage). */
   clientId?: string;
@@ -87,7 +86,6 @@ type Props = {
 export function DocumentTable({
   docs,
   showClient = false,
-  showBalance = false,
   clientId,
   clientForPdf,
   clients,
@@ -114,14 +112,11 @@ export function DocumentTable({
               {showClient && <th>Client</th>}
               <th>Émis</th>
               <th>Statut</th>
-              <th className='text-right'>Total</th>
-              {showBalance && <th className='text-right'>Solde</th>}
               <th className='text-right whitespace-nowrap w-px'>Actions</th>
             </tr>
           </thead>
           <tbody>
             {docs.map((d: any) => {
-              const balance = d.type === 'invoice' ? +(d.total - d.amountPaid).toFixed(2) : null;
               const docForPdf = clientForPdf ? { ...d, client: clientForPdf } : d;
               const sentActivities = ((d as any).activities || []) as Array<{ createdAt: string | Date; metadata?: any }>;
               const lastSentForType = sentActivities.find((a) => (a.metadata?.type === 'invoice' ? 'invoice' : 'quote') === d.type) || null;
@@ -134,25 +129,18 @@ export function DocumentTable({
                       {d.type === 'invoice' ? 'Facture' : 'Soumission'}
                     </span>
                   </td>
-                  <td className='font-mono text-xs'>{d.number}</td>
+                  <td>
+                    <span className='font-mono text-xs'>{d.number}</span>
+                    {d.type === 'invoice' && (
+                      <><br /><span className='text-xs text-muted'>{formatCurrency(d.amountPaid)} sur {formatCurrency(d.total)} payé</span></>
+                    )}
+                  </td>
                   <td className='font-medium'>{d.title || '—'}</td>
                   {showClient && <td className='text-muted'>{d.client?.name ?? '—'}</td>}
                   <td className='text-muted'>{formatDate(d.issueDate)}</td>
                   <td>
                     <StatusSelect doc={d} />
                   </td>
-                  <td className='text-right font-medium'>{formatCurrency(d.total)}</td>
-                  {showBalance && (
-                    <td className='text-right'>
-                      {balance !== null ? (
-                        <span className={balance > 0 ? 'text-danger font-medium' : 'text-success'}>
-                          {formatCurrency(balance)}
-                        </span>
-                      ) : (
-                        <span className='text-muted'>—</span>
-                      )}
-                    </td>
-                  )}
                   <td className='text-right whitespace-nowrap w-px'>
                     <div className='flex items-center justify-end gap-1'>
                       <IconBtn title='Modifier' onClick={() => setEditing(d)}>
@@ -163,18 +151,6 @@ export function DocumentTable({
                         onClick={() => setPreviewing(docForPdf)}
                       >
                         <LuEye size={14} />
-                      </IconBtn>
-                      <IconBtn
-                        title='Télécharger en PDF'
-                        onClick={() => {
-                          try {
-                            downloadDocumentPdf(docForPdf, company || null, brand || null);
-                          } catch (err: any) {
-                            toast.error(err?.message || 'Erreur lors de la génération du PDF');
-                          }
-                        }}
-                      >
-                        <LuDownload size={14} />
                       </IconBtn>
                       <IconBtn
                         title={wasSent ? `Renvoyer (envoyé le ${formatDate(lastSentForType.createdAt)})` : 'Envoyer par courriel'}

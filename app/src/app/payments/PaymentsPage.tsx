@@ -26,7 +26,9 @@ export default function PaymentsPage() {
       document: {
         id: p.document.id,
         number: p.document.number,
+        type: p.document.type,
         total: p.document.total,
+        amountPaid: p.document.amountPaid,
         subtotal: p.document.subtotal,
         taxGst: p.document.taxGst,
         taxQst: p.document.taxQst,

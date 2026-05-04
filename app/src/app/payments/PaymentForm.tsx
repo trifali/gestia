@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import toast from 'react-hot-toast';
 import { createPayment, updatePayment } from 'wasp/client/operations';
 import { Modal } from '../../client/ui';
@@ -61,24 +61,26 @@ export function PaymentForm({
       ? PAYMENT_METHOD_OPTIONS.filter((o) => availableMethods.includes(o.value))
       : PAYMENT_METHOD_OPTIONS;
   const isEdit = !!payment;
-  // For new payments only show open invoices; for edits, also include current
-  // doc even if already fully paid so it remains selectable.
-  const open = invoices.filter((i) => i.status !== 'payee' && i.status !== 'annulee');
-  const selectable = isEdit
-    ? Array.from(new Map([...open, ...invoices.filter((i) => i.id === payment!.documentId)].map((i) => [i.id, i])).values())
-    : open;
+
+  // All non-cancelled invoices are selectable (multiple payments per bill is allowed).
+  // For edit, also include current invoice even if cancelled.
+  const selectable = invoices.filter(
+    (i) => i.status !== 'annulee' || (isEdit && i.id === payment!.documentId)
+  );
 
   const initialDocId = payment?.documentId || defaultDocumentId || selectable[0]?.id || '';
   const [documentId, setDocumentId] = useState(initialDocId);
   const selected = invoices.find((i) => i.id === documentId);
-  const remaining = selected ? +(selected.total - selected.amountPaid + (payment?.documentId === selected.id ? payment.amount : 0)).toFixed(2) : 0;
+  // Remaining balance: add back current payment amount when editing the same invoice
+  const remaining = selected
+    ? +(selected.total - selected.amountPaid + (isEdit && payment!.documentId === selected.id ? payment!.amount : 0)).toFixed(2)
+    : 0;
 
   const [amount, setAmount] = useState(
     payment ? payment.amount.toString() : remaining.toString()
   );
   const [method, setMethod] = useState(() => {
     if (payment?.method) return payment.method;
-    // default to first available method
     const opts = availableMethods && availableMethods.length > 0
       ? PAYMENT_METHOD_OPTIONS.filter((o) => availableMethods.includes(o.value))
       : PAYMENT_METHOD_OPTIONS;
@@ -134,26 +136,20 @@ export function PaymentForm({
       <form id='payment-form' onSubmit={onSubmit} className='space-y-4'>
         <div>
           <label className='label'>Facture *</label>
-          <select
-            className='input'
-            required
-            disabled={lockDocument}
-            value={documentId}
-            onChange={(e) => {
-              setDocumentId(e.target.value);
-              const inv = invoices.find((i) => i.id === e.target.value);
-              if (inv && !isEdit) {
-                setAmount((+(inv.total - inv.amountPaid).toFixed(2)).toString());
-              }
-            }}
-          >
-            <option value=''>— Sélectionner —</option>
-            {selectable.map((i) => (
-              <option key={i.id} value={i.id}>
-                {i.number}{i.client?.name ? ` — ${i.client.name}` : ''} (solde {formatCurrency(i.total - i.amountPaid)})
-              </option>
-            ))}
-          </select>
+          {lockDocument ? (
+            <input className='input bg-canvas' disabled value={
+              selected ? `${selected.number}${selected.client?.name ? ` — ${selected.client.name}` : ''}` : '—'
+            } />
+          ) : (
+            <InvoiceCombobox
+              invoices={selectable}
+              value={documentId}
+              onChange={(id, inv) => {
+                setDocumentId(id);
+                if (inv && !isEdit) setAmount((+(inv.total - inv.amountPaid).toFixed(2)).toString());
+              }}
+            />
+          )}
         </div>
         <div className='grid grid-cols-1 sm:grid-cols-2 gap-4'>
           <div>
@@ -182,5 +178,117 @@ export function PaymentForm({
         </div>
       </form>
     </Modal>
+  );
+}
+
+// ─── Searchable invoice combobox ──────────────────────────────────────────────
+
+function InvoiceCombobox({
+  invoices,
+  value,
+  onChange,
+}: {
+  invoices: InvoiceLite[];
+  value: string;
+  onChange: (id: string, invoice: InvoiceLite | undefined) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState('');
+  const inputRef = useRef<HTMLInputElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  const selected = invoices.find((i) => i.id === value);
+
+  const filtered = search.trim()
+    ? invoices.filter((i) => {
+        const q = search.toLowerCase();
+        return (
+          i.number.toLowerCase().includes(q) ||
+          (i.client?.name || '').toLowerCase().includes(q)
+        );
+      })
+    : invoices;
+
+  // Close on outside click
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setOpen(false);
+        setSearch('');
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
+
+  const select = (inv: InvoiceLite) => {
+    onChange(inv.id, inv);
+    setOpen(false);
+    setSearch('');
+  };
+
+  const label = selected
+    ? `${selected.number}${selected.client?.name ? ` — ${selected.client.name}` : ''}`
+    : '— Sélectionner —';
+
+  return (
+    <div ref={containerRef} className='relative'>
+      {/* Trigger button */}
+      <button
+        type='button'
+        className='input text-left flex items-center justify-between gap-2 w-full'
+        onClick={() => {
+          setOpen((v) => !v);
+          if (!open) setTimeout(() => inputRef.current?.focus(), 50);
+        }}
+      >
+        <span className={selected ? 'text-ink' : 'text-muted'}>{label}</span>
+        <svg className='w-4 h-4 text-muted shrink-0' fill='none' viewBox='0 0 24 24' stroke='currentColor'>
+          <path strokeLinecap='round' strokeLinejoin='round' strokeWidth={2} d='M19 9l-7 7-7-7' />
+        </svg>
+      </button>
+
+      {open && (
+        <div className='absolute z-50 mt-1 w-full bg-white border border-gray-200 rounded-lg shadow-lg overflow-hidden'>
+          {/* Search input */}
+          <div className='p-2 border-b border-gray-100'>
+            <input
+              ref={inputRef}
+              className='input py-1.5 text-sm w-full'
+              placeholder='Rechercher par n° facture ou client…'
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+          </div>
+
+          {/* Option list */}
+          <ul className='max-h-52 overflow-y-auto'>
+            {filtered.length === 0 ? (
+              <li className='px-3 py-2 text-sm text-muted'>Aucun résultat</li>
+            ) : (
+              filtered.map((i) => {
+                const balance = i.total - i.amountPaid;
+                const isSelected = i.id === value;
+                return (
+                  <li
+                    key={i.id}
+                    onMouseDown={(e) => { e.preventDefault(); select(i); }}
+                    className={`px-3 py-2 text-sm cursor-pointer flex items-center justify-between gap-3 hover:bg-canvas ${isSelected ? 'bg-accent/10 text-accent font-medium' : 'text-ink'}`}
+                  >
+                    <span>
+                      <span className='font-mono'>{i.number}</span>
+                      {i.client?.name && <span className='text-muted ml-2'>{i.client.name}</span>}
+                    </span>
+                    <span className='text-xs text-muted whitespace-nowrap'>
+                      solde {formatCurrency(balance)}
+                    </span>
+                  </li>
+                );
+              })
+            )}
+          </ul>
+        </div>
+      )}
+    </div>
   );
 }
