@@ -76,6 +76,8 @@ export async function getCalendarClient(
   return google.calendar({ version: 'v3', auth: oauth2 });
 }
 
+const TIMEZONE = 'America/Toronto'; // Montréal
+
 type MeetingData = {
   title: string;
   description?: string | null;
@@ -88,11 +90,24 @@ function buildEventBody(meeting: MeetingData) {
   const start = meeting.startsAt;
   const end = meeting.endsAt ?? new Date(start.getTime() + 60 * 60 * 1000); // default 1 h
 
+  // Always anchor the event to the Montréal timezone so Google displays the
+  // correct local time regardless of where the server is running.
+  const toLocalISO = (d: Date) => {
+    const fmt = new Intl.DateTimeFormat('en-CA', {
+      timeZone: TIMEZONE,
+      year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit', second: '2-digit',
+      hour12: false,
+    });
+    const parts = Object.fromEntries(fmt.formatToParts(d).map(({ type, value }) => [type, value]));
+    return `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}:${parts.second}`;
+  };
+
   return {
     summary: meeting.title,
     description: meeting.description ?? undefined,
-    start: { dateTime: start.toISOString() },
-    end: { dateTime: end.toISOString() },
+    start: { dateTime: toLocalISO(start), timeZone: TIMEZONE },
+    end:   { dateTime: toLocalISO(end),   timeZone: TIMEZONE },
     attendees: (meeting.attendeeEmails ?? []).map((email) => ({ email })),
     conferenceData: {
       createRequest: {
@@ -131,13 +146,7 @@ export async function updateCalendarEvent(
     eventId,
     conferenceDataVersion: 1,
     sendUpdates: 'all',
-    requestBody: {
-      summary: meeting.title,
-      description: meeting.description ?? undefined,
-      start: { dateTime: meeting.startsAt.toISOString() },
-      end: { dateTime: (meeting.endsAt ?? new Date(meeting.startsAt.getTime() + 60 * 60 * 1000)).toISOString() },
-      attendees: (meeting.attendeeEmails ?? []).map((email) => ({ email })),
-    },
+    requestBody: buildEventBody(meeting),
   });
 }
 

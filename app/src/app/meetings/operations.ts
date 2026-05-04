@@ -82,7 +82,29 @@ export const createMeeting: CreateMeeting<CreateMeetingArgs, Meeting> = async (a
     throw new HttpError(403, 'Veuillez connecter Google Agenda dans Paramètres → Intégrations avant de créer une rencontre.');
   }
 
-  const startsAt = new Date(args.startsAt);
+  // Parse the naive datetime string as Montréal local time so the server
+  // timezone never affects the stored value.
+  const parseMontrealTime = (s: string): Date => {
+    // s is "YYYY-MM-DDTHH:MM" with no timezone suffix
+    const clean = s.length === 16 ? s + ':00' : s.replace('Z', '');
+    // Intl gives us the UTC offset for America/Toronto at this instant
+    const ref = new Date(clean + 'Z'); // treat as UTC temporarily
+    const fmt = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'America/Toronto',
+      year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit', second: '2-digit',
+      hour12: false,
+    });
+    const parts = Object.fromEntries(fmt.formatToParts(ref).map(({ type, value }) => [type, value]));
+    const utcEquiv = Date.UTC(
+      Number(parts.year), Number(parts.month) - 1, Number(parts.day),
+      Number(parts.hour), Number(parts.minute), Number(parts.second),
+    );
+    const offsetMs = ref.getTime() - utcEquiv;
+    return new Date(ref.getTime() + offsetMs);
+  };
+
+  const startsAt = parseMontrealTime(args.startsAt);
   const duration = (args.durationMinutes ?? 60) * 60 * 1000;
   const endsAt = new Date(startsAt.getTime() + duration);
 
@@ -140,7 +162,25 @@ export const updateMeeting: UpdateMeeting<UpdateMeetingArgs, Meeting> = async (
   const existing = await context.entities.Meeting.findUnique({ where: { id } });
   if (!existing || existing.companyId !== companyId) throw new HttpError(404);
 
-  const newStartsAt = startsAt !== undefined ? new Date(startsAt) : existing.startsAt;
+  const parseMontrealTime = (s: string): Date => {
+    const clean = s.length === 16 ? s + ':00' : s.replace('Z', '');
+    const ref = new Date(clean + 'Z');
+    const fmt = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'America/Toronto',
+      year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit', second: '2-digit',
+      hour12: false,
+    });
+    const parts = Object.fromEntries(fmt.formatToParts(ref).map(({ type, value }) => [type, value]));
+    const utcEquiv = Date.UTC(
+      Number(parts.year), Number(parts.month) - 1, Number(parts.day),
+      Number(parts.hour), Number(parts.minute), Number(parts.second),
+    );
+    const offsetMs = ref.getTime() - utcEquiv;
+    return new Date(ref.getTime() + offsetMs);
+  };
+
+  const newStartsAt = startsAt !== undefined ? parseMontrealTime(startsAt) : existing.startsAt;
   const newEndsAt = durationMinutes !== undefined
     ? new Date(newStartsAt.getTime() + durationMinutes * 60 * 1000)
     : (existing as any).endsAt ?? new Date(newStartsAt.getTime() + 60 * 60 * 1000);
