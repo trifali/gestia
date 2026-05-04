@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useParams, useNavigate } from 'react-router';
+import { useParams, useNavigate, Link } from 'react-router';
 import { LuArrowLeft, LuPencil } from 'react-icons/lu';
 import toast from 'react-hot-toast';
 import {
@@ -9,6 +9,7 @@ import {
   deleteMeeting,
   updateClient,
   getClientActivities,
+  getGoogleCalendarStatus,
 } from 'wasp/client/operations';
 import { Modal, useConfirm, IconBtn, TrashIcon } from '../../client/ui';
 import { MagicInput, MagicTextarea } from '../../client/magic';
@@ -219,6 +220,8 @@ function RencontresTab({ client }: { client: ClientDetail }) {
   const { ask, Dialog: ConfirmDialog } = useConfirm();
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState<any>(null);
+  const { data: calStatus } = useQuery(getGoogleCalendarStatus);
+  const calConnected = (calStatus as { connected?: boolean } | undefined)?.connected ?? false;
 
   const MEETING_STATUS: Record<string, { label: string; className: string }> = {
     prevue: { label: 'Prévue', className: 'badge-info' },
@@ -231,10 +234,25 @@ function RencontresTab({ client }: { client: ClientDetail }) {
     <>
       <div className='flex items-center justify-between mb-4'>
         <p className='text-sm text-muted'>{client.meetings.length} rencontre(s)</p>
-        <button className='btn-primary' onClick={() => setCreating(true)}>
+        <button
+          className='btn-primary'
+          onClick={() => setCreating(true)}
+          disabled={!calConnected}
+          title={!calConnected ? 'Connectez Google Agenda pour créer des rencontres' : undefined}
+        >
           Nouvelle rencontre
         </button>
       </div>
+
+      {!calConnected && (
+        <div className='mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 flex items-start gap-3'>
+          <span className='text-lg leading-tight'>⚠️</span>
+          <div>
+            <strong>Google Agenda non connecté.</strong> Connectez votre Google Agenda dans{' '}
+            <Link to='/parametres' className='underline font-medium'>Paramètres → Intégrations</Link>{' '}pour créer des rencontres.
+          </div>
+        </div>
+      )}
 
       {client.meetings.length === 0 ? (
         <p className='text-muted text-sm'>Aucune rencontre pour ce client.</p>

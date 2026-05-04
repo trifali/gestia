@@ -17,6 +17,7 @@
     "@types/pdfmake": "^0.3.2",
     "apexcharts": "3.41.0",
     "clsx": "^2.1.0",
+    "googleapis": "^171.4.0",
     "minio": "^8.0.7",
     "node-fetch": "3.3.0",
     "openai": "^6.27.0",

@@ -16,6 +16,9 @@ import {
   getPriceCategories,
   createPriceCategory,
   deletePriceCategory,
+  getGoogleCalendarStatus,
+  getGoogleCalendarAuthUrl,
+  disconnectGoogleCalendar,
 } from 'wasp/client/operations';
 import { useAuth } from 'wasp/client/auth';
 import { PAYMENT_METHOD_OPTIONS } from '../payments/PaymentForm';
@@ -27,7 +30,7 @@ import { formatCurrency } from '../../shared/format';
 export default function SettingsPage() {
   const { data: user } = useAuth();
   const { data: company, isLoading } = useQuery(getCurrentCompany);
-  const [tab, setTab] = useState<'entreprise' | 'marque' | 'catalogue' | 'modalites' | 'compte' | 'localisation'>('entreprise');
+  const [tab, setTab] = useState<'entreprise' | 'marque' | 'catalogue' | 'modalites' | 'compte' | 'localisation' | 'integrations'>('entreprise');
 
   if (isLoading) return <div className='text-muted'>Chargement…</div>;
   if (!company) return <div className='text-muted'>Aucune entreprise associée.</div>;
@@ -38,16 +41,18 @@ export default function SettingsPage() {
     <>
       <PageHeader title='Paramètres' subtitle='Configurez votre entreprise et votre compte.' />
 
-      <div className='flex gap-2 border-b border-line mb-6'>
+      <div className='flex gap-2 border-b border-line mb-6 overflow-x-auto'>
         <TabButton active={tab === 'entreprise'} onClick={() => setTab('entreprise')}>Entreprise</TabButton>
         <TabButton active={tab === 'marque'} onClick={() => setTab('marque')}>Marque</TabButton>
         <TabButton active={tab === 'catalogue'} onClick={() => setTab('catalogue')}>Catalogue</TabButton>
         <TabButton active={tab === 'modalites'} onClick={() => setTab('modalites')}>Modalités</TabButton>
         <TabButton active={tab === 'compte'} onClick={() => setTab('compte')}>Compte</TabButton>
         <TabButton active={tab === 'localisation'} onClick={() => setTab('localisation')}>Localisation</TabButton>
+        <TabButton active={tab === 'integrations'} onClick={() => setTab('integrations')}>Intégrations</TabButton>
       </div>
 
       {tab === 'entreprise' && <CompanyForm company={company} canEdit={!!isAdmin} />}
+      {tab === 'integrations' && <IntegrationsTab />}
       {tab === 'marque' && <BrandForm company={company} canEdit={!!isAdmin} />}
       {tab === 'catalogue' && <PriceList canEdit={!!isAdmin} />}
       {tab === 'modalites' && <ModalitesForm company={company} canEdit={!!isAdmin} />}
@@ -1099,6 +1104,107 @@ function ModalitesForm({ company, canEdit }: { company: any; canEdit: boolean })
           {saved && <span className='text-sm text-success'>✓ Enregistré</span>}
         </div>
       )}
+    </div>
+  );
+}
+
+// ─── Intégrations ──────────────────────────────────────────────────────────
+
+function IntegrationsTab() {
+  const { data: status, isLoading, refetch } = useQuery(getGoogleCalendarStatus);
+  const calStatus = status as { connected: boolean; email: string | null } | undefined;
+  const [connecting, setConnecting] = useState(false);
+  const [disconnecting, setDisconnecting] = useState(false);
+
+  const onConnect = async () => {
+    setConnecting(true);
+    try {
+      const { url } = await getGoogleCalendarAuthUrl();
+      window.location.href = url;
+    } catch (err: any) {
+      toast.error(err?.message || 'Impossible de démarrer l\'autorisation Google');
+      setConnecting(false);
+    }
+  };
+
+  const onDisconnect = async () => {
+    if (!window.confirm('Déconnecter Google Agenda ? Les rencontres existantes resteront dans votre calendrier, mais les nouvelles ne seront plus synchronisées.')) return;
+    setDisconnecting(true);
+    try {
+      await disconnectGoogleCalendar();
+      await refetch();
+      toast.success('Google Agenda déconnecté');
+    } catch (err: any) {
+      toast.error(err?.message || 'Erreur lors de la déconnexion');
+    } finally {
+      setDisconnecting(false);
+    }
+  };
+
+  return (
+    <div className='space-y-4 max-w-xl'>
+      <div className='card p-6'>
+        <div className='flex items-start gap-4'>
+          {/* Google Calendar icon */}
+          <div className='shrink-0 w-12 h-12 rounded-xl flex items-center justify-center bg-white border border-line shadow-sm'>
+            <svg viewBox='0 0 48 48' className='w-7 h-7' aria-hidden='true'>
+              <path fill='#1976d2' d='M36 36H12V12h24v24z'/>
+              <path fill='#fff' d='M26 22h-4v-4h-2v4h-4v2h4v4h2v-4h4v-2z'/>
+              <path fill='#fbc02d' d='M36 12l-6-6H12v6h24z'/>
+              <path fill='#e53935' d='M12 12l-6 6v18l6 6h24v-6H12V12z'/>
+              <path fill='#1976d2' d='M42 18l-6-6v6h6z'/>
+              <path fill='#1565c0' d='M42 18h-6v18H12v6h24l6-6V18z'/>
+            </svg>
+          </div>
+          <div className='flex-1 min-w-0'>
+            <h3 className='font-semibold text-base'>Google Agenda</h3>
+            <p className='text-sm text-muted mt-1'>
+              Synchronisez automatiquement vos rencontres Gestia avec votre Google Agenda.
+              La connexion est requise pour créer, modifier ou supprimer des rencontres.
+            </p>
+
+            {isLoading ? (
+              <div className='mt-3 text-sm text-muted'>Vérification…</div>
+            ) : calStatus?.connected ? (
+              <div className='mt-3 space-y-2'>
+                <div className='flex items-center gap-2 text-sm'>
+                  <span className='inline-block w-2 h-2 rounded-full bg-success'></span>
+                  <span className='text-success font-medium'>Connecté</span>
+                  {calStatus.email && <span className='text-muted'>— {calStatus.email}</span>}
+                </div>
+                <button
+                  type='button'
+                  className='btn-secondary text-danger border-danger/30 hover:bg-danger/5'
+                  onClick={onDisconnect}
+                  disabled={disconnecting}
+                >
+                  {disconnecting ? 'Déconnexion…' : 'Déconnecter Google Agenda'}
+                </button>
+              </div>
+            ) : (
+              <div className='mt-3'>
+                <button
+                  type='button'
+                  className='btn-primary'
+                  onClick={onConnect}
+                  disabled={connecting}
+                >
+                  {connecting ? 'Redirection vers Google…' : 'Connecter Google Agenda'}
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      <div className='rounded-lg border border-line bg-canvas-100 px-4 py-3 text-sm text-muted'>
+        <strong className='text-ink'>Note :</strong> Gestia utilise les autorisations minimales nécessaires (écriture d'événements uniquement).
+        Votre compte Google n'est jamais partagé avec des tiers.
+        Vous pouvez révoquer l'accès à tout moment depuis{' '}
+        <a href='https://myaccount.google.com/permissions' target='_blank' rel='noreferrer' className='text-accent underline'>
+          myaccount.google.com/permissions
+        </a>.
+      </div>
     </div>
   );
 }

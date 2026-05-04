@@ -1,10 +1,12 @@
 import { useState } from 'react';
+import { Link } from 'react-router';
 import toast from 'react-hot-toast';
 import {
   useQuery,
   getMeetings,
   getClients,
   deleteMeeting,
+  getGoogleCalendarStatus,
 } from 'wasp/client/operations';
 import { PageHeader, EmptyState, useConfirm, IconBtn, EditIcon, TrashIcon } from '../../client/ui';
 import { formatDate, formatTime } from '../../shared/format';
@@ -20,17 +22,46 @@ const STATUS: Record<string, { label: string; className: string }> = {
 export default function MeetingsPage() {
   const { data: meetings, isLoading } = useQuery(getMeetings);
   const { data: clients } = useQuery(getClients);
+  const { data: calStatus } = useQuery(getGoogleCalendarStatus);
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState<any>(null);
   const { ask, Dialog: ConfirmDialog } = useConfirm();
+
+  const calConnected = calStatus?.connected ?? false;
+
+  const handleNewMeeting = () => {
+    if (!calConnected) return; // button is disabled, but guard anyway
+    setCreating(true);
+  };
 
   return (
     <>
       <PageHeader
         title='Rencontres'
         subtitle='Planifiez vos rencontres avec clients et collaborateurs.'
-        actions={<button className='btn-primary' onClick={() => setCreating(true)}>Nouvelle rencontre</button>}
+        actions={
+          <button
+            className='btn-primary'
+            onClick={handleNewMeeting}
+            disabled={!calConnected}
+            title={!calConnected ? 'Connectez Google Agenda pour créer des rencontres' : undefined}
+          >
+            Nouvelle rencontre
+          </button>
+        }
       />
+
+      {!calConnected && (
+        <div className='mb-5 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 flex items-start gap-3'>
+          <span className='text-lg leading-tight'>⚠️</span>
+          <div>
+            <strong>Google Agenda non connecté.</strong> La création de rencontres est désactivée jusqu'à ce que vous connectiez votre Google Agenda.{' '}
+            <Link to='/parametres' className='underline font-medium'>
+              Aller dans Paramètres → Intégrations
+            </Link>
+          </div>
+        </div>
+      )}
 
       {isLoading ? (
         <div className='text-muted'>Chargement…</div>
@@ -38,7 +69,11 @@ export default function MeetingsPage() {
         <EmptyState
           title='Aucune rencontre'
           description='Planifiez votre première rencontre.'
-          action={<button className='btn-primary' onClick={() => setCreating(true)}>Planifier</button>}
+          action={
+            calConnected
+              ? <button className='btn-primary' onClick={() => setCreating(true)}>Planifier</button>
+              : <Link to='/parametres' className='btn-primary'>Connecter Google Agenda</Link>
+          }
         />
       ) : (
         <div className='space-y-3'>

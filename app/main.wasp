@@ -137,6 +137,12 @@ page SettingsPage {
   component: import SettingsPage from "@src/app/settings/SettingsPage"
 }
 
+route GoogleCalendarCallbackRoute { path: "/parametres/google-callback", to: GoogleCalendarCallbackPage }
+page GoogleCalendarCallbackPage {
+  authRequired: true,
+  component: import GoogleCalendarCallbackPage from "@src/app/settings/GoogleCalendarCallbackPage"
+}
+
 route NotFoundRoute { path: "*", to: NotFoundPage }
 page NotFoundPage {
   component: import { NotFoundPage } from "@src/client/NotFoundPage"
@@ -293,6 +299,23 @@ action updateMeeting {
 action deleteMeeting {
   fn: import { deleteMeeting } from "@src/app/meetings/operations",
   entities: [User, Meeting]
+}
+
+query getGoogleCalendarStatus {
+  fn: import { getGoogleCalendarStatus } from "@src/app/settings/integrationsOperations",
+  entities: [User]
+}
+action getGoogleCalendarAuthUrl {
+  fn: import { getGoogleCalendarAuthUrl } from "@src/app/settings/integrationsOperations",
+  entities: []
+}
+action handleGoogleCalendarCallback {
+  fn: import { handleGoogleCalendarCallback } from "@src/app/settings/integrationsOperations",
+  entities: [User]
+}
+action disconnectGoogleCalendar {
+  fn: import { disconnectGoogleCalendar } from "@src/app/settings/integrationsOperations",
+  entities: [User]
 }
 
 query getAutomations {

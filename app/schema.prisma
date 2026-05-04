@@ -20,6 +20,12 @@ model User {
   role      String   @default("client")
   fullName  String?
 
+  // Google Calendar integration (per-user OAuth tokens)
+  googleCalendarAccessToken  String?
+  googleCalendarRefreshToken String?
+  googleCalendarTokenExpiry  DateTime?
+  googleCalendarEmail        String?
+
   activities ActivityLog[]
 }
 
@@ -211,6 +217,9 @@ model Meeting {
   location    String?
   meetingUrl  String?
   status      String    @default("prevue")
+
+  // Google Calendar sync
+  googleCalendarEventId String?
 }
 
 model PriceItem {
