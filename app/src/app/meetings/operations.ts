@@ -42,11 +42,12 @@ type CreateMeetingArgs = {
   description?: string;
   clientId?: string | null;
   startsAt: string;
-  endsAt?: string | null;
-  location?: string;
-  meetingUrl?: string;
-  status?: string;
+  /** Duration in minutes (default 60) */
+  durationMinutes?: number;
+  /** JSON array of attendee email strings */
+  attendeeEmails?: string;
 };
+
 export const createMeeting: CreateMeeting<CreateMeetingArgs, Meeting> = async (args, context) => {
   const companyId = ensureCompany(context.user);
   if (!args.title?.trim()) throw new HttpError(400, 'Titre requis');
@@ -58,10 +59,14 @@ export const createMeeting: CreateMeeting<CreateMeetingArgs, Meeting> = async (a
   }
 
   const startsAt = new Date(args.startsAt);
-  const endsAt = args.endsAt ? new Date(args.endsAt) : null;
+  const duration = (args.durationMinutes ?? 60) * 60 * 1000;
+  const endsAt = new Date(startsAt.getTime() + duration);
 
-  // Create in Google Calendar first so we can persist the event ID
+  let emails: string[] = [];
+  try { emails = args.attendeeEmails ? JSON.parse(args.attendeeEmails) : []; } catch { /* ignore */ }
+
   let googleCalendarEventId: string | undefined;
+  let meetLink: string | null = null;
   try {
     const calendar = await getCalendarClient(userCal, async (accessToken, expiry) => {
       await context.entities.User.update({
@@ -69,17 +74,21 @@ export const createMeeting: CreateMeeting<CreateMeetingArgs, Meeting> = async (a
         data: { googleCalendarAccessToken: accessToken, googleCalendarTokenExpiry: expiry } as any,
       });
     });
-    googleCalendarEventId = await createCalendarEvent(calendar, {
+    const result = await createCalendarEvent(calendar, {
       title: args.title,
       description: args.description,
       startsAt,
       endsAt,
-      location: args.location,
-      meetingUrl: args.meetingUrl,
+      attendeeEmails: emails,
     });
+    googleCalendarEventId = result.eventId;
+    meetLink = result.meetLink;
   } catch (err: any) {
-    // Surface Google Calendar errors clearly
-    throw new HttpError(500, `Erreur Google Agenda : ${err?.message ?? err}`);
+    const msg: string = err?.message ?? String(err);
+    if (msg.includes('insufficient authentication scopes') || msg.includes('insufficientPermissions')) {
+      throw new HttpError(403, 'Autorisations Google insuffisantes. Veuillez déconnecter puis reconnecter votre Google Agenda dans Paramètres → Intégrations.');
+    }
+    throw new HttpError(500, `Erreur Google Agenda : ${msg}`);
   }
 
   return context.entities.Meeting.create({
@@ -90,24 +99,34 @@ export const createMeeting: CreateMeeting<CreateMeetingArgs, Meeting> = async (a
       clientId: args.clientId || null,
       startsAt,
       endsAt,
-      location: args.location,
-      meetingUrl: args.meetingUrl,
-      status: args.status || 'prevue',
+      status: 'prevue',
       googleCalendarEventId,
+      meetLink,
+      attendeeEmails: args.attendeeEmails ?? '[]',
     } as any,
   });
 };
 
 type UpdateMeetingArgs = { id: string } & Partial<CreateMeetingArgs>;
-export const updateMeeting: UpdateMeeting<UpdateMeetingArgs, Meeting> = async ({ id, startsAt, endsAt, ...rest }, context) => {
+export const updateMeeting: UpdateMeeting<UpdateMeetingArgs, Meeting> = async (
+  { id, startsAt, durationMinutes, attendeeEmails, ...rest },
+  context,
+) => {
   const companyId = ensureCompany(context.user);
   const existing = await context.entities.Meeting.findUnique({ where: { id } });
   if (!existing || existing.companyId !== companyId) throw new HttpError(404);
 
-  const newStartsAt = startsAt !== undefined ? new Date(startsAt!) : existing.startsAt;
-  const newEndsAt = endsAt !== undefined ? (endsAt ? new Date(endsAt) : null) : (existing as any).endsAt;
+  const newStartsAt = startsAt !== undefined ? new Date(startsAt) : existing.startsAt;
+  const newEndsAt = durationMinutes !== undefined
+    ? new Date(newStartsAt.getTime() + durationMinutes * 60 * 1000)
+    : (existing as any).endsAt ?? new Date(newStartsAt.getTime() + 60 * 60 * 1000);
 
-  // Sync to Google Calendar if we have an event ID
+  let emails: string[] = [];
+  try {
+    const raw = attendeeEmails ?? (existing as any).attendeeEmails ?? '[]';
+    emails = JSON.parse(raw);
+  } catch { /* ignore */ }
+
   const calEventId = (existing as any).googleCalendarEventId;
   if (calEventId) {
     const userCal = await loadUserWithCalendar(context);
@@ -124,11 +143,20 @@ export const updateMeeting: UpdateMeeting<UpdateMeetingArgs, Meeting> = async ({
           description: rest.description ?? existing.description,
           startsAt: newStartsAt,
           endsAt: newEndsAt,
-          location: rest.location ?? existing.location,
-          meetingUrl: rest.meetingUrl ?? (existing as any).meetingUrl,
+          attendeeEmails: emails,
         });
-      } catch {
-        // Non-fatal: DB update proceeds even if Calendar sync fails
+      } catch (err: any) {
+        const msg: string = err?.message ?? String(err);
+        const status: number = err?.status ?? err?.code ?? 0;
+        if (msg.includes('insufficient authentication scopes') || msg.includes('insufficientPermissions')) {
+          throw new HttpError(403, 'Autorisations Google insuffisantes. Veuillez déconnecter puis reconnecter votre Google Agenda dans Paramètres → Intégrations.');
+        }
+        // Event was deleted from Google Calendar directly — clear the stale ID and proceed
+        if (status === 404 || status === 410 || msg.includes('Resource has been deleted') || msg.includes('Not Found')) {
+          await context.entities.Meeting.update({ where: { id }, data: { googleCalendarEventId: null } as any });
+        } else {
+          throw new HttpError(500, `Erreur Google Agenda : ${msg}`);
+        }
       }
     }
   }
@@ -137,8 +165,8 @@ export const updateMeeting: UpdateMeeting<UpdateMeetingArgs, Meeting> = async ({
     where: { id },
     data: {
       ...rest,
-      ...(startsAt !== undefined ? { startsAt: newStartsAt } : {}),
-      ...(endsAt !== undefined ? { endsAt: newEndsAt } : {}),
+      ...(startsAt !== undefined ? { startsAt: newStartsAt, endsAt: newEndsAt } : {}),
+      ...(attendeeEmails !== undefined ? { attendeeEmails } : {}),
     },
   });
 };
@@ -148,7 +176,6 @@ export const deleteMeeting: DeleteMeeting<{ id: string }, { id: string }> = asyn
   const existing = await context.entities.Meeting.findUnique({ where: { id } });
   if (!existing || existing.companyId !== companyId) throw new HttpError(404);
 
-  // Delete from Google Calendar
   const calEventId = (existing as any).googleCalendarEventId;
   if (calEventId) {
     const userCal = await loadUserWithCalendar(context);
@@ -170,3 +197,4 @@ export const deleteMeeting: DeleteMeeting<{ id: string }, { id: string }> = asyn
   await context.entities.Meeting.delete({ where: { id } });
   return { id };
 };
+

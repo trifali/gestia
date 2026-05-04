@@ -12,12 +12,10 @@ import { PageHeader, EmptyState, useConfirm, IconBtn, EditIcon, TrashIcon } from
 import { formatDate, formatTime } from '../../shared/format';
 import { MeetingForm } from './MeetingForm';
 
-const STATUS: Record<string, { label: string; className: string }> = {
-  prevue: { label: 'Prévue', className: 'badge-info' },
-  confirmee: { label: 'Confirmée', className: 'badge-success' },
-  terminee: { label: 'Terminée', className: 'badge-neutral' },
-  annulee: { label: 'Annulée', className: 'badge-danger' },
-};
+function parseEmails(raw: string | null | undefined): string[] {
+  if (!raw) return [];
+  try { return JSON.parse(raw); } catch { return []; }
+}
 
 export default function MeetingsPage() {
   const { data: meetings, isLoading } = useQuery(getMeetings);
@@ -27,10 +25,10 @@ export default function MeetingsPage() {
   const [editing, setEditing] = useState<any>(null);
   const { ask, Dialog: ConfirmDialog } = useConfirm();
 
-  const calConnected = calStatus?.connected ?? false;
+  const calConnected = (calStatus as any)?.connected ?? false;
 
   const handleNewMeeting = () => {
-    if (!calConnected) return; // button is disabled, but guard anyway
+    if (!calConnected) return;
     setCreating(true);
   };
 
@@ -38,7 +36,7 @@ export default function MeetingsPage() {
     <>
       <PageHeader
         title='Rencontres'
-        subtitle='Planifiez vos rencontres avec clients et collaborateurs.'
+        subtitle='Planifiez vos rencontres vidéo avec clients et collaborateurs.'
         actions={
           <button
             className='btn-primary'
@@ -68,7 +66,7 @@ export default function MeetingsPage() {
       ) : !meetings || meetings.length === 0 ? (
         <EmptyState
           title='Aucune rencontre'
-          description='Planifiez votre première rencontre.'
+          description='Planifiez votre première rencontre vidéo.'
           action={
             calConnected
               ? <button className='btn-primary' onClick={() => setCreating(true)}>Planifier</button>
@@ -77,48 +75,64 @@ export default function MeetingsPage() {
         />
       ) : (
         <div className='space-y-3'>
-          {meetings.map((m: any) => (
-            <div key={m.id} className='card p-4 flex items-start justify-between gap-4'>
-              <div className='flex gap-4 flex-1 min-w-0'>
-                <div className='shrink-0 w-16 text-center bg-canvas-200 rounded-lg p-2'>
-                  <div className='text-xs uppercase text-muted'>{formatDate(m.startsAt).split(' ')[1]}</div>
-                  <div className='text-2xl font-semibold leading-none'>{new Date(m.startsAt).getDate()}</div>
-                  <div className='text-xs text-muted mt-1'>{formatTime(m.startsAt)}</div>
-                </div>
-                <div className='min-w-0 flex-1'>
-                  <div className='flex items-center gap-2 flex-wrap'>
-                    <h3 className='font-medium'>{m.title}</h3>
-                    <span className={STATUS[m.status]?.className || 'badge-neutral'}>
-                      {STATUS[m.status]?.label || m.status}
-                    </span>
+          {meetings.map((m: any) => {
+            const attendees = parseEmails(m.attendeeEmails);
+            return (
+              <div key={m.id} className='card p-4 flex items-start justify-between gap-4'>
+                <div className='flex gap-4 flex-1 min-w-0'>
+                  {/* Date badge */}
+                  <div className='shrink-0 w-16 text-center bg-canvas-200 rounded-lg p-2'>
+                    <div className='text-xs uppercase text-muted'>{formatDate(m.startsAt).split(' ')[1]}</div>
+                    <div className='text-2xl font-semibold leading-none'>{new Date(m.startsAt).getDate()}</div>
+                    <div className='text-xs text-muted mt-1'>{formatTime(m.startsAt)}</div>
                   </div>
-                  <div className='text-sm text-muted mt-1'>
-                    {m.client?.name && <>👤 {m.client.name} · </>}
-                    {m.location && <>📍 {m.location}</>}
+                  <div className='min-w-0 flex-1'>
+                    <div className='flex items-center gap-2 flex-wrap'>
+                      <h3 className='font-medium'>{m.title}</h3>
+                      <span className='badge-info text-xs'>🎥 Vidéo</span>
+                    </div>
+                    {/* Client + attendees */}
+                    <div className='text-sm text-muted mt-1 flex flex-wrap gap-x-3'>
+                      {m.client?.name && <span>👤 {m.client.name}</span>}
+                      {attendees.length > 0 && (
+                        <span title={attendees.join(', ')}>
+                          ✉️ {attendees.length} invité{attendees.length > 1 ? 's' : ''}
+                        </span>
+                      )}
+                    </div>
+                    {m.description && <p className='text-sm mt-1.5 text-muted'>{m.description}</p>}
+                    {/* Meet link */}
+                    {m.meetLink ? (
+                      <a
+                        href={m.meetLink}
+                        target='_blank'
+                        rel='noreferrer'
+                        className='inline-flex items-center gap-1.5 mt-2 text-sm font-medium text-blue-600 hover:underline'
+                      >
+                        <span>🎥</span>
+                        Rejoindre Google Meet →
+                      </a>
+                    ) : (
+                      <span className='text-xs text-muted mt-2 inline-block'>Lien Meet non disponible</span>
+                    )}
                   </div>
-                  {m.description && <p className='text-sm mt-2'>{m.description}</p>}
-                  {m.meetingUrl && (
-                    <a href={m.meetingUrl} target='_blank' rel='noreferrer' className='text-sm text-accent hover:underline mt-2 inline-block'>
-                      Lien de visioconférence →
-                    </a>
-                  )}
                 </div>
-              </div>
-              <div className='flex items-center gap-1 shrink-0'>
-                <IconBtn title='Modifier' onClick={() => setEditing(m)}><EditIcon /></IconBtn>
-                <IconBtn variant='danger' title='Supprimer' onClick={async () => {
-                  if (await ask('Supprimer cette rencontre ?')) {
-                    try {
-                      await deleteMeeting({ id: m.id });
-                      toast.success('Rencontre supprimée');
-                    } catch (err: any) {
-                      toast.error(err?.message || 'Erreur lors de la suppression');
+                <div className='flex items-center gap-1 shrink-0'>
+                  <IconBtn title='Modifier' onClick={() => setEditing(m)}><EditIcon /></IconBtn>
+                  <IconBtn variant='danger' title='Supprimer' onClick={async () => {
+                    if (await ask('Supprimer cette rencontre ?')) {
+                      try {
+                        await deleteMeeting({ id: m.id });
+                        toast.success('Rencontre supprimée');
+                      } catch (err: any) {
+                        toast.error(err?.message || 'Erreur lors de la suppression');
+                      }
                     }
-                  }
-                }}><TrashIcon /></IconBtn>
+                  }}><TrashIcon /></IconBtn>
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
 

@@ -223,13 +223,6 @@ function RencontresTab({ client }: { client: ClientDetail }) {
   const { data: calStatus } = useQuery(getGoogleCalendarStatus);
   const calConnected = (calStatus as { connected?: boolean } | undefined)?.connected ?? false;
 
-  const MEETING_STATUS: Record<string, { label: string; className: string }> = {
-    prevue: { label: 'Prévue', className: 'badge-info' },
-    confirmee: { label: 'Confirmée', className: 'badge-info' },
-    terminee: { label: 'Terminée', className: 'badge-success' },
-    annulee: { label: 'Annulée', className: 'badge-neutral' },
-  };
-
   return (
     <>
       <div className='flex items-center justify-between mb-4'>
@@ -263,20 +256,36 @@ function RencontresTab({ client }: { client: ClientDetail }) {
               <tr>
                 <th>Titre</th>
                 <th>Date</th>
-                <th>Lieu / URL</th>
-                <th>Statut</th>
+                <th>Invités</th>
+                <th>Lien Meet</th>
                 <th className='text-right'>Actions</th>
               </tr>
             </thead>
             <tbody>
               {client.meetings.map((m) => {
-                const st = MEETING_STATUS[m.status] || { label: m.status, className: 'badge-neutral' };
+                let attendees: string[] = [];
+                try { attendees = JSON.parse((m as any).attendeeEmails || '[]'); } catch { /* ignore */ }
                 return (
                   <tr key={m.id}>
                     <td className='font-medium'>{m.title}</td>
                     <td className='text-muted'>{formatDate(m.startsAt)}</td>
-                    <td className='text-muted'>{m.location || m.meetingUrl || '—'}</td>
-                    <td><span className={st.className}>{st.label}</span></td>
+                    <td className='text-muted text-sm'>
+                      {attendees.length > 0
+                        ? <span title={attendees.join(', ')}>{attendees.length} invité{attendees.length > 1 ? 's' : ''}</span>
+                        : '—'}
+                    </td>
+                    <td>
+                      {(m as any).meetLink ? (
+                        <a
+                          href={(m as any).meetLink}
+                          target='_blank'
+                          rel='noreferrer'
+                          className='text-sm text-blue-600 hover:underline font-medium'
+                        >
+                          🎥 Rejoindre
+                        </a>
+                      ) : <span className='text-muted text-sm'>—</span>}
+                    </td>
                     <td className='text-right'>
                       <div className='flex items-center justify-end gap-1'>
                         <IconBtn title='Modifier' onClick={() => setEditing(m)}>
@@ -307,6 +316,8 @@ function RencontresTab({ client }: { client: ClientDetail }) {
         <MeetingForm
           meeting={editing}
           clientId={client.id}
+          clientName={client.name ?? undefined}
+          clientEmail={client.email ?? undefined}
           onClose={() => { setCreating(false); setEditing(null); }}
         />
       )}
@@ -314,7 +325,6 @@ function RencontresTab({ client }: { client: ClientDetail }) {
     </>
   );
 }
-
 // ─── Edit modal (reuses same form as ClientsPage) ────────────────────────────
 function maskPhone(raw: string): string {
   let digits = raw.replace(/\D/g, '');

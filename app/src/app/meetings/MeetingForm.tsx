@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import toast from 'react-hot-toast';
 import { createMeeting, updateMeeting } from 'wasp/client/operations';
 import { Modal } from '../../client/ui';
@@ -8,24 +8,122 @@ import { formatDateTimeForInput } from '../../shared/format';
 type Props = {
   /** When provided, edits this meeting; otherwise creates a new one. */
   meeting?: any;
-  /** Pre-filled client id (hides the client selector). */
+  /** Pre-filled client id. */
   clientId?: string;
+  /** Pre-fill client name in default title. */
+  clientName?: string;
+  /** Pre-fill invited emails with client email. */
+  clientEmail?: string;
   /** Required when `clientId` is not provided. */
   clients?: any[];
   onClose: () => void;
 };
 
-export function MeetingForm({ meeting, clientId: presetClientId, clients, onClose }: Props) {
+// ─── Email tag input ──────────────────────────────────────────────────────────
+function EmailTagInput({
+  emails,
+  onChange,
+}: {
+  emails: string[];
+  onChange: (emails: string[]) => void;
+}) {
+  const [input, setInput] = useState('');
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const addEmail = (raw: string) => {
+    const trimmed = raw.trim().toLowerCase();
+    if (!trimmed) return;
+    // Basic email validation
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed)) {
+      toast.error(`Courriel invalide : ${trimmed}`);
+      return;
+    }
+    if (!emails.includes(trimmed)) onChange([...emails, trimmed]);
+    setInput('');
+  };
+
+  const onKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter' || e.key === ',' || e.key === ' ') {
+      e.preventDefault();
+      addEmail(input);
+    } else if (e.key === 'Backspace' && !input && emails.length > 0) {
+      onChange(emails.slice(0, -1));
+    }
+  };
+
+  const onBlur = () => {
+    if (input.trim()) addEmail(input);
+  };
+
+  return (
+    <div
+      className='input min-h-[42px] flex flex-wrap gap-1.5 items-center cursor-text py-1.5'
+      onClick={() => inputRef.current?.focus()}
+    >
+      {emails.map((email) => (
+        <span
+          key={email}
+          className='inline-flex items-center gap-1 bg-accent/10 text-accent text-xs font-medium px-2 py-0.5 rounded-full'
+        >
+          {email}
+          <button
+            type='button'
+            className='hover:text-danger transition-colors'
+            onClick={(e) => { e.stopPropagation(); onChange(emails.filter((x) => x !== email)); }}
+            aria-label={`Retirer ${email}`}
+          >
+            ✕
+          </button>
+        </span>
+      ))}
+      <input
+        ref={inputRef}
+        type='email'
+        className='flex-1 min-w-[180px] bg-transparent outline-none text-sm placeholder:text-muted'
+        placeholder={emails.length === 0 ? 'Ajouter une adresse courriel…' : '+ courriel'}
+        value={input}
+        onChange={(e) => setInput(e.target.value)}
+        onKeyDown={onKeyDown}
+        onBlur={onBlur}
+      />
+    </div>
+  );
+}
+
+// ─── Form ─────────────────────────────────────────────────────────────────────
+export function MeetingForm({ meeting, clientId: presetClientId, clientName, clientEmail, clients, onClose }: Props) {
+  // Parse attendee emails from existing meeting or default to client email
+  const initialEmails = (): string[] => {
+    if (meeting?.attendeeEmails) {
+      try { return JSON.parse(meeting.attendeeEmails); } catch { /* ignore */ }
+    }
+    if (clientEmail) return [clientEmail];
+    return [];
+  };
+
+  // Compute duration from existing meeting (startsAt → endsAt)
+  const initialDuration = (): number => {
+    if (meeting?.startsAt && meeting?.endsAt) {
+      const diff = Math.round(
+        (new Date(meeting.endsAt).getTime() - new Date(meeting.startsAt).getTime()) / 60000,
+      );
+      return diff > 0 ? diff : 60;
+    }
+    return 60;
+  };
+
+  const defaultTitle = (name?: string) => name ? `Rencontre avec ${name}` : 'Rencontre';
+
   const [form, setForm] = useState({
-    title: meeting?.title || '',
+    title: meeting?.title || defaultTitle(clientName),
     description: meeting?.description || '',
     clientId: presetClientId ?? meeting?.clientId ?? '',
     startsAt: formatDateTimeForInput(meeting?.startsAt) || formatDateTimeForInput(new Date()),
-    endsAt: formatDateTimeForInput(meeting?.endsAt),
-    location: meeting?.location || '',
-    meetingUrl: meeting?.meetingUrl || '',
-    status: meeting?.status || 'prevue',
+    durationMinutes: String(initialDuration()),
   });
+  // Track if user has manually edited the title so we don't overwrite it on client change
+  const [titleDirty, setTitleDirty] = useState(!!meeting?.title);
+  const [emails, setEmails] = useState<string[]>(initialEmails);
   const [saving, setSaving] = useState(false);
 
   const onSubmit = async (e: React.FormEvent) => {
@@ -37,17 +135,15 @@ export function MeetingForm({ meeting, clientId: presetClientId, clients, onClos
         description: form.description || undefined,
         clientId: form.clientId || null,
         startsAt: form.startsAt,
-        endsAt: form.endsAt || null,
-        location: form.location || undefined,
-        meetingUrl: form.meetingUrl || undefined,
-        status: form.status,
+        durationMinutes: Number(form.durationMinutes) || 60,
+        attendeeEmails: JSON.stringify(emails),
       };
       if (meeting) {
         await updateMeeting({ id: meeting.id, ...payload });
         toast.success('Rencontre modifiée');
       } else {
         await createMeeting(payload);
-        toast.success('Rencontre créée');
+        toast.success('Rencontre créée — lien Google Meet généré');
       }
       onClose();
     } catch (err: any) {
@@ -66,28 +162,42 @@ export function MeetingForm({ meeting, clientId: presetClientId, clients, onClos
         <>
           <button className='btn-secondary' onClick={onClose}>Annuler</button>
           <button form='meeting-form' type='submit' className='btn-primary' disabled={saving}>
-            {saving ? 'Enregistrement…' : 'Enregistrer'}
+            {saving ? 'Enregistrement…' : (meeting ? 'Enregistrer' : 'Créer & générer le lien Meet')}
           </button>
         </>
       }
     >
       <form id='meeting-form' onSubmit={onSubmit} className='grid grid-cols-1 sm:grid-cols-2 gap-4'>
+        {/* Title */}
         <div className='col-span-2'>
           <label className='label'>Titre *</label>
           <MagicInput
             className='input'
             required
             value={form.title}
-            onChange={(e) => setForm({ ...form, title: e.target.value })}
+            onChange={(e) => { setTitleDirty(true); setForm({ ...form, title: e.target.value }); }}
           />
         </div>
+
+        {/* Client selector (only on standalone meetings page) */}
         {!presetClientId && (
-          <div>
+          <div className='col-span-2'>
             <label className='label'>Client</label>
             <select
               className='input'
               value={form.clientId}
-              onChange={(e) => setForm({ ...form, clientId: e.target.value })}
+              onChange={(e) => {
+                const selected = (clients || []).find((c) => c.id === e.target.value);
+                const newEmails = selected?.email
+                  ? Array.from(new Set([...emails, selected.email]))
+                  : emails;
+                setEmails(newEmails);
+                setForm({
+                  ...form,
+                  clientId: e.target.value,
+                  title: titleDirty ? form.title : defaultTitle(selected?.name),
+                });
+              }}
             >
               <option value=''>— Aucun —</option>
               {(clients || []).map((c) => (
@@ -96,21 +206,10 @@ export function MeetingForm({ meeting, clientId: presetClientId, clients, onClos
             </select>
           </div>
         )}
+
+        {/* Date */}
         <div>
-          <label className='label'>Statut</label>
-          <select
-            className='input'
-            value={form.status}
-            onChange={(e) => setForm({ ...form, status: e.target.value })}
-          >
-            <option value='prevue'>Prévue</option>
-            <option value='confirmee'>Confirmée</option>
-            <option value='terminee'>Terminée</option>
-            <option value='annulee'>Annulée</option>
-          </select>
-        </div>
-        <div>
-          <label className='label'>Début *</label>
+          <label className='label'>Date et heure *</label>
           <input
             type='datetime-local'
             className='input'
@@ -119,33 +218,31 @@ export function MeetingForm({ meeting, clientId: presetClientId, clients, onClos
             onChange={(e) => setForm({ ...form, startsAt: e.target.value })}
           />
         </div>
+
+        {/* Duration */}
         <div>
-          <label className='label'>Fin</label>
+          <label className='label'>Durée (minutes) *</label>
           <input
-            type='datetime-local'
+            type='number'
             className='input'
-            value={form.endsAt}
-            onChange={(e) => setForm({ ...form, endsAt: e.target.value })}
+            required
+            min={5}
+            step={5}
+            value={form.durationMinutes}
+            onChange={(e) => setForm({ ...form, durationMinutes: e.target.value })}
           />
         </div>
+
+        {/* Invited emails */}
         <div className='col-span-2'>
-          <label className='label'>Lieu</label>
-          <MagicInput
-            className='input'
-            value={form.location}
-            onChange={(e) => setForm({ ...form, location: e.target.value })}
-            placeholder='Ex. Bureau · Visioconférence · Adresse'
-          />
+          <label className='label'>Invités</label>
+          <EmailTagInput emails={emails} onChange={setEmails} />
+          <p className='text-xs text-muted mt-1'>
+            Appuyez sur Entrée ou virgule pour ajouter. Les invités recevront une invitation Google Agenda.
+          </p>
         </div>
-        <div className='col-span-2'>
-          <label className='label'>Lien de visioconférence</label>
-          <input
-            className='input'
-            value={form.meetingUrl}
-            onChange={(e) => setForm({ ...form, meetingUrl: e.target.value })}
-            placeholder='https://…'
-          />
-        </div>
+
+        {/* Description */}
         <div className='col-span-2'>
           <label className='label'>Description</label>
           <MagicTextarea
@@ -155,7 +252,23 @@ export function MeetingForm({ meeting, clientId: presetClientId, clients, onClos
             onChange={(e) => setForm({ ...form, description: e.target.value })}
           />
         </div>
+
+        {/* Show existing Meet link when editing */}
+        {meeting?.meetLink && (
+          <div className='col-span-2 rounded-lg bg-blue-50 border border-blue-200 px-3 py-2 flex items-center gap-2'>
+            <span className='text-sm'>🎥</span>
+            <a
+              href={meeting.meetLink}
+              target='_blank'
+              rel='noreferrer'
+              className='text-sm text-blue-700 hover:underline truncate'
+            >
+              {meeting.meetLink}
+            </a>
+          </div>
+        )}
       </form>
     </Modal>
   );
 }
+

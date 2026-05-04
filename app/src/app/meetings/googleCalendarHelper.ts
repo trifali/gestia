@@ -80,8 +80,7 @@ type MeetingData = {
   description?: string | null;
   startsAt: Date;
   endsAt?: Date | null;
-  location?: string | null;
-  meetingUrl?: string | null;
+  attendeeEmails?: string[];
 };
 
 function buildEventBody(meeting: MeetingData) {
@@ -91,24 +90,34 @@ function buildEventBody(meeting: MeetingData) {
   return {
     summary: meeting.title,
     description: meeting.description ?? undefined,
-    location: meeting.location ?? undefined,
     start: { dateTime: start.toISOString() },
     end: { dateTime: end.toISOString() },
-    ...(meeting.meetingUrl
-      ? { conferenceData: undefined, hangoutLink: undefined, source: { url: meeting.meetingUrl } }
-      : {}),
+    attendees: (meeting.attendeeEmails ?? []).map((email) => ({ email })),
+    conferenceData: {
+      createRequest: {
+        requestId: `gestia-${start.getTime()}-${Math.random().toString(36).slice(2, 9)}`,
+        conferenceSolutionKey: { type: 'hangoutsMeet' },
+      },
+    },
   };
 }
+
+export type CalendarEventResult = { eventId: string; meetLink: string | null };
 
 export async function createCalendarEvent(
   calendar: Awaited<ReturnType<typeof getCalendarClient>>,
   meeting: MeetingData,
-): Promise<string> {
+): Promise<CalendarEventResult> {
   const res = await calendar.events.insert({
     calendarId: 'primary',
+    conferenceDataVersion: 1,
+    sendUpdates: 'all',
     requestBody: buildEventBody(meeting),
   });
-  return res.data.id!;
+  return {
+    eventId: res.data.id!,
+    meetLink: res.data.hangoutLink ?? null,
+  };
 }
 
 export async function updateCalendarEvent(
@@ -116,10 +125,18 @@ export async function updateCalendarEvent(
   eventId: string,
   meeting: MeetingData,
 ): Promise<void> {
-  await calendar.events.update({
+  await calendar.events.patch({
     calendarId: 'primary',
     eventId,
-    requestBody: buildEventBody(meeting),
+    conferenceDataVersion: 1,
+    sendUpdates: 'all',
+    requestBody: {
+      summary: meeting.title,
+      description: meeting.description ?? undefined,
+      start: { dateTime: meeting.startsAt.toISOString() },
+      end: { dateTime: (meeting.endsAt ?? new Date(meeting.startsAt.getTime() + 60 * 60 * 1000)).toISOString() },
+      attendees: (meeting.attendeeEmails ?? []).map((email) => ({ email })),
+    },
   });
 }
 
@@ -130,5 +147,6 @@ export async function deleteCalendarEvent(
   await calendar.events.delete({
     calendarId: 'primary',
     eventId,
+    sendUpdates: 'all',
   });
 }

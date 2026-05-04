@@ -220,6 +220,8 @@ model Meeting {
 
   // Google Calendar sync
   googleCalendarEventId String?
+  meetLink              String? // Google Meet URL
+  attendeeEmails        String? // JSON array of email strings
 }
 
 model PriceItem {
