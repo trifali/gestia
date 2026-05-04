@@ -86,7 +86,7 @@ type MeetingData = {
   attendeeEmails?: string[];
 };
 
-function buildEventBody(meeting: MeetingData) {
+function buildEventBody(meeting: MeetingData, includeConferenceData = false) {
   const start = meeting.startsAt;
   const end = meeting.endsAt ?? new Date(start.getTime() + 60 * 60 * 1000); // default 1 h
 
@@ -109,12 +109,14 @@ function buildEventBody(meeting: MeetingData) {
     start: { dateTime: toLocalISO(start), timeZone: TIMEZONE },
     end:   { dateTime: toLocalISO(end),   timeZone: TIMEZONE },
     attendees: (meeting.attendeeEmails ?? []).map((email) => ({ email })),
-    conferenceData: {
-      createRequest: {
-        requestId: `gestia-${start.getTime()}-${Math.random().toString(36).slice(2, 9)}`,
-        conferenceSolutionKey: { type: 'hangoutsMeet' },
+    ...(includeConferenceData ? {
+      conferenceData: {
+        createRequest: {
+          requestId: `gestia-${start.getTime()}-${Math.random().toString(36).slice(2, 9)}`,
+          conferenceSolutionKey: { type: 'hangoutsMeet' },
+        },
       },
-    },
+    } : {}),
   };
 }
 
@@ -128,7 +130,7 @@ export async function createCalendarEvent(
     calendarId: 'primary',
     conferenceDataVersion: 1,
     sendUpdates: 'all',
-    requestBody: buildEventBody(meeting),
+    requestBody: buildEventBody(meeting, true),
   });
   return {
     eventId: res.data.id!,
@@ -144,9 +146,9 @@ export async function updateCalendarEvent(
   await calendar.events.patch({
     calendarId: 'primary',
     eventId,
-    conferenceDataVersion: 1,
+    conferenceDataVersion: 0,
     sendUpdates: 'all',
-    requestBody: buildEventBody(meeting),
+    requestBody: buildEventBody(meeting, false),
   });
 }
 

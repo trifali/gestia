@@ -24,9 +24,11 @@ type Props = {
 function EmailTagInput({
   emails,
   onChange,
+  lockedEmails = [],
 }: {
   emails: string[];
   onChange: (emails: string[]) => void;
+  lockedEmails?: string[];
 }) {
   const [input, setInput] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
@@ -48,7 +50,9 @@ function EmailTagInput({
       e.preventDefault();
       addEmail(input);
     } else if (e.key === 'Backspace' && !input && emails.length > 0) {
-      onChange(emails.slice(0, -1));
+      // Don't remove locked emails via backspace
+      const last = emails[emails.length - 1];
+      if (!lockedEmails.includes(last)) onChange(emails.slice(0, -1));
     }
   };
 
@@ -61,22 +65,32 @@ function EmailTagInput({
       className='input min-h-[42px] flex flex-wrap gap-1.5 items-center cursor-text py-1.5'
       onClick={() => inputRef.current?.focus()}
     >
-      {emails.map((email) => (
-        <span
-          key={email}
-          className='inline-flex items-center gap-1 bg-accent/10 text-accent text-xs font-medium px-2 py-0.5 rounded-full'
-        >
-          {email}
-          <button
-            type='button'
-            className='hover:text-danger transition-colors'
-            onClick={(e) => { e.stopPropagation(); onChange(emails.filter((x) => x !== email)); }}
-            aria-label={`Retirer ${email}`}
+      {emails.map((email) => {
+        const locked = lockedEmails.includes(email);
+        return (
+          <span
+            key={email}
+            className={[
+              'inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full',
+              locked ? 'bg-canvas-200 text-muted' : 'bg-accent/10 text-accent',
+            ].join(' ')}
           >
-            ✕
-          </button>
-        </span>
-      ))}
+            {email}
+            {locked ? (
+              <span className='text-muted/50 text-[10px]' title='Invité existant'>🔒</span>
+            ) : (
+              <button
+                type='button'
+                className='hover:text-danger transition-colors'
+                onClick={(e) => { e.stopPropagation(); onChange(emails.filter((x) => x !== email)); }}
+                aria-label={`Retirer ${email}`}
+              >
+                ✕
+              </button>
+            )}
+          </span>
+        );
+      })}
       <input
         ref={inputRef}
         type='email'
@@ -125,6 +139,8 @@ export function MeetingForm({ meeting, clientId: presetClientId, clientName, cli
   // Track if user has manually edited the title so we don't overwrite it on client change
   const [titleDirty, setTitleDirty] = useState(!!meeting?.title);
   const [emails, setEmails] = useState<string[]>(initialEmails);
+  // Emails already on the meeting cannot be removed — only new ones can
+  const lockedEmails = initialEmails();
   const [saving, setSaving] = useState(false);
 
   const onSubmit = async (e: React.FormEvent) => {
@@ -239,7 +255,7 @@ export function MeetingForm({ meeting, clientId: presetClientId, clientName, cli
         {/* Invited emails */}
         <div className='col-span-2'>
           <label className='label'>Invités</label>
-          <EmailTagInput emails={emails} onChange={setEmails} />
+          <EmailTagInput emails={emails} onChange={setEmails} lockedEmails={meeting ? lockedEmails : []} />
           <p className='text-xs text-muted mt-1'>
             Appuyez sur Entrée ou virgule pour ajouter. Les invités recevront une invitation Google Agenda.
           </p>

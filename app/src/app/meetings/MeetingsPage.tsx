@@ -61,6 +61,17 @@ export default function MeetingsPage() {
         </div>
       )}
 
+      {calConnected && (
+        <div className='mb-5 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-800 flex items-start gap-3'>
+          <span className='text-lg leading-tight'>ℹ️</span>
+          <div>
+            <strong>Synchronisation Google Agenda unidirectionnelle.</strong>{' '}
+            Les rencontres créées ici sont automatiquement ajoutées à votre Google Agenda et les invités reçoivent une invitation.{' '}
+            Cependant, toute modification ou suppression effectuée <em>directement dans Google Agenda</em> ne sera pas répercutée dans cette application — gérez toujours vos rencontres depuis ici.
+          </div>
+        </div>
+      )}
+
       {isLoading ? (
         <div className='text-muted'>Chargement…</div>
       ) : !meetings || meetings.length === 0 ? (

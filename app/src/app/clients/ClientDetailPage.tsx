@@ -247,6 +247,17 @@ function RencontresTab({ client }: { client: ClientDetail }) {
         </div>
       )}
 
+      {calConnected && (
+        <div className='mb-4 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-800 flex items-start gap-3'>
+          <span className='text-lg leading-tight'>ℹ️</span>
+          <div>
+            <strong>Synchronisation unidirectionnelle.</strong>{' '}
+            Les rencontres sont synchronisées vers Google Agenda et les invités reçoivent une invitation par courriel.{' '}
+            Les modifications faites <em>directement dans Google Agenda</em> ne sont pas reflétées ici — gérez toujours vos rencontres depuis cette application.
+          </div>
+        </div>
+      )}
+
       {client.meetings.length === 0 ? (
         <p className='text-muted text-sm'>Aucune rencontre pour ce client.</p>
       ) : (

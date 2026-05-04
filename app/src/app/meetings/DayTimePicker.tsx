@@ -161,15 +161,12 @@ export function DayTimePicker({ value, onChange, duration, onDurationChange }: P
   // Track whether this is the very first busy-data load so we don't
   // accidentally clear a pre-selected time when editing an existing meeting
   // (the meeting's own slot shows up as "busy" in the calendar).
-  const firstLoadRef = useRef(true);
+  const userSelectedTimeRef = useRef(false);
 
-  // Clear the selected time if busy data has loaded and the current slot is unavailable
+  // Clear the selected time if busy data has loaded and the current slot is unavailable.
+  // Only applies to times the user explicitly clicked — never to pre-loaded times (edit mode).
   useEffect(() => {
-    if (firstLoadRef.current) {
-      // Skip the check on first load — preserve whatever was pre-selected.
-      if (!busyLoading) firstLoadRef.current = false;
-      return;
-    }
+    if (!userSelectedTimeRef.current) return;
     if (!busyLoading && selectedTime && !slotStartable(selectedTime, selectedDate, busy, duration)) {
       onChange(selectedDate); // date only, no time
     }
@@ -187,9 +184,9 @@ export function DayTimePicker({ value, onChange, duration, onDurationChange }: P
 
   const onDateSelect = (d: string) => {
     setSelectedDate(d);
-    // Don't carry the time over — wait for busy data to load, then the effect above
-    // will either keep it (if available) or clear it (if occupied).
-    // We pass date-only until a slot is explicitly chosen on the new day.
+    // Changing the date resets the "user explicitly picked a time" flag so
+    // the auto-clear won't fire until they actively choose a slot on the new day.
+    userSelectedTimeRef.current = false;
     onChange(d);
   };
 
@@ -263,7 +260,7 @@ export function DayTimePicker({ value, onChange, duration, onDurationChange }: P
                       key={time}
                       type='button'
                       disabled={!startable && !inSel}
-                      onClick={() => { if (startable) onChange(`${selectedDate}T${time}`); }}
+                      onClick={() => { if (startable) { userSelectedTimeRef.current = true; onChange(`${selectedDate}T${time}`); } }}
                       className={[
                         'w-full flex items-center gap-2 px-3 py-[5px] text-left transition-colors',
                         inSel   ? 'bg-accent text-white' : '',
