@@ -55,7 +55,7 @@ export const getCalendarBusySlots = async (
 export const getMeetings: GetMeetings<void, MeetingWithClient[]> = async (_args, context) => {
   const companyId = ensureCompany(context.user);
   return context.entities.Meeting.findMany({
-    where: { companyId },
+    where: { companyId, archived: false },
     include: { client: true },
     orderBy: { startsAt: 'asc' },
   });
@@ -260,5 +260,34 @@ export const deleteMeeting: DeleteMeeting<{ id: string }, { id: string }> = asyn
 
   await context.entities.Meeting.delete({ where: { id } });
   return { id };
+};
+
+export const archiveMeeting = async ({ id }: { id: string }, context: any): Promise<Meeting> => {
+  const companyId = ensureCompany(context.user);
+  const existing = await context.entities.Meeting.findUnique({ where: { id } });
+  if (!existing || existing.companyId !== companyId) throw new HttpError(404);
+  return context.entities.Meeting.update({
+    where: { id },
+    data: { archived: true } as any,
+  });
+};
+
+export const unarchiveMeeting = async ({ id }: { id: string }, context: any): Promise<Meeting> => {
+  const companyId = ensureCompany(context.user);
+  const existing = await context.entities.Meeting.findUnique({ where: { id } });
+  if (!existing || existing.companyId !== companyId) throw new HttpError(404);
+  return context.entities.Meeting.update({
+    where: { id },
+    data: { archived: false } as any,
+  });
+};
+
+export const getArchivedMeetings = async (_args: void, context: any): Promise<MeetingWithClient[]> => {
+  const companyId = ensureCompany(context.user);
+  return context.entities.Meeting.findMany({
+    where: { companyId, archived: true },
+    include: { client: true },
+    orderBy: { startsAt: 'desc' },
+  });
 };
 

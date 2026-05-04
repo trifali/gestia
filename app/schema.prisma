@@ -222,6 +222,8 @@ model Meeting {
   googleCalendarEventId String?
   meetLink              String? // Google Meet URL
   attendeeEmails        String? // JSON array of email strings
+
+  archived Boolean @default(false)
 }
 
 model PriceItem {

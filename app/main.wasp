@@ -304,6 +304,18 @@ action deleteMeeting {
   fn: import { deleteMeeting } from "@src/app/meetings/operations",
   entities: [User, Meeting]
 }
+action archiveMeeting {
+  fn: import { archiveMeeting } from "@src/app/meetings/operations",
+  entities: [Meeting]
+}
+action unarchiveMeeting {
+  fn: import { unarchiveMeeting } from "@src/app/meetings/operations",
+  entities: [Meeting]
+}
+query getArchivedMeetings {
+  fn: import { getArchivedMeetings } from "@src/app/meetings/operations",
+  entities: [Meeting, Client]
+}
 
 query getGoogleCalendarStatus {
   fn: import { getGoogleCalendarStatus } from "@src/app/settings/integrationsOperations",

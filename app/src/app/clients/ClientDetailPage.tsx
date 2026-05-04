@@ -7,6 +7,7 @@ import {
   getClientDetail,
   getProjects,
   deleteMeeting,
+  archiveMeeting,
   updateClient,
   getClientActivities,
   getGoogleCalendarStatus,
@@ -220,13 +221,18 @@ function RencontresTab({ client }: { client: ClientDetail }) {
   const { ask, Dialog: ConfirmDialog } = useConfirm();
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState<any>(null);
+  const [showPast, setShowPast] = useState(false);
   const { data: calStatus } = useQuery(getGoogleCalendarStatus);
   const calConnected = (calStatus as { connected?: boolean } | undefined)?.connected ?? false;
+
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const upcoming = client.meetings.filter((m) => new Date(m.startsAt) >= today);
+  const past = client.meetings.filter((m) => new Date(m.startsAt) < today);
 
   return (
     <>
       <div className='flex items-center justify-between mb-4'>
-        <p className='text-sm text-muted'>{client.meetings.length} rencontre(s)</p>
+        <p className='text-sm text-muted'>{upcoming.length} rencontre(s) à venir</p>
         <button
           className='btn-primary'
           onClick={() => setCreating(true)}
@@ -258,10 +264,13 @@ function RencontresTab({ client }: { client: ClientDetail }) {
         </div>
       )}
 
-      {client.meetings.length === 0 ? (
+      {/* Upcoming meetings */}
+      {upcoming.length === 0 && past.length === 0 ? (
         <p className='text-muted text-sm'>Aucune rencontre pour ce client.</p>
+      ) : upcoming.length === 0 ? (
+        <p className='text-muted text-sm'>Aucune rencontre à venir.</p>
       ) : (
-        <div className='table-wrap'>
+        <div className='table-wrap mb-4'>
           <table>
             <thead>
               <tr>
@@ -273,7 +282,7 @@ function RencontresTab({ client }: { client: ClientDetail }) {
               </tr>
             </thead>
             <tbody>
-              {client.meetings.map((m) => {
+              {upcoming.map((m) => {
                 let attendees: string[] = [];
                 try { attendees = JSON.parse((m as any).attendeeEmails || '[]'); } catch { /* ignore */ }
                 return (
@@ -287,35 +296,25 @@ function RencontresTab({ client }: { client: ClientDetail }) {
                     </td>
                     <td>
                       {(m as any).meetLink ? (
-                        <a
-                          href={(m as any).meetLink}
-                          target='_blank'
-                          rel='noreferrer'
-                          className='text-sm text-blue-600 hover:underline font-medium'
-                        >
+                        <a href={(m as any).meetLink} target='_blank' rel='noreferrer'
+                          className='text-sm text-blue-600 hover:underline font-medium'>
                           🎥 Rejoindre
                         </a>
                       ) : <span className='text-muted text-sm'>—</span>}
                     </td>
                     <td className='text-right'>
                       <div className='flex items-center justify-end gap-1'>
-                        <IconBtn title='Modifier' onClick={() => setEditing(m)}>
-                          <LuPencil size={14} />
-                        </IconBtn>
+                        <IconBtn title='Modifier' onClick={() => setEditing(m)}><LuPencil size={14} /></IconBtn>
                         <IconBtn variant='danger' title='Supprimer' onClick={async () => {
-                          if (await ask(`Supprimer la rencontre « ${m.title} » ?`)) {
+                          if (await ask(`Supprimer la rencontre « ${m.title} » ?`)) {
                             try {
                               await deleteMeeting({ id: m.id });
-                              const attendees: string[] = (() => { try { return JSON.parse((m as any).attendeeEmails || '[]'); } catch { return []; } })();
-                              const msg = attendees.length > 0 ? ` — ${attendees.length} invité${attendees.length > 1 ? 's' : ''} notifié${attendees.length > 1 ? 's' : ''}` : '';
+                              const att: string[] = (() => { try { return JSON.parse((m as any).attendeeEmails || '[]'); } catch { return []; } })();
+                              const msg = att.length > 0 ? ` — ${att.length} invité${att.length > 1 ? 's' : ''} notifié${att.length > 1 ? 's' : ''}` : '';
                               toast.success(`Rencontre supprimée${msg}`);
-                            } catch (err: any) {
-                              toast.error(err?.message || 'Erreur lors de la suppression');
-                            }
+                            } catch (err: any) { toast.error(err?.message || 'Erreur lors de la suppression'); }
                           }
-                        }}>
-                          <TrashIcon />
-                        </IconBtn>
+                        }}><TrashIcon /></IconBtn>
                       </div>
                     </td>
                   </tr>
@@ -325,6 +324,84 @@ function RencontresTab({ client }: { client: ClientDetail }) {
           </table>
         </div>
       )}
+
+      {/* Past meetings */}
+      {past.length > 0 && (
+        <div className='mt-2'>
+          <button
+            type='button'
+            onClick={() => setShowPast((v) => !v)}
+            className='flex items-center gap-2 text-sm text-muted hover:text-foreground transition-colors font-medium mb-3'
+          >
+            <span className={`transition-transform ${showPast ? 'rotate-90' : ''}`}>›</span>
+            {showPast ? 'Masquer' : 'Afficher'} les rencontres passées ({past.length})
+          </button>
+          {showPast && (
+            <div className='table-wrap opacity-70'>
+              <table>
+                <thead>
+                  <tr>
+                    <th>Titre</th>
+                    <th>Date</th>
+                    <th>Invités</th>
+                    <th>Lien Meet</th>
+                    <th className='text-right'>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {past.map((m) => {
+                    let attendees: string[] = [];
+                    try { attendees = JSON.parse((m as any).attendeeEmails || '[]'); } catch { /* ignore */ }
+                    return (
+                      <tr key={m.id}>
+                        <td className='font-medium'>{m.title}</td>
+                        <td className='text-muted'>{formatDateTime(m.startsAt)}</td>
+                        <td className='text-muted text-sm'>
+                          {attendees.length > 0
+                            ? <span title={attendees.join(', ')}>{attendees.length} invité{attendees.length > 1 ? 's' : ''}</span>
+                            : '—'}
+                        </td>
+                        <td>
+                          {(m as any).meetLink ? (
+                            <a href={(m as any).meetLink} target='_blank' rel='noreferrer'
+                              className='text-sm text-blue-600 hover:underline font-medium'>
+                              🎥 Rejoindre
+                            </a>
+                          ) : <span className='text-muted text-sm'>—</span>}
+                        </td>
+                        <td className='text-right'>
+                          <div className='flex items-center justify-end gap-1'>
+                            <button
+                              type='button'
+                              onClick={async () => {
+                                try { await archiveMeeting({ id: m.id }); toast.success('Rencontre archivée'); }
+                                catch (err: any) { toast.error(err?.message || 'Erreur'); }
+                              }}
+                              className='px-2 py-1 text-xs rounded border border-canvas-300 text-muted hover:bg-canvas-100 transition-colors'
+                            >
+                              📦 Archiver
+                            </button>
+                            <IconBtn title='Modifier' onClick={() => setEditing(m)}><LuPencil size={14} /></IconBtn>
+                            <IconBtn variant='danger' title='Supprimer' onClick={async () => {
+                              if (await ask(`Supprimer la rencontre « ${m.title} » ?`)) {
+                                try {
+                                  await deleteMeeting({ id: m.id });
+                                  toast.success('Rencontre supprimée');
+                                } catch (err: any) { toast.error(err?.message || 'Erreur lors de la suppression'); }
+                              }
+                            }}><TrashIcon /></IconBtn>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+
       {(creating || editing) && (
         <MeetingForm
           meeting={editing}
