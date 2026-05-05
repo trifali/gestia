@@ -126,7 +126,6 @@ model Project {
   tasks        ProjectTask[]
   notes        ProjectNote[]
   clientAccess ProjectClientAccess[]
-  links        ProjectLink[]
   files        ProjectFile[]
 }
 
@@ -174,20 +173,6 @@ model ProjectClientAccess {
   isRevoked  Boolean   @default(false)
   expiresAt  DateTime?
   lastUsedAt DateTime?
-}
-
-model ProjectLink {
-  id        String   @id @default(uuid())
-  createdAt DateTime @default(now())
-
-  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  projectId String
-
-  title       String
-  url         String
-  description String?
-  category    String  @default("autre") // design | dev | doc | credential | reference | autre
-  sortOrder   Int     @default(0)
 }
 
 model ProjectFile {

@@ -230,7 +230,7 @@ query getProjects {
 }
 query getProjectDetail {
   fn: import { getProjectDetail } from "@src/app/projects/projectDetailOperations",
-  entities: [User, Project, Client, ProjectTask, ProjectNote, ProjectClientAccess, ProjectLink]
+  entities: [User, Project, Client, ProjectTask, ProjectNote, ProjectClientAccess]
 }
 query getProjectByToken {
   fn: import { getProjectByToken } from "@src/app/projects/projectDetailOperations",
@@ -288,18 +288,7 @@ action revokeProjectClientAccess {
   fn: import { revokeProjectClientAccess } from "@src/app/projects/projectDetailOperations",
   entities: [User, Project, ProjectClientAccess]
 }
-action createProjectLink {
-  fn: import { createProjectLink } from "@src/app/projects/projectDetailOperations",
-  entities: [User, Project, ProjectLink]
-}
-action updateProjectLink {
-  fn: import { updateProjectLink } from "@src/app/projects/projectDetailOperations",
-  entities: [User, Project, ProjectLink]
-}
-action deleteProjectLink {
-  fn: import { deleteProjectLink } from "@src/app/projects/projectDetailOperations",
-  entities: [User, Project, ProjectLink]
-}
+
 action submitPortalFile {
   fn: import { submitPortalFile } from "@src/app/projects/projectFileOperations",
   entities: [Project, ProjectFile, ProjectClientAccess]

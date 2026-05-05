@@ -28,7 +28,6 @@ type ProjectDetailResult = {
   notes: any[];
   privateNotes: any[];
   clientAccess: any[];
-  links: any[];
 };
 
 export const getProjectDetail = async (
@@ -42,7 +41,7 @@ export const getProjectDetail = async (
   });
   if (!project || project.companyId !== companyId) throw new HttpError(404);
 
-  const [tasks, allNotes, clientAccess, links] = await Promise.all([
+  const [tasks, allNotes, clientAccess] = await Promise.all([
     context.entities.ProjectTask.findMany({
       where: { projectId },
       orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],
@@ -56,16 +55,12 @@ export const getProjectDetail = async (
       where: { projectId },
       orderBy: { createdAt: 'desc' },
     }),
-    context.entities.ProjectLink.findMany({
-      where: { projectId },
-      orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],
-    }),
   ]);
 
   const notes = allNotes.filter((n: any) => !n.isPrivate);
   const privateNotes = allNotes.filter((n: any) => n.isPrivate);
 
-  return { project, tasks, notes, privateNotes, clientAccess, links };
+  return { project, tasks, notes, privateNotes, clientAccess };
 };
 
 // ─── getProjectByToken (public – no auth) ─────────────────────────────────────
@@ -252,44 +247,6 @@ export const revokeProjectClientAccess = async ({ id }: { id: string }, context:
   if (!access) throw new HttpError(404);
   await ensureProjectOwned(access.projectId, companyId, context.entities);
   return context.entities.ProjectClientAccess.update({ where: { id }, data: { isRevoked: true } });
-};
-
-// ─── ProjectLink operations ───────────────────────────────────────────────────
-
-type CreateLinkArgs = { projectId: string; title: string; url: string; description?: string; category?: string };
-export const createProjectLink = async (args: CreateLinkArgs, context: any) => {
-  const companyId = ensureCompany(context.user);
-  await ensureProjectOwned(args.projectId, companyId, context.entities);
-  if (!args.title?.trim() || !args.url?.trim()) throw new HttpError(400, 'Titre et URL sont requis');
-  const count = await context.entities.ProjectLink.count({ where: { projectId: args.projectId } });
-  return context.entities.ProjectLink.create({
-    data: {
-      projectId: args.projectId,
-      title: args.title.trim(),
-      url: args.url.trim(),
-      description: args.description || null,
-      category: args.category || 'autre',
-      sortOrder: count,
-    },
-  });
-};
-
-type UpdateLinkArgs = { id: string; title?: string; url?: string; description?: string; category?: string };
-export const updateProjectLink = async ({ id, ...rest }: UpdateLinkArgs, context: any) => {
-  const companyId = ensureCompany(context.user);
-  const link = await context.entities.ProjectLink.findUnique({ where: { id } });
-  if (!link) throw new HttpError(404);
-  await ensureProjectOwned(link.projectId, companyId, context.entities);
-  return context.entities.ProjectLink.update({ where: { id }, data: rest });
-};
-
-export const deleteProjectLink = async ({ id }: { id: string }, context: any) => {
-  const companyId = ensureCompany(context.user);
-  const link = await context.entities.ProjectLink.findUnique({ where: { id } });
-  if (!link) throw new HttpError(404);
-  await ensureProjectOwned(link.projectId, companyId, context.entities);
-  await context.entities.ProjectLink.delete({ where: { id } });
-  return { id };
 };
 
 // ─── Public portal actions (no auth) ─────────────────────────────────────────

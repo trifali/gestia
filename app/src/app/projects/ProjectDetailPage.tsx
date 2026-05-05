@@ -15,16 +15,12 @@ import {
   deleteProjectNote,
   createProjectClientAccess,
   revokeProjectClientAccess,
-  createProjectLink,
-  updateProjectLink,
-  deleteProjectLink,
 } from 'wasp/client/operations';
 import {
   LuLayoutDashboard,
   LuSquareCheck,
   LuFileText,
   LuLock,
-  LuLink,
   LuUsers,
   LuArrowLeft,
   LuPlus,
@@ -71,15 +67,6 @@ const TASK_PRIORITY: Record<string, { label: string; className: string; color: s
   high: { label: 'Haute', className: 'text-red-500', color: '#ef4444' },
 };
 
-const LINK_CATEGORIES: Record<string, { label: string; emoji: string }> = {
-  design: { label: 'Design', emoji: '🎨' },
-  dev: { label: 'Développement', emoji: '💻' },
-  doc: { label: 'Document', emoji: '📄' },
-  credential: { label: 'Accès / Identifiants', emoji: '🔑' },
-  reference: { label: 'Référence', emoji: '📎' },
-  autre: { label: 'Autre', emoji: '🔗' },
-};
-
 // ─── Tabs ─────────────────────────────────────────────────────────────────────
 
 const TABS = [
@@ -87,7 +74,6 @@ const TABS = [
   { id: 'taches', label: 'Tâches', icon: <LuSquareCheck size={16} /> },
   { id: 'notes', label: 'Notes', icon: <LuFileText size={16} /> },
   { id: 'privees', label: 'Notes privées', icon: <LuLock size={16} /> },
-  { id: 'ressources', label: 'Ressources', icon: <LuLink size={16} /> },
   { id: 'portail', label: 'Portail client', icon: <LuUsers size={16} /> },
   { id: 'fichiers', label: 'Fichiers', icon: <LuFolderOpen size={16} /> },
 ] as const;
@@ -123,7 +109,7 @@ export default function ProjectDetailPage() {
     );
   }
 
-  const { project, tasks, notes, privateNotes, clientAccess, links } = data as any;
+  const { project, tasks, notes, privateNotes, clientAccess } = data as any;
   const doneTasks = tasks.filter((t: any) => t.status === 'done').length;
 
   return (
@@ -177,7 +163,6 @@ export default function ProjectDetailPage() {
         {activeTab === 'taches' && <TasksTab projectId={projectId!} tasks={tasks} />}
         {activeTab === 'notes' && <NotesTab projectId={projectId!} notes={notes} isPrivate={false} />}
         {activeTab === 'privees' && <NotesTab projectId={projectId!} notes={privateNotes} isPrivate={true} />}
-        {activeTab === 'ressources' && <LinksTab projectId={projectId!} links={links} />}
         {activeTab === 'portail' && <PortalTab projectId={projectId!} clientAccess={clientAccess} />}
         {activeTab === 'fichiers' && <ProjectFileManagerTab projectId={projectId!} />}
       </div>
@@ -662,165 +647,6 @@ function NoteEditCard({ note, onClose }: { note: any; onClose: () => void }) {
         <button className='btn-secondary text-sm' onClick={onClose}>Annuler</button>
         <button className='btn-primary text-sm' onClick={save} disabled={saving || !content.trim()}>Enregistrer</button>
       </div>
-    </div>
-  );
-}
-
-// ─── Tab: Ressources ──────────────────────────────────────────────────────────
-
-function LinksTab({ projectId, links }: { projectId: string; links: any[] }) {
-  const [adding, setAdding] = useState(false);
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const { ask, Dialog } = useConfirm();
-
-  const remove = async (link: any) => {
-    if (await ask(`Supprimer « ${link.title} » ?`)) {
-      try {
-        await deleteProjectLink({ id: link.id });
-        toast.success('Lien supprimé');
-      } catch (err: any) {
-        toast.error(err?.message);
-      }
-    }
-  };
-
-  const grouped: Record<string, any[]> = {};
-  for (const cat of Object.keys(LINK_CATEGORIES)) {
-    const items = links.filter((l) => l.category === cat);
-    if (items.length > 0) grouped[cat] = items;
-  }
-
-  return (
-    <div className='flex flex-col gap-5 max-w-2xl'>
-      <div className='flex justify-end'>
-        <button className='btn-primary flex items-center gap-2' onClick={() => setAdding(!adding)}>
-          <LuPlus size={16} /> Ajouter un lien
-        </button>
-      </div>
-
-      {adding && <LinkAddForm projectId={projectId} onClose={() => setAdding(false)} />}
-
-      {links.length === 0 ? (
-        <p className='text-muted text-sm text-center py-10'>Aucune ressource ajoutée.</p>
-      ) : (
-        Object.entries(grouped).map(([cat, items]) => (
-          <div key={cat}>
-            <h3 className='text-xs font-semibold uppercase tracking-wider text-muted mb-2'>
-              {LINK_CATEGORIES[cat]?.emoji} {LINK_CATEGORIES[cat]?.label}
-            </h3>
-            <div className='flex flex-col gap-2'>
-              {items.map((link) =>
-                editingId === link.id ? (
-                  <LinkEditCard key={link.id} link={link} onClose={() => setEditingId(null)} />
-                ) : (
-                  <div key={link.id} className='card px-4 py-3 flex items-start gap-3 group'>
-                    <LuLink size={16} className='text-muted shrink-0 mt-0.5' />
-                    <div className='flex-1 min-w-0'>
-                      <div className='flex items-center gap-2'>
-                        <a
-                          href={link.url}
-                          target='_blank'
-                          rel='noreferrer'
-                          className='text-sm font-medium text-accent hover:underline truncate'
-                        >
-                          {link.title}
-                        </a>
-                        <LuExternalLink size={12} className='text-muted shrink-0' />
-                      </div>
-                      {link.description && <p className='text-xs text-muted mt-0.5 truncate'>{link.description}</p>}
-                      <p className='text-xs text-muted/60 truncate'>{link.url}</p>
-                    </div>
-                    <div className='flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity'>
-                      <IconBtn title='Copier' onClick={() => { navigator.clipboard.writeText(link.url); toast.success('URL copiée'); }}>
-                        <LuCopy size={14} />
-                      </IconBtn>
-                      <IconBtn title='Modifier' onClick={() => setEditingId(link.id)}><LuPencil size={14} /></IconBtn>
-                      <IconBtn variant='danger' title='Supprimer' onClick={() => remove(link)}><LuTrash2 size={14} /></IconBtn>
-                    </div>
-                  </div>
-                )
-              )}
-            </div>
-          </div>
-        ))
-      )}
-      {Dialog}
-    </div>
-  );
-}
-
-function LinkAddForm({ projectId, onClose }: { projectId: string; onClose: () => void }) {
-  const [form, setForm] = useState({ title: '', url: '', description: '', category: 'autre' });
-  const [saving, setSaving] = useState(false);
-
-  const submit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setSaving(true);
-    try {
-      await createProjectLink({ projectId, ...form });
-      toast.success('Lien ajouté');
-      onClose();
-    } catch (err: any) {
-      toast.error(err?.message || 'Erreur');
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  return (
-    <div className='card p-4 border-2 border-accent/30'>
-      <form onSubmit={submit} className='flex flex-col gap-3'>
-        <input autoFocus className='input' required placeholder='Titre *' value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} />
-        <input className='input' required placeholder='URL * (https://…)' type='url' value={form.url} onChange={(e) => setForm({ ...form, url: e.target.value })} />
-        <input className='input' placeholder='Description' value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} />
-        <select className='input' value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })}>
-          {Object.entries(LINK_CATEGORIES).map(([v, { label, emoji }]) => (
-            <option key={v} value={v}>{emoji} {label}</option>
-          ))}
-        </select>
-        <div className='flex justify-end gap-2'>
-          <button type='button' className='btn-secondary text-sm' onClick={onClose}>Annuler</button>
-          <button type='submit' className='btn-primary text-sm' disabled={saving}>Ajouter</button>
-        </div>
-      </form>
-    </div>
-  );
-}
-
-function LinkEditCard({ link, onClose }: { link: any; onClose: () => void }) {
-  const [form, setForm] = useState({ title: link.title, url: link.url, description: link.description || '', category: link.category });
-  const [saving, setSaving] = useState(false);
-
-  const save = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setSaving(true);
-    try {
-      await updateProjectLink({ id: link.id, ...form });
-      toast.success('Lien modifié');
-      onClose();
-    } catch (err: any) {
-      toast.error(err?.message);
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  return (
-    <div className='card p-4 border-2 border-accent/30'>
-      <form onSubmit={save} className='flex flex-col gap-3'>
-        <input autoFocus className='input' required value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} />
-        <input className='input' required type='url' value={form.url} onChange={(e) => setForm({ ...form, url: e.target.value })} />
-        <input className='input' value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} />
-        <select className='input' value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })}>
-          {Object.entries(LINK_CATEGORIES).map(([v, { label, emoji }]) => (
-            <option key={v} value={v}>{emoji} {label}</option>
-          ))}
-        </select>
-        <div className='flex justify-end gap-2'>
-          <button type='button' className='btn-secondary text-sm' onClick={onClose}>Annuler</button>
-          <button type='submit' className='btn-primary text-sm' disabled={saving}>Enregistrer</button>
-        </div>
-      </form>
     </div>
   );
 }
