@@ -10,6 +10,7 @@ import {
 import toast from 'react-hot-toast';
 import { LuUpload, LuFilePlus, LuX } from 'react-icons/lu';
 import { FilePreviewModal } from './FilePreviewModal';
+import { FileEditorModal, type EditorFileInfo } from './FileEditorModal';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -35,6 +36,10 @@ export interface FileManagerOperations {
   moveFiles: (params: { ids: string[]; targetParentId: string | null }) => Promise<any>;
   /** Optional — if not provided the "Nouveau fichier" button is hidden */
   createNewFile?: (params: { name: string; type: NewFileType; parentId: string | null }) => Promise<any>;
+  /** Load editor content for a file (txt/md/json/docx/xlsx). If not provided, no inline editing. */
+  getEditorContent?: (id: string) => Promise<any>;
+  /** Save edited content back. If not provided, editor is read-only. */
+  saveFileContent?: (id: string, content: string, contentType: 'text' | 'html' | 'spreadsheet') => Promise<any>;
   /** Unique DOM id suffix (prevents collisions when both are on screen) */
   instanceId: string;
 }
@@ -192,11 +197,12 @@ function NewFileDialog({
 // ─── Shared File Manager ──────────────────────────────────────────────────────
 
 export function SharedFileManager({ ops }: { ops: FileManagerOperations }) {
-  const { files: rawFiles, isFetching, refetch, upload, createFolder, deleteFiles, renameFile, moveFiles, createNewFile, instanceId } = ops;
+  const { files: rawFiles, isFetching, refetch, upload, createFolder, deleteFiles, renameFile, moveFiles, createNewFile, getEditorContent, saveFileContent, instanceId } = ops;
 
   const [fileSystemData, setFileSystemData] = useState<FileData[]>(() => toFileData([]));
   const [dataReady, setDataReady] = useState(false);
   const [previewFile, setPreviewFile] = useState<{ name: string; mimeType: string | null; url: string | null } | null>(null);
+  const [editorFile, setEditorFile] = useState<EditorFileInfo | null>(null);
   const [showNewFileDialog, setShowNewFileDialog] = useState(false);
   const [currentFolderId, setCurrentFolderId] = useState<string | null>(null);
 
@@ -319,6 +325,8 @@ export function SharedFileManager({ ops }: { ops: FileManagerOperations }) {
 
   // ─── File open / folder navigate ──────────────────────────────────────────
 
+  const EDITABLE_EXTS = new Set(['txt', 'md', 'json', 'csv', 'docx', 'xlsx']);
+
   const handleFileOpen = useCallback((args: any) => {
     const d = args?.fileDetails as any;
     if (!d) return;
@@ -327,8 +335,13 @@ export function SharedFileManager({ ops }: { ops: FileManagerOperations }) {
       return;
     }
     args.cancel = true;
-    setPreviewFile({ name: d.name, mimeType: d._mimeType ?? null, url: d._url ?? null });
-  }, []);
+    const ext = d.name.split('.').pop()?.toLowerCase() ?? '';
+    if (getEditorContent && EDITABLE_EXTS.has(ext)) {
+      setEditorFile({ id: d.id, name: d.name, mimeType: d._mimeType ?? null, url: d._url ?? null });
+    } else {
+      setPreviewFile({ name: d.name, mimeType: d._mimeType ?? null, url: d._url ?? null });
+    }
+  }, [getEditorContent]);
 
   // ─── Syncfusion restoreFocus crash workaround ─────────────────────────────
 
@@ -424,6 +437,15 @@ export function SharedFileManager({ ops }: { ops: FileManagerOperations }) {
       )}
 
       <FilePreviewModal file={previewFile} onClose={() => setPreviewFile(null)} />
+
+      {getEditorContent && (
+        <FileEditorModal
+          file={editorFile}
+          onClose={() => setEditorFile(null)}
+          fetchContent={getEditorContent}
+          saveContent={saveFileContent}
+        />
+      )}
     </div>
   );
 }

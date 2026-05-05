@@ -11,6 +11,12 @@
 @import "../../node_modules/@syncfusion/ej2-layouts/styles/material.css";
 @import "../../node_modules/@syncfusion/ej2-grids/styles/material.css";
 @import "../../node_modules/@syncfusion/ej2-react-filemanager/styles/material.css";
+/* Syncfusion Editor styles */
+@import "../../node_modules/@syncfusion/ej2-lists/styles/material.css";
+@import "../../node_modules/@syncfusion/ej2-splitbuttons/styles/material.css";
+@import "../../node_modules/@syncfusion/ej2-richtexteditor/styles/material.css";
+@import "../../node_modules/@syncfusion/ej2-spreadsheet/styles/material.css";
+@import "../../node_modules/@syncfusion/ej2-documenteditor/styles/material.css";
 
 @tailwind base;
 @tailwind components;

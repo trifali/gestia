@@ -1,9 +1,9 @@
 import { HttpError } from 'wasp/server';
 import { randomBytes } from 'crypto';
 import * as XLSX from 'xlsx';
-import { Document, Packer, Paragraph } from 'docx';
+import { Document, Packer, Paragraph, TextRun } from 'docx';
 import sharp from 'sharp';
-import { putObject, removeObject, getPresignedUrl } from '../../server/storage';
+import { putObject, removeObject, getPresignedUrl, getObjectBuffer } from '../../server/storage';
 
 // JPEG quality for compressed image uploads
 const IMAGE_JPEG_QUALITY = 82;
@@ -497,5 +497,225 @@ export const movePortalFiles = async (
   await context.entities.ProjectFile.updateMany({
     where: { id: { in: validIds } },
     data: { parentId: targetParentId ?? null },
+  });
+};
+
+// ─── Editor content helpers ───────────────────────────────────────────────────
+
+import mammoth from 'mammoth';
+
+type EditorContent =
+  | { type: 'text'; content: string }
+  | { type: 'html'; content: string }
+  | {
+      type: 'spreadsheet';
+      /** Full Syncfusion workbook JSON when sidecar exists (preserves styles, dimensions, formulas, merges). */
+      workbook?: any;
+      /** Plain 2D cell values (always populated as a fallback). */
+      sheets: { name: string; data: any[][] }[];
+    };
+
+/** Sidecar key for the lossless Syncfusion workbook JSON. */
+function sfjsonKey(key: string): string {
+  return `${key}.sfjson`;
+}
+
+async function buildEditorContent(file: any): Promise<EditorContent> {
+  if (!file.key) throw new HttpError(400, 'Ce fichier n\'a pas de contenu');
+
+  const ext = file.name.split('.').pop()?.toLowerCase() ?? '';
+
+  // Read directly from MinIO (no presigned URL / HTTP caching layer)
+  const buffer = await getObjectBuffer(file.key);
+
+  if (['txt', 'md', 'json', 'csv'].includes(ext)) {
+    return { type: 'text', content: buffer.toString('utf-8') };
+  }
+
+  if (ext === 'docx') {
+    const result = await mammoth.convertToHtml({ buffer });
+    return { type: 'html', content: result.value || '' };
+  }
+
+  if (ext === 'xlsx') {
+    // Try to load the lossless Syncfusion sidecar first
+    let workbookJson: any | undefined;
+    try {
+      const sidecarBuf = await getObjectBuffer(sfjsonKey(file.key));
+      workbookJson = JSON.parse(sidecarBuf.toString('utf-8'));
+    } catch {
+      // No sidecar — file uploaded externally or saved before sidecar support
+    }
+    const wb = XLSX.read(buffer, { type: 'buffer' });
+    const sheets = wb.SheetNames.map((name) => ({
+      name,
+      data: XLSX.utils.sheet_to_json(wb.Sheets[name], { header: 1, defval: '' }) as any[][],
+    }));
+    return { type: 'spreadsheet', workbook: workbookJson, sheets };
+  }
+
+  throw new HttpError(400, 'Type de fichier non supporté pour l\'édition');
+}
+
+async function applyEditorContent(
+  file: any,
+  content: string,
+  contentType: 'text' | 'html' | 'spreadsheet',
+): Promise<{ buffer: Buffer; mimeType: string }> {
+  const ext = file.name.split('.').pop()?.toLowerCase() ?? '';
+
+  if (contentType === 'text') {
+    const mimeType =
+      ext === 'json' ? 'application/json' :
+      ext === 'md' ? 'text/markdown' :
+      ext === 'csv' ? 'text/csv' :
+      'text/plain';
+    return { buffer: Buffer.from(content, 'utf-8'), mimeType };
+  }
+
+  if (contentType === 'html' && ext === 'docx') {
+    // Strip HTML tags → plain paragraphs in a new DOCX
+    const rawText = content
+      .replace(/<br\s*\/?>/gi, '\n')
+      .replace(/<\/p>/gi, '\n')
+      .replace(/<\/h[1-6]>/gi, '\n')
+      .replace(/<\/li>/gi, '\n')
+      .replace(/<[^>]+>/g, '')
+      .replace(/&nbsp;/g, ' ')
+      .replace(/&amp;/g, '&')
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&#039;/g, "'")
+      .trim();
+    const paragraphs = rawText
+      .split('\n')
+      .map((line) => new Paragraph({ children: [new TextRun(line)] }));
+    const doc = new Document({
+      sections: [{ children: paragraphs.length ? paragraphs : [new Paragraph('')] }],
+    });
+    const buf = await Packer.toBuffer(doc);
+    return {
+      buffer: Buffer.from(buf),
+      mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    };
+  }
+
+  if (contentType === 'spreadsheet' && ext === 'xlsx') {
+    // Client sends the full Syncfusion workbook JSON (lossless).
+    // We do TWO things:
+    //  1. Persist that JSON as a sidecar (`<key>.sfjson`) for lossless reload.
+    //  2. Generate a real .xlsx from the cell values for Excel/download compatibility.
+    const workbook: any = JSON.parse(content);
+
+    // ── Build .xlsx from cell values (Syncfusion stores rows/cells sparsely with `index` props) ──
+    const xlsxWb = XLSX.utils.book_new();
+    const sheets: any[] = workbook?.sheets ?? [];
+    if (!sheets.length) {
+      const ws = XLSX.utils.aoa_to_sheet([['']]);
+      XLSX.utils.book_append_sheet(xlsxWb, ws, 'Sheet1');
+    } else {
+      for (const s of sheets) {
+        const data: any[][] = [];
+        for (const rowObj of (s.rows ?? [])) {
+          if (rowObj == null) continue;
+          const ri: number = rowObj.index ?? data.length;
+          while (data.length <= ri) data.push([]);
+          const row = data[ri];
+          for (const cellObj of (rowObj.cells ?? [])) {
+            if (cellObj == null) continue;
+            const ci: number = cellObj.index ?? row.length;
+            while (row.length <= ci) row.push('');
+            const v = cellObj.value;
+            row[ci] = v === null || v === undefined ? '' : v;
+          }
+        }
+        const ws = XLSX.utils.aoa_to_sheet(data);
+        XLSX.utils.book_append_sheet(xlsxWb, ws, s.name || 'Sheet');
+      }
+    }
+    const xlsxBuf = XLSX.write(xlsxWb, { type: 'buffer', bookType: 'xlsx' });
+
+    // ── Persist the lossless sidecar (best-effort — don't fail the save if it errors) ──
+    try {
+      await putObject(sfjsonKey(file.key), Buffer.from(content, 'utf-8'), 'application/json');
+    } catch (err) {
+      console.warn('[updateFileContent] failed to write sfjson sidecar:', err);
+    }
+
+    return {
+      buffer: Buffer.from(xlsxBuf),
+      mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    };
+  }
+
+  throw new HttpError(400, 'Contenu invalide pour ce type de fichier');
+}
+
+// ─── getFileEditorContent ─────────────────────────────────────────────────────
+
+export const getFileEditorContent = async (
+  { id }: { id: string },
+  context: any,
+): Promise<EditorContent> => {
+  const companyId = ensureCompany(context.user);
+  const file = await context.entities.ProjectFile.findUnique({ where: { id } });
+  if (!file || file.isFolder) throw new HttpError(404);
+  await ensureProjectOwned(file.projectId, companyId, context.entities);
+  return buildEditorContent(file);
+};
+
+// ─── updateProjectFileContent ─────────────────────────────────────────────────
+
+export const updateProjectFileContent = async (
+  { id, content, contentType }: {
+    id: string;
+    content: string;
+    contentType: 'text' | 'html' | 'spreadsheet';
+  },
+  context: any,
+) => {
+  const companyId = ensureCompany(context.user);
+  const file = await context.entities.ProjectFile.findUnique({ where: { id } });
+  if (!file || file.isFolder || !file.key) throw new HttpError(404);
+  await ensureProjectOwned(file.projectId, companyId, context.entities);
+  const { buffer, mimeType } = await applyEditorContent(file, content, contentType);
+  await putObject(file.key, buffer, mimeType);
+  return context.entities.ProjectFile.update({
+    where: { id },
+    data: { size: buffer.length },
+  });
+};
+
+// ─── getPortalFileEditorContent ───────────────────────────────────────────────
+
+export const getPortalFileEditorContent = async (
+  { token, id }: { token: string; id: string },
+  context: any,
+): Promise<EditorContent> => {
+  const { projectId } = await resolvePortalProject(token, context.entities);
+  const file = await context.entities.ProjectFile.findUnique({ where: { id } });
+  if (!file || file.isFolder || file.projectId !== projectId) throw new HttpError(404);
+  return buildEditorContent(file);
+};
+
+// ─── updatePortalFileContent ──────────────────────────────────────────────────
+
+export const updatePortalFileContent = async (
+  { token, id, content, contentType }: {
+    token: string;
+    id: string;
+    content: string;
+    contentType: 'text' | 'html' | 'spreadsheet';
+  },
+  context: any,
+) => {
+  const { projectId } = await resolvePortalProject(token, context.entities);
+  const file = await context.entities.ProjectFile.findUnique({ where: { id } });
+  if (!file || file.isFolder || !file.key || file.projectId !== projectId) throw new HttpError(404);
+  const { buffer, mimeType } = await applyEditorContent(file, content, contentType);
+  await putObject(file.key, buffer, mimeType);
+  return context.entities.ProjectFile.update({
+    where: { id },
+    data: { size: buffer.length },
   });
 };

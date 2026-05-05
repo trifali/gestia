@@ -8,6 +8,8 @@ import {
   renameProjectFile,
   moveProjectFiles,
   createNewProjectFile,
+  getFileEditorContent,
+  updateProjectFileContent,
 } from 'wasp/client/operations';
 import { SharedFileManager } from './SharedFileManager';
 
@@ -23,6 +25,7 @@ export function ProjectFileManagerTab({ projectId }: Props) {
   const renameFile = useAction(renameProjectFile);
   const moveFiles = useAction(moveProjectFiles);
   const createFile = useAction(createNewProjectFile);
+  const updateFileContent = useAction(updateProjectFileContent);
 
   return (
     <SharedFileManager
@@ -42,6 +45,9 @@ export function ProjectFileManagerTab({ projectId }: Props) {
           moveFiles({ projectId, ids, targetParentId }),
         createNewFile: ({ name, type, parentId }) =>
           createFile({ projectId, name, type, parentId }),
+        getEditorContent: (id) => getFileEditorContent({ id }),
+        saveFileContent: (id, content, contentType) =>
+          updateFileContent({ id, content, contentType }),
         instanceId: projectId,
       }}
     />
