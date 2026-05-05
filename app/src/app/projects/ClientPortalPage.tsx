@@ -315,11 +315,17 @@ function PortalMediaThumb({ media }: { media: any }) {
         )}
       </div>
       <div className='p-3 flex items-center justify-between gap-2'>
-        <p className='text-xs font-medium text-ink truncate'>{media.name}</p>
+        <p className='text-xs font-medium text-ink truncate'>
+          {media.name}<span className='text-muted font-normal'>{getExt(media)}</span>
+        </p>
         {media.url && (
-          <a href={media.url} download={media.name} target='_blank' rel='noreferrer' title='Télécharger' className='text-muted hover:text-ink shrink-0'>
+          <button
+            onClick={() => downloadFile(media.url, media.name + getExt(media))}
+            title='Télécharger'
+            className='text-muted hover:text-ink shrink-0'
+          >
             <LuDownload size={14} />
-          </a>
+          </button>
         )}
       </div>
       <p className='text-xs text-muted px-3 pb-3 -mt-1'>{formatSize(media.size)}</p>
@@ -421,4 +427,23 @@ function fileToDataUrl(file: File): Promise<string> {
 
 function stripExt(filename: string): string {
   return filename.replace(/\.[^.]+$/, '');
+}
+
+function getExt(media: any): string {
+  if (media.mimeType?.startsWith('image/')) return '.jpg';
+  const orig: string = media.originalName ?? '';
+  const dot = orig.lastIndexOf('.');
+  return dot >= 0 ? orig.slice(dot) : '';
+}
+
+async function downloadFile(url: string, filename: string) {
+  const res = await fetch(url);
+  const blob = await res.blob();
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(a.href);
 }

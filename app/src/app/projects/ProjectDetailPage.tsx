@@ -671,9 +671,13 @@ function MediaCard({ media, onDelete }: { media: any; onDelete: () => void }) {
         {/* Hover actions */}
         <div className='absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2'>
           {media.url && (
-            <a href={media.url} download={media.name} target='_blank' rel='noreferrer' className='bg-white/90 p-2 rounded-lg hover:bg-white' title='Télécharger'>
+            <button
+              onClick={() => downloadFile(media.url, media.name + getExt(media))}
+              className='bg-white/90 p-2 rounded-lg hover:bg-white'
+              title='Télécharger'
+            >
               <LuDownload size={16} />
-            </a>
+            </button>
           )}
           <button onClick={() => setEditing(!editing)} className='bg-white/90 p-2 rounded-lg hover:bg-white' title='Modifier'>
             <LuPencil size={16} />
@@ -688,13 +692,16 @@ function MediaCard({ media, onDelete }: { media: any; onDelete: () => void }) {
       <div className='p-3 flex-1'>
         {editing ? (
           <div className='flex flex-col gap-2'>
-            <input
-              autoFocus
-              className='input text-xs'
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder='Nom du fichier'
-            />
+            <div className='flex items-center gap-1'>
+              <input
+                autoFocus
+                className='input text-xs flex-1'
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder='Nom du fichier'
+              />
+              <span className='text-xs text-muted shrink-0 font-mono'>{getExt(media)}</span>
+            </div>
             <div className='flex flex-wrap gap-1'>
               {tags.map((t) => (
                 <span key={t} className='flex items-center gap-1 text-xs bg-canvas-200 text-ink px-2 py-0.5 rounded-full'>
@@ -720,7 +727,9 @@ function MediaCard({ media, onDelete }: { media: any; onDelete: () => void }) {
           </div>
         ) : (
           <>
-            <p className='text-sm font-medium text-ink truncate'>{media.name}</p>
+            <p className='text-sm font-medium text-ink truncate'>
+              {media.name}<span className='text-muted font-normal'>{getExt(media)}</span>
+            </p>
             <p className='text-xs text-muted mt-0.5'>{formatSize(media.size)}</p>
             {(tags.length > 0) && (
               <div className='flex flex-wrap gap-1 mt-2'>
@@ -1185,4 +1194,25 @@ function fileToDataUrl(file: File): Promise<string> {
 
 function stripExt(filename: string): string {
   return filename.replace(/\.[^.]+$/, '');
+}
+
+/** Extension for a stored media item (images are always JPEG after server compression). */
+function getExt(media: any): string {
+  if (media.mimeType?.startsWith('image/')) return '.jpg';
+  const orig: string = media.originalName ?? '';
+  const dot = orig.lastIndexOf('.');
+  return dot >= 0 ? orig.slice(dot) : '';
+}
+
+/** Force-download via blob so cross-origin URLs don't open in a new tab. */
+async function downloadFile(url: string, filename: string) {
+  const res = await fetch(url);
+  const blob = await res.blob();
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(a.href);
 }

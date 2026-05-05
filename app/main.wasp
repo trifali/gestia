@@ -46,6 +46,7 @@ app gestia {
 
   server: {
     setupFn: import { serverSetup } from "@src/server/setup",
+    middlewareConfigFn: import { serverMiddlewareFn } from "@src/server/setup",
   },
 
   emailSender: {
