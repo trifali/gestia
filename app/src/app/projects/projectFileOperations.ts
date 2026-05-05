@@ -1,7 +1,7 @@
 import { HttpError } from 'wasp/server';
 import { randomBytes } from 'crypto';
 import * as XLSX from 'xlsx';
-import { Document, Packer, Paragraph, TextRun } from 'docx';
+import { Document, Packer, Paragraph } from 'docx';
 import sharp from 'sharp';
 import { putObject, removeObject, getPresignedUrl, getObjectBuffer } from '../../server/storage';
 
@@ -502,11 +502,9 @@ export const movePortalFiles = async (
 
 // ─── Editor content helpers ───────────────────────────────────────────────────
 
-import mammoth from 'mammoth';
-
 type EditorContent =
   | { type: 'text'; content: string }
-  | { type: 'html'; content: string }
+  | { type: 'docx'; base64: string }
   | {
       type: 'spreadsheet';
       /** Syncfusion workbook JSON (sidecar or converted from xlsx with styles). */
@@ -646,9 +644,8 @@ async function buildEditorContent(file: any): Promise<EditorContent> {
     return { type: 'text', content: buffer.toString('utf-8') };
   }
 
-  if (ext === 'docx') {
-    const result = await mammoth.convertToHtml({ buffer });
-    return { type: 'html', content: result.value || '' };
+  if (['docx', 'doc'].includes(ext)) {
+    return { type: 'docx', base64: buffer.toString('base64') };
   }
 
   if (['xlsx', 'xls', 'xlsm', 'xlsb'].includes(ext)) {
@@ -681,7 +678,7 @@ async function buildEditorContent(file: any): Promise<EditorContent> {
 async function applyEditorContent(
   file: any,
   content: string,
-  contentType: 'text' | 'html' | 'spreadsheet',
+  contentType: 'text' | 'spreadsheet',
 ): Promise<{ buffer: Buffer; mimeType: string }> {
   const keyExt = file.key?.split('.').pop()?.toLowerCase() ?? '';
   const nameExt = file.name.includes('.') ? file.name.split('.').pop()?.toLowerCase() ?? '' : '';
@@ -694,33 +691,6 @@ async function applyEditorContent(
       ext === 'csv' ? 'text/csv' :
       'text/plain';
     return { buffer: Buffer.from(content, 'utf-8'), mimeType };
-  }
-
-  if (contentType === 'html' && ext === 'docx') {
-    // Strip HTML tags → plain paragraphs in a new DOCX
-    const rawText = content
-      .replace(/<br\s*\/?>/gi, '\n')
-      .replace(/<\/p>/gi, '\n')
-      .replace(/<\/h[1-6]>/gi, '\n')
-      .replace(/<\/li>/gi, '\n')
-      .replace(/<[^>]+>/g, '')
-      .replace(/&nbsp;/g, ' ')
-      .replace(/&amp;/g, '&')
-      .replace(/&lt;/g, '<')
-      .replace(/&gt;/g, '>')
-      .replace(/&#039;/g, "'")
-      .trim();
-    const paragraphs = rawText
-      .split('\n')
-      .map((line) => new Paragraph({ children: [new TextRun(line)] }));
-    const doc = new Document({
-      sections: [{ children: paragraphs.length ? paragraphs : [new Paragraph('')] }],
-    });
-    const buf = await Packer.toBuffer(doc);
-    return {
-      buffer: Buffer.from(buf),
-      mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-    };
   }
 
   if (contentType === 'spreadsheet' && ['xlsx', 'xls', 'xlsm', 'xlsb'].includes(ext)) {
@@ -793,7 +763,7 @@ export const updateProjectFileContent = async (
   { id, content, contentType }: {
     id: string;
     content: string;
-    contentType: 'text' | 'html' | 'spreadsheet';
+    contentType: 'text' | 'spreadsheet';
   },
   context: any,
 ) => {
@@ -828,7 +798,7 @@ export const updatePortalFileContent = async (
     token: string;
     id: string;
     content: string;
-    contentType: 'text' | 'html' | 'spreadsheet';
+    contentType: 'text' | 'spreadsheet';
   },
   context: any,
 ) => {

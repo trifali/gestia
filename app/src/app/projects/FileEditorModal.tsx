@@ -2,42 +2,28 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import { LuX, LuDownload, LuSave, LuLoader } from 'react-icons/lu';
 import toast from 'react-hot-toast';
 import {
-  RichTextEditorComponent,
-  HtmlEditor,
-  Toolbar,
-  QuickToolbar,
-  Link,
-  Table,
-  Inject as RTEInject,
-} from '@syncfusion/ej2-react-richtexteditor';
-import {
   SpreadsheetComponent,
   Inject as SSInject,
   Resize,
-  Edit,
-  UndoRedo,
-  Clipboard,
   Sort,
   Filter,
   Merge,
   WorkbookOpen,
-  WorkbookSave,
 } from '@syncfusion/ej2-react-spreadsheet';
+import { renderAsync } from 'docx-preview';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 type EditorContent =
   | { type: 'text'; content: string }
-  | { type: 'html'; content: string }
+  | { type: 'docx'; base64: string }
   | {
       type: 'spreadsheet';
-      /** Full Syncfusion workbook JSON when available (preserves styles, dimensions, formulas, merges). */
       workbook?: any;
-      /** Fallback: plain 2D cell values when no Syncfusion sidecar exists (e.g. xlsx uploaded externally). */
       sheets: { name: string; data: any[][] }[];
     };
 
-type ContentType = 'text' | 'html' | 'spreadsheet';
+type ContentType = 'text' | 'spreadsheet';
 
 export interface EditorFileInfo {
   id: string;
@@ -49,9 +35,8 @@ export interface EditorFileInfo {
 interface Props {
   file: EditorFileInfo | null;
   onClose: () => void;
-  /** Load editor content from the server (converts DOCX→HTML, XLSX→JSON, etc.) */
   fetchContent: (id: string) => Promise<EditorContent>;
-  /** If not provided, editor is read-only */
+  /** If provided, text files show a Save button */
   saveContent?: (id: string, content: string, contentType: ContentType) => Promise<any>;
 }
 
@@ -86,57 +71,55 @@ function TextEditor({
   );
 }
 
-// ─── HTML (DOCX) Editor ───────────────────────────────────────────────────────
+// ─── DOCX Viewer ──────────────────────────────────────────────────────────────
 
-const RTE_TOOLBAR = [
-  'Bold', 'Italic', 'Underline', 'StrikeThrough', '|',
-  'Formats', 'Alignments', '|',
-  'OrderedList', 'UnorderedList', '|',
-  'CreateLink', 'CreateTable', '|',
-  'Undo', 'Redo',
-];
+function DocxViewer({ base64 }: { base64: string }) {
+  const containerRef = useRef<HTMLDivElement>(null);
 
-function HtmlDocEditor({
-  content,
-  readOnly,
-  rteRef,
-}: {
-  content: string;
-  readOnly: boolean;
-  rteRef: React.RefObject<RichTextEditorComponent | null>;
-}) {
+  useEffect(() => {
+    if (!containerRef.current) return;
+    const binaryStr = atob(base64);
+    const bytes = new Uint8Array(binaryStr.length);
+    for (let i = 0; i < binaryStr.length; i++) bytes[i] = binaryStr.charCodeAt(i);
+    const blob = new Blob([bytes], {
+      type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    });
+    containerRef.current.innerHTML = '';
+    renderAsync(blob, containerRef.current, undefined, {
+      className: 'docx-preview',
+      inWrapper: true,
+      ignoreWidth: false,
+      ignoreHeight: false,
+      ignoreFonts: false,
+      breakPages: true,
+      useBase64URL: true,
+    }).catch((err) => {
+      if (containerRef.current) {
+        containerRef.current.innerHTML =
+          '<p style="color:#b91c1c;padding:1rem">Impossible d\'afficher ce document.</p>';
+      }
+      console.error('[DocxViewer]', err);
+    });
+  }, [base64]);
+
   return (
-    <div className='w-full h-full overflow-auto'>
-      <RichTextEditorComponent
-        ref={rteRef as any}
-        value={content}
-        height='100%'
-        readonly={readOnly}
-        toolbarSettings={{ items: RTE_TOOLBAR }}
-        enableResize={false}
-      >
-        <RTEInject services={[Toolbar, HtmlEditor, QuickToolbar, Link, Table]} />
-      </RichTextEditorComponent>
+    <div className='w-full h-full overflow-auto bg-gray-100 flex justify-center py-6'>
+      <div ref={containerRef} className='w-full max-w-4xl' />
     </div>
   );
 }
 
-// ─── Spreadsheet (XLSX) Editor ────────────────────────────────────────────────
+// ─── Spreadsheet Viewer ───────────────────────────────────────────────────────
 
-function SpreadsheetEditor({
+function SpreadsheetViewer({
   workbook,
   sheets,
-  readOnly,
   ssRef,
 }: {
   workbook?: any;
   sheets: { name: string; data: any[][] }[];
-  readOnly: boolean;
   ssRef: React.RefObject<SpreadsheetComponent | null>;
 }) {
-  // Keep a ref so the created callback always sees the latest data even though
-  // it is a stable callback (no deps). SpreadsheetEditor is only rendered after
-  // the data fetch is complete, so dataRef will be populated before created fires.
   const dataRef = useRef({ workbook, sheets });
   dataRef.current = { workbook, sheets };
 
@@ -172,16 +155,16 @@ function SpreadsheetEditor({
     <SpreadsheetComponent
       ref={ssRef as any}
       height='100%'
-      allowEditing={!readOnly}
+      allowEditing={false}
       created={handleCreated}
       beforeOpen={(args: any) => { args.cancel = true; }}
     >
-      <SSInject services={[Resize, Edit, UndoRedo, Clipboard, Sort, Filter, Merge, WorkbookOpen, WorkbookSave]} />
+      <SSInject services={[Resize, Sort, Filter, Merge, WorkbookOpen]} />
     </SpreadsheetComponent>
   );
 }
 
-// ─── Main Editor Modal ────────────────────────────────────────────────────────
+// ─── Main Modal ───────────────────────────────────────────────────────────────
 
 export function FileEditorModal({ file, onClose, fetchContent, saveContent }: Props) {
   const [editorContent, setEditorContent] = useState<EditorContent | null>(null);
@@ -189,12 +172,10 @@ export function FileEditorModal({ file, onClose, fetchContent, saveContent }: Pr
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
 
-  const rteRef = useRef<RichTextEditorComponent | null>(null);
   const ssRef = useRef<SpreadsheetComponent | null>(null);
 
-  const readOnly = !saveContent;
+  const canSave = !!saveContent && editorContent?.type === 'text';
 
-  // ─── Load content on open ──────────────────────────────────────────────────
   useEffect(() => {
     if (!file) return;
     setEditorContent(null);
@@ -211,31 +192,11 @@ export function FileEditorModal({ file, onClose, fetchContent, saveContent }: Pr
       .finally(() => setLoading(false));
   }, [file?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ─── Save ─────────────────────────────────────────────────────────────────
   const handleSave = useCallback(async () => {
-    if (!file || !saveContent || !editorContent) return;
+    if (!file || !saveContent || editorContent?.type !== 'text') return;
     setSaving(true);
     try {
-      let content: string;
-      const contentType: ContentType = editorContent.type;
-
-      if (editorContent.type === 'text') {
-        content = textValue;
-      } else if (editorContent.type === 'html') {
-        content = rteRef.current?.value ?? '';
-      } else {
-        // Commit any active cell edit before serialising
-        (ssRef.current as any)?.endEdit?.();
-        // spreadsheet — saveAsJson() returns the full Syncfusion workbook JSON
-        // (sheets, rows, cells, styles, dimensions, formulas, merges, etc.)
-        const result = await (ssRef.current as any)?.saveAsJson() as any;
-        const workbook = result?.jsonObject?.Workbook;
-        if (!workbook) throw new Error('Impossible de sérialiser le classeur');
-        // Send the full workbook — server stores both xlsx (for download) and JSON sidecar (for fidelity)
-        content = JSON.stringify(workbook);
-      }
-
-      await saveContent(file.id, content, contentType);
+      await saveContent(file.id, textValue, 'text');
       toast.success('Fichier sauvegardé');
     } catch (err: any) {
       toast.error(err?.message || 'Erreur lors de la sauvegarde');
@@ -252,6 +213,7 @@ export function FileEditorModal({ file, onClose, fetchContent, saveContent }: Pr
       onClick={(e) => e.target === e.currentTarget && onClose()}
     >
       <div className='bg-white rounded-2xl shadow-2xl flex flex-col w-full max-w-6xl' style={{ height: '92vh' }}>
+
         {/* Header */}
         <div className='flex items-center justify-between px-5 py-3 border-b border-line shrink-0'>
           <p className='text-sm font-semibold text-ink truncate max-w-lg'>{file.name}</p>
@@ -265,7 +227,7 @@ export function FileEditorModal({ file, onClose, fetchContent, saveContent }: Pr
                 <LuDownload size={16} />
               </button>
             )}
-            {saveContent && !readOnly && (
+            {canSave && (
               <button
                 onClick={handleSave}
                 disabled={saving || loading}
@@ -299,26 +261,29 @@ export function FileEditorModal({ file, onClose, fetchContent, saveContent }: Pr
           {!loading && editorContent?.type === 'text' && (
             <TextEditor
               content={textValue}
-              readOnly={readOnly}
+              readOnly={!saveContent}
               onChange={setTextValue}
             />
           )}
 
-          {!loading && editorContent?.type === 'html' && (
-            <HtmlDocEditor
-              content={editorContent.content}
-              readOnly={readOnly}
-              rteRef={rteRef}
-            />
+          {!loading && editorContent?.type === 'docx' && (
+            <DocxViewer base64={editorContent.base64} />
           )}
 
           {!loading && editorContent?.type === 'spreadsheet' && (
-            <SpreadsheetEditor
-              workbook={editorContent.workbook}
-              sheets={editorContent.sheets}
-              readOnly={readOnly}
-              ssRef={ssRef}
-            />
+            <div className='flex flex-col h-full'>
+              <div className='flex items-center gap-2 px-3 py-1.5 bg-amber-50 border-b border-amber-200 text-amber-700 text-xs'>
+                <span>⚠️</span>
+                <span>Les images intégrées dans le fichier Excel ne sont pas affichées dans l'aperçu.</span>
+              </div>
+              <div className='flex-1 min-h-0'>
+                <SpreadsheetViewer
+                  workbook={editorContent.workbook}
+                  sheets={editorContent.sheets}
+                  ssRef={ssRef}
+                />
+              </div>
+            </div>
           )}
         </div>
       </div>

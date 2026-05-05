@@ -39,7 +39,7 @@ export interface FileManagerOperations {
   /** Load editor content for a file (txt/md/json/docx/xlsx). If not provided, no inline editing. */
   getEditorContent?: (id: string) => Promise<any>;
   /** Save edited content back. If not provided, editor is read-only. */
-  saveFileContent?: (id: string, content: string, contentType: 'text' | 'html' | 'spreadsheet') => Promise<any>;
+  saveFileContent?: (id: string, content: string, contentType: 'text' | 'spreadsheet') => Promise<any>;
   /** Unique DOM id suffix (prevents collisions when both are on screen) */
   instanceId: string;
 }
