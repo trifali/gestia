@@ -360,24 +360,30 @@ export function SharedFileManager({ ops }: { ops: FileManagerOperations }) {
   ]);
 
   const isEditable = (f: any) => {
-    if (f.mimeType && EDITABLE_MIMES.has(f.mimeType)) return true;
+    const mime = f._mimeType ?? f.mimeType;
+    if (mime && EDITABLE_MIMES.has(mime)) return true;
     const ext = (f.name ?? '').split('.').pop()?.toLowerCase() ?? '';
     return EDITABLE_EXTS.has(ext);
   };
 
-  const navigableFiles = (rawFiles ?? []).filter((f: any) => !f.isFolder);
+  // Use fileSystemData as source of truth — same data the FileManager renders,
+  // already with display names (+ extension). Syncfusion sorts files by name A→Z.
+  const currentParentId = currentFolderId ?? VIRTUAL_ROOT_ID;
+  const navigableFiles = fileSystemData
+    .filter((f: any) => f.isFile && f.parentId === currentParentId)
+    .sort((a: any, b: any) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
 
   const openFileAtIdx = useCallback((idx: number) => {
-    const f = navigableFiles[idx];
+    const f = navigableFiles[idx] as any;
     if (!f) return;
     if (getEditorContent && isEditable(f)) {
       setPreviewFile(null);
       setPreviewFileId(null);
-      setEditorFile({ id: f.id, name: f.name, mimeType: f.mimeType ?? null, url: f.url ?? null });
+      setEditorFile({ id: f.id, name: f.name, mimeType: f._mimeType ?? null, url: f._url ?? null });
     } else {
       setEditorFile(null);
       setPreviewFileId(f.id);
-      setPreviewFile({ name: f.name, mimeType: f.mimeType ?? null, url: f.url ?? null });
+      setPreviewFile({ name: f.name, mimeType: f._mimeType ?? null, url: f._url ?? null });
     }
   }, [navigableFiles, getEditorContent]);
 
