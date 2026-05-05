@@ -24,9 +24,6 @@ type CreateProjectArgs = {
   description?: string;
   clientId?: string | null;
   status?: string;
-  startDate?: string | null;
-  dueDate?: string | null;
-  budget?: number | null;
 };
 export const createProject: CreateProject<CreateProjectArgs, Project> = async (args, context) => {
   const companyId = ensureCompany(context.user);
@@ -38,25 +35,18 @@ export const createProject: CreateProject<CreateProjectArgs, Project> = async (a
       description: args.description,
       clientId: args.clientId || null,
       status: args.status || 'en_cours',
-      startDate: args.startDate ? new Date(args.startDate) : null,
-      dueDate: args.dueDate ? new Date(args.dueDate) : null,
-      budget: args.budget ?? null,
     } as any,
   });
 };
 
 type UpdateProjectArgs = { id: string } & Partial<CreateProjectArgs>;
-export const updateProject: UpdateProject<UpdateProjectArgs, Project> = async ({ id, startDate, dueDate, ...rest }, context) => {
+export const updateProject: UpdateProject<UpdateProjectArgs, Project> = async ({ id, ...rest }, context) => {
   const companyId = ensureCompany(context.user);
   const existing = await context.entities.Project.findUnique({ where: { id } });
   if (!existing || existing.companyId !== companyId) throw new HttpError(404);
   return context.entities.Project.update({
     where: { id },
-    data: {
-      ...rest,
-      ...(startDate !== undefined ? { startDate: startDate ? new Date(startDate) : null } : {}),
-      ...(dueDate !== undefined ? { dueDate: dueDate ? new Date(dueDate) : null } : {}),
-    },
+    data: rest,
   });
 };
 

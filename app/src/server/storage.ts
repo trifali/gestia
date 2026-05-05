@@ -65,3 +65,8 @@ export async function getObjectBuffer(key: string): Promise<Buffer> {
     stream.on('error', reject);
   });
 }
+
+export async function getPresignedUrl(key: string, expirySecs = 7 * 24 * 3600): Promise<string> {
+  await ensureBucket();
+  return getMinioClient().presignedGetObject(getBucket(), key, expirySecs);
+}

@@ -107,6 +107,17 @@ page ProjectsPage {
   component: import ProjectsPage from "@src/app/projects/ProjectsPage"
 }
 
+route ProjectDetailRoute { path: "/projets/:projectId", to: ProjectDetailPage }
+page ProjectDetailPage {
+  authRequired: true,
+  component: import ProjectDetailPage from "@src/app/projects/ProjectDetailPage"
+}
+
+route ClientPortalRoute { path: "/portail/:token", to: ClientPortalPage }
+page ClientPortalPage {
+  component: import ClientPortalPage from "@src/app/projects/ClientPortalPage"
+}
+
 route DocumentsRoute { path: "/facturation", to: DocumentsPage }
 page DocumentsPage {
   authRequired: true,
@@ -212,6 +223,14 @@ query getProjects {
   fn: import { getProjects } from "@src/app/projects/operations",
   entities: [User, Project, Client]
 }
+query getProjectDetail {
+  fn: import { getProjectDetail } from "@src/app/projects/projectDetailOperations",
+  entities: [User, Project, Client, ProjectTask, ProjectNote, ProjectMedia, ProjectClientAccess, ProjectLink]
+}
+query getProjectByToken {
+  fn: import { getProjectByToken } from "@src/app/projects/projectDetailOperations",
+  entities: [Project, ProjectClientAccess, ProjectMedia, ProjectNote, ProjectTask]
+}
 action createProject {
   fn: import { createProject } from "@src/app/projects/operations",
   entities: [User, Project]
@@ -223,6 +242,74 @@ action updateProject {
 action deleteProject {
   fn: import { deleteProject } from "@src/app/projects/operations",
   entities: [User, Project]
+}
+action updateProjectDetail {
+  fn: import { updateProjectDetail } from "@src/app/projects/projectDetailOperations",
+  entities: [User, Project]
+}
+action createProjectTask {
+  fn: import { createProjectTask } from "@src/app/projects/projectDetailOperations",
+  entities: [User, Project, ProjectTask]
+}
+action updateProjectTask {
+  fn: import { updateProjectTask } from "@src/app/projects/projectDetailOperations",
+  entities: [User, Project, ProjectTask]
+}
+action deleteProjectTask {
+  fn: import { deleteProjectTask } from "@src/app/projects/projectDetailOperations",
+  entities: [User, Project, ProjectTask]
+}
+action createProjectNote {
+  fn: import { createProjectNote } from "@src/app/projects/projectDetailOperations",
+  entities: [User, Project, ProjectNote]
+}
+action updateProjectNote {
+  fn: import { updateProjectNote } from "@src/app/projects/projectDetailOperations",
+  entities: [User, Project, ProjectNote]
+}
+action deleteProjectNote {
+  fn: import { deleteProjectNote } from "@src/app/projects/projectDetailOperations",
+  entities: [User, Project, ProjectNote]
+}
+action uploadProjectMedia {
+  fn: import { uploadProjectMedia } from "@src/app/projects/projectDetailOperations",
+  entities: [User, Project, ProjectMedia]
+}
+action updateProjectMedia {
+  fn: import { updateProjectMedia } from "@src/app/projects/projectDetailOperations",
+  entities: [User, Project, ProjectMedia]
+}
+action deleteProjectMedia {
+  fn: import { deleteProjectMedia } from "@src/app/projects/projectDetailOperations",
+  entities: [User, Project, ProjectMedia]
+}
+action createProjectClientAccess {
+  fn: import { createProjectClientAccess } from "@src/app/projects/projectDetailOperations",
+  entities: [User, Project, ProjectClientAccess]
+}
+action revokeProjectClientAccess {
+  fn: import { revokeProjectClientAccess } from "@src/app/projects/projectDetailOperations",
+  entities: [User, Project, ProjectClientAccess]
+}
+action createProjectLink {
+  fn: import { createProjectLink } from "@src/app/projects/projectDetailOperations",
+  entities: [User, Project, ProjectLink]
+}
+action updateProjectLink {
+  fn: import { updateProjectLink } from "@src/app/projects/projectDetailOperations",
+  entities: [User, Project, ProjectLink]
+}
+action deleteProjectLink {
+  fn: import { deleteProjectLink } from "@src/app/projects/projectDetailOperations",
+  entities: [User, Project, ProjectLink]
+}
+action submitClientMedia {
+  fn: import { submitClientMedia } from "@src/app/projects/projectDetailOperations",
+  entities: [ProjectClientAccess, ProjectMedia]
+}
+action submitClientNote {
+  fn: import { submitClientNote } from "@src/app/projects/projectDetailOperations",
+  entities: [ProjectClientAccess, ProjectNote]
 }
 
 query getDocuments {

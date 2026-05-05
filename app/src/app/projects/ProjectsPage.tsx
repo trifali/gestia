@@ -1,16 +1,15 @@
 import { useState } from 'react';
+import { Link } from 'react-router';
 import toast from 'react-hot-toast';
 import {
   useQuery,
   getProjects,
   getClients,
   createProject,
-  updateProject,
   deleteProject,
 } from 'wasp/client/operations';
-import { PageHeader, EmptyState, Modal, useConfirm, IconBtn, EditIcon, TrashIcon } from '../../client/ui';
-import { MagicInput, MagicTextarea } from '../../client/magic';
-import { formatCurrency, formatDate, formatDateForInput } from '../../shared/format';
+import { PageHeader, EmptyState, Modal, useConfirm, IconBtn, TrashIcon } from '../../client/ui';
+import { LuFolderOpen, LuExternalLink } from 'react-icons/lu';
 
 const STATUS: Record<string, { label: string; className: string }> = {
   brouillon: { label: 'Brouillon', className: 'badge-neutral' },
@@ -25,13 +24,12 @@ export default function ProjectsPage() {
   const { data: clients } = useQuery(getClients);
   const { ask, Dialog: ConfirmDialog } = useConfirm();
   const [creating, setCreating] = useState(false);
-  const [editing, setEditing] = useState<any>(null);
 
   return (
     <>
       <PageHeader
         title='Projets'
-        subtitle='Suivez vos mandats, échéances et budgets.'
+        subtitle='Suivez vos mandats et accédez aux détails de chaque projet.'
         actions={<button className='btn-primary' onClick={() => setCreating(true)}>Nouveau projet</button>}
       />
 
@@ -51,28 +49,38 @@ export default function ProjectsPage() {
                 <th>Projet</th>
                 <th>Client</th>
                 <th>Statut</th>
-                <th>Échéance</th>
-                <th>Budget</th>
                 <th className='text-right'>Actions</th>
               </tr>
             </thead>
             <tbody>
               {projects.map((p: any) => (
-                <tr key={p.id}>
-                  <td className='font-medium'>{p.name}</td>
+                <tr key={p.id} className='group'>
+                  <td className='font-medium'>
+                    <Link
+                      to={`/projets/${p.id}`}
+                      className='flex items-center gap-2 hover:text-accent transition-colors'
+                    >
+                      <LuFolderOpen size={16} className='text-muted shrink-0' />
+                      {p.name}
+                      <LuExternalLink size={12} className='text-muted opacity-0 group-hover:opacity-100 transition-opacity' />
+                    </Link>
+                  </td>
                   <td className='text-muted'>{p.client?.name || '—'}</td>
                   <td>
                     <span className={STATUS[p.status]?.className || 'badge-neutral'}>
                       {STATUS[p.status]?.label || p.status}
                     </span>
                   </td>
-                  <td className='text-muted'>{p.dueDate ? formatDate(p.dueDate) : '—'}</td>
-                  <td className='text-muted'>{p.budget ? formatCurrency(p.budget) : '—'}</td>
                   <td className='text-right'>
-                    <div className='flex items-center justify-end gap-1'>
-                      <IconBtn title='Modifier' onClick={() => setEditing(p)}><EditIcon /></IconBtn>
-                      <IconBtn variant='danger' title='Supprimer' onClick={async () => {
-                        if (await ask(`Supprimer le projet « ${p.name} » ?`)) {
+                    <IconBtn
+                      variant='danger'
+                      title='Supprimer'
+                      onClick={async () => {
+                        if (
+                          await ask(`Supprimer le projet « ${p.name} » ?`, {
+                            description: 'Toutes les tâches, notes, médias et accès clients seront supprimés.',
+                          })
+                        ) {
                           try {
                             await deleteProject({ id: p.id });
                             toast.success('Projet supprimé');
@@ -80,8 +88,10 @@ export default function ProjectsPage() {
                             toast.error(err?.message || 'Erreur lors de la suppression');
                           }
                         }
-                      }}><TrashIcon /></IconBtn>
-                    </div>
+                      }}
+                    >
+                      <TrashIcon />
+                    </IconBtn>
                   </td>
                 </tr>
               ))}
@@ -90,14 +100,10 @@ export default function ProjectsPage() {
         </div>
       )}
 
-      {(creating || editing) && (
-        <ProjectForm
-          project={editing}
+      {creating && (
+        <CreateProjectModal
           clients={clients || []}
-          onClose={() => {
-            setCreating(false);
-            setEditing(null);
-          }}
+          onClose={() => setCreating(false)}
         />
       )}
       {ConfirmDialog}
@@ -105,15 +111,12 @@ export default function ProjectsPage() {
   );
 }
 
-function ProjectForm({ project, clients, onClose }: { project?: any; clients: any[]; onClose: () => void }) {
+function CreateProjectModal({ clients, onClose }: { clients: any[]; onClose: () => void }) {
   const [form, setForm] = useState({
-    name: project?.name || '',
-    description: project?.description || '',
-    clientId: project?.clientId || '',
-    status: project?.status || 'en_cours',
-    startDate: formatDateForInput(project?.startDate),
-    dueDate: formatDateForInput(project?.dueDate),
-    budget: project?.budget?.toString() || '',
+    name: '',
+    description: '',
+    clientId: '',
+    status: 'en_cours',
   });
   const [saving, setSaving] = useState(false);
 
@@ -121,22 +124,13 @@ function ProjectForm({ project, clients, onClose }: { project?: any; clients: an
     e.preventDefault();
     setSaving(true);
     try {
-      const payload = {
+      await createProject({
         name: form.name,
         description: form.description || undefined,
         clientId: form.clientId || null,
         status: form.status,
-        startDate: form.startDate || null,
-        dueDate: form.dueDate || null,
-        budget: form.budget ? parseFloat(form.budget) : null,
-      };
-      if (project) {
-        await updateProject({ id: project.id, ...payload });
-        toast.success('Projet modifié');
-      } else {
-        await createProject(payload);
-        toast.success('Projet créé');
-      }
+      });
+      toast.success('Projet créé');
       onClose();
     } catch (err: any) {
       toast.error(err?.message || 'Une erreur est survenue');
@@ -149,55 +143,64 @@ function ProjectForm({ project, clients, onClose }: { project?: any; clients: an
     <Modal
       open
       onClose={onClose}
-      title={project ? 'Modifier le projet' : 'Nouveau projet'}
+      title='Nouveau projet'
       footer={
         <>
           <button className='btn-secondary' onClick={onClose}>Annuler</button>
-          <button form='project-form' type='submit' className='btn-primary' disabled={saving}>
-            {saving ? 'Enregistrement…' : 'Enregistrer'}
+          <button form='create-project-form' type='submit' className='btn-primary' disabled={saving}>
+            {saving ? 'Création…' : 'Créer le projet'}
           </button>
         </>
       }
     >
-      <form id='project-form' onSubmit={onSubmit} className='grid grid-cols-1 sm:grid-cols-2 gap-4'>
-        <div className='col-span-2'>
-          <label className='label'>Nom du projet *</label>
-          <MagicInput className='input' required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
+      <form id='create-project-form' onSubmit={onSubmit} className='flex flex-col gap-4'>
+        <div>
+          <label className='label'>Titre du projet *</label>
+          <input
+            className='input'
+            required
+            autoFocus
+            value={form.name}
+            onChange={(e) => setForm({ ...form, name: e.target.value })}
+            placeholder='ex. Refonte site web'
+          />
         </div>
         <div>
-          <label className='label'>Client</label>
-          <select className='input' value={form.clientId} onChange={(e) => setForm({ ...form, clientId: e.target.value })}>
-            <option value=''>— Aucun —</option>
-            {clients.map((c) => (
-              <option key={c.id} value={c.id}>{c.name}</option>
-            ))}
-          </select>
-        </div>
-        <div>
-          <label className='label'>Statut</label>
-          <select className='input' value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })}>
-            <option value='brouillon'>Brouillon</option>
-            <option value='en_cours'>En cours</option>
-            <option value='en_pause'>En pause</option>
-            <option value='termine'>Terminé</option>
-            <option value='annule'>Annulé</option>
-          </select>
-        </div>
-        <div>
-          <label className='label'>Date de début</label>
-          <input type='date' className='input' value={form.startDate} onChange={(e) => setForm({ ...form, startDate: e.target.value })} />
-        </div>
-        <div>
-          <label className='label'>Échéance</label>
-          <input type='date' className='input' value={form.dueDate} onChange={(e) => setForm({ ...form, dueDate: e.target.value })} />
-        </div>
-        <div className='col-span-2'>
-          <label className='label'>Budget (CAD)</label>
-          <input type='number' step='0.01' className='input' value={form.budget} onChange={(e) => setForm({ ...form, budget: e.target.value })} />
-        </div>
-        <div className='col-span-2'>
           <label className='label'>Description</label>
-          <MagicTextarea className='input' rows={3} value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} />
+          <textarea
+            className='input'
+            rows={3}
+            value={form.description}
+            onChange={(e) => setForm({ ...form, description: e.target.value })}
+            placeholder='Résumé du projet…'
+          />
+        </div>
+        <div className='grid grid-cols-1 sm:grid-cols-2 gap-4'>
+          <div>
+            <label className='label'>Client</label>
+            <select
+              className='input'
+              value={form.clientId}
+              onChange={(e) => setForm({ ...form, clientId: e.target.value })}
+            >
+              <option value=''>— Aucun —</option>
+              {clients.map((c) => (
+                <option key={c.id} value={c.id}>{c.name}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className='label'>Statut</label>
+            <select
+              className='input'
+              value={form.status}
+              onChange={(e) => setForm({ ...form, status: e.target.value })}
+            >
+              {Object.entries(STATUS).map(([val, { label }]) => (
+                <option key={val} value={val}>{label}</option>
+              ))}
+            </select>
+          </div>
         </div>
       </form>
     </Modal>
