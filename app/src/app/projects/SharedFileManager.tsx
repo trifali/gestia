@@ -325,7 +325,7 @@ export function SharedFileManager({ ops }: { ops: FileManagerOperations }) {
 
   // ─── File open / folder navigate ──────────────────────────────────────────
 
-  const EDITABLE_EXTS = new Set(['txt', 'md', 'json', 'csv', 'docx', 'xlsx']);
+  const EDITABLE_EXTS = new Set(['txt', 'md', 'json', 'csv', 'docx', 'xlsx', 'xls', 'xlsm', 'xlsb']);
 
   const handleFileOpen = useCallback((args: any) => {
     const d = args?.fileDetails as any;

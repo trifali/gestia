@@ -509,11 +509,121 @@ type EditorContent =
   | { type: 'html'; content: string }
   | {
       type: 'spreadsheet';
-      /** Full Syncfusion workbook JSON when sidecar exists (preserves styles, dimensions, formulas, merges). */
+      /** Syncfusion workbook JSON (sidecar or converted from xlsx with styles). */
       workbook?: any;
-      /** Plain 2D cell values (always populated as a fallback). */
+      /** Plain 2D cell values (kept as fallback for save round-trips). */
       sheets: { name: string; data: any[][] }[];
     };
+
+// ─── SheetJS → Syncfusion workbook JSON converter ────────────────────────────
+
+/** Map a SheetJS cell style object to a CSS string that Syncfusion accepts. */
+function sheetjsStyleToCSS(s: any): string {
+  const parts: string[] = [];
+  if (s.font) {
+    if (s.font.bold) parts.push('font-weight:bold');
+    if (s.font.italic) parts.push('font-style:italic');
+    if (s.font.underline) parts.push('text-decoration:underline');
+    if (s.font.sz) parts.push(`font-size:${s.font.sz}pt`);
+    if (s.font.color?.rgb) parts.push(`color:#${s.font.color.rgb.slice(-6)}`);
+    if (s.font.name) parts.push(`font-family:${s.font.name}`);
+  }
+  if (s.fill) {
+    const pat = s.fill.patternType;
+    if (pat && pat !== 'none') {
+      const raw = s.fill.fgColor?.rgb ?? s.fill.bgColor?.rgb;
+      if (raw) {
+        const hex = raw.length === 8 ? raw.slice(2) : raw; // strip ARGB alpha
+        if (!/^FF?FF?FF$/i.test(hex)) parts.push(`background-color:#${hex}`);
+      }
+    }
+  }
+  if (s.alignment) {
+    const hMap: Record<string, string> = { left: 'left', center: 'center', right: 'right', justify: 'justify' };
+    const h = hMap[s.alignment.horizontal ?? ''];
+    if (h) parts.push(`text-align:${h}`);
+    const vMap: Record<string, string> = { top: 'top', middle: 'middle', bottom: 'bottom', center: 'middle' };
+    const v = vMap[s.alignment.vertical ?? ''];
+    if (v) parts.push(`vertical-align:${v}`);
+    if (s.alignment.wrapText) parts.push('white-space:pre-wrap');
+  }
+  return parts.join(';');
+}
+
+/** Convert a SheetJS workbook (parsed with cellStyles:true) to Syncfusion workbook JSON. */
+function xlsxToSyncfusionWorkbook(xlsxWb: XLSX.WorkBook): any {
+  const sfSheets = xlsxWb.SheetNames.map((name) => {
+    const sheet = xlsxWb.Sheets[name];
+    if (!sheet['!ref']) return { name, rows: [] };
+
+    const range = XLSX.utils.decode_range(sheet['!ref']);
+    const merges: XLSX.Range[] = (sheet['!merges'] as any) ?? [];
+
+    // Mark merged cells: top-left gets rowSpan/colSpan; covered cells are skipped
+    const mergeInfo = new Map<string, { rowSpan: number; colSpan: number }>();
+    const covered = new Set<string>();
+    for (const m of merges) {
+      mergeInfo.set(`${m.s.r},${m.s.c}`, {
+        rowSpan: m.e.r - m.s.r + 1,
+        colSpan: m.e.c - m.s.c + 1,
+      });
+      for (let r = m.s.r; r <= m.e.r; r++) {
+        for (let c = m.s.c; c <= m.e.c; c++) {
+          if (r === m.s.r && c === m.s.c) continue;
+          covered.add(`${r},${c}`);
+        }
+      }
+    }
+
+    const rowMap = new Map<number, any>();
+    for (let r = range.s.r; r <= range.e.r; r++) {
+      for (let c = range.s.c; c <= range.e.c; c++) {
+        const cellKey = `${r},${c}`;
+        if (covered.has(cellKey)) continue;
+        const cell = sheet[XLSX.utils.encode_cell({ r, c })];
+        if (!cell && !mergeInfo.has(cellKey)) continue;
+
+        if (!rowMap.has(r)) rowMap.set(r, { index: r, cells: [] });
+        const cellObj: any = { index: c };
+        if (cell) {
+          if (cell.t === 'n' || cell.t === 'b') cellObj.value = cell.v;
+          else if (cell.t === 'd') cellObj.value = cell.w ?? String(cell.v);
+          else cellObj.value = cell.v !== undefined ? String(cell.v) : '';
+          if (cell.f) cellObj.formula = cell.f;
+          if (cell.z && cell.z !== 'General') cellObj.format = cell.z;
+          if (cell.s) {
+            const style = sheetjsStyleToCSS(cell.s);
+            if (style) cellObj.style = style;
+          }
+        }
+        const merge = mergeInfo.get(cellKey);
+        if (merge) {
+          if (merge.rowSpan > 1) cellObj.rowSpan = merge.rowSpan;
+          if (merge.colSpan > 1) cellObj.colSpan = merge.colSpan;
+        }
+        rowMap.get(r)!.cells.push(cellObj);
+      }
+    }
+
+    const rowHeights: any[] = (sheet['!rows'] as any) ?? [];
+    const rows = Array.from(rowMap.values()).map((row) => {
+      const h = rowHeights[row.index];
+      if (h?.hpt) row.height = Math.round(h.hpt * 1.333); // pt → px
+      return row;
+    });
+
+    const colWidths: any[] = (sheet['!cols'] as any) ?? [];
+    const columns = colWidths
+      .map((col: any, i: number) => ({ index: i, width: col?.wch ? Math.round(col.wch * 7) : undefined }))
+      .filter((c: any) => c.width != null);
+
+    const sfSheet: any = { name, rows };
+    if (columns.length) sfSheet.columns = columns;
+    return sfSheet;
+  });
+
+  return { sheets: sfSheets };
+}
 
 /** Sidecar key for the lossless Syncfusion workbook JSON. */
 function sfjsonKey(key: string): string {
@@ -523,7 +633,11 @@ function sfjsonKey(key: string): string {
 async function buildEditorContent(file: any): Promise<EditorContent> {
   if (!file.key) throw new HttpError(400, 'Ce fichier n\'a pas de contenu');
 
-  const ext = file.name.split('.').pop()?.toLowerCase() ?? '';
+  // Derive extension from the stored key (always has the correct ext, e.g. "abc123.xlsx")
+  // rather than file.name, which may have had its extension stripped on upload.
+  const keyExt = file.key.split('.').pop()?.toLowerCase() ?? '';
+  const nameExt = file.name.includes('.') ? file.name.split('.').pop()?.toLowerCase() ?? '' : '';
+  const ext = keyExt || nameExt;
 
   // Read directly from MinIO (no presigned URL / HTTP caching layer)
   const buffer = await getObjectBuffer(file.key);
@@ -537,16 +651,23 @@ async function buildEditorContent(file: any): Promise<EditorContent> {
     return { type: 'html', content: result.value || '' };
   }
 
-  if (ext === 'xlsx') {
-    // Try to load the lossless Syncfusion sidecar first
+  if (['xlsx', 'xls', 'xlsm', 'xlsb'].includes(ext)) {
+    // Try to load the lossless Syncfusion sidecar first (only for xlsx)
     let workbookJson: any | undefined;
-    try {
-      const sidecarBuf = await getObjectBuffer(sfjsonKey(file.key));
-      workbookJson = JSON.parse(sidecarBuf.toString('utf-8'));
-    } catch {
-      // No sidecar — file uploaded externally or saved before sidecar support
+    if (ext === 'xlsx') {
+      try {
+        const sidecarBuf = await getObjectBuffer(sfjsonKey(file.key));
+        workbookJson = JSON.parse(sidecarBuf.toString('utf-8'));
+      } catch {
+        // No sidecar — file uploaded externally or saved before sidecar support
+      }
     }
-    const wb = XLSX.read(buffer, { type: 'buffer' });
+    // Parse with cellStyles:true so we can convert styles even without a sidecar
+    const wb = XLSX.read(buffer, { type: 'buffer', cellStyles: true });
+    if (!workbookJson) {
+      // Convert xlsx (with styles, merges, column widths) to Syncfusion workbook JSON
+      workbookJson = xlsxToSyncfusionWorkbook(wb);
+    }
     const sheets = wb.SheetNames.map((name) => ({
       name,
       data: XLSX.utils.sheet_to_json(wb.Sheets[name], { header: 1, defval: '' }) as any[][],
@@ -562,7 +683,9 @@ async function applyEditorContent(
   content: string,
   contentType: 'text' | 'html' | 'spreadsheet',
 ): Promise<{ buffer: Buffer; mimeType: string }> {
-  const ext = file.name.split('.').pop()?.toLowerCase() ?? '';
+  const keyExt = file.key?.split('.').pop()?.toLowerCase() ?? '';
+  const nameExt = file.name.includes('.') ? file.name.split('.').pop()?.toLowerCase() ?? '' : '';
+  const ext = keyExt || nameExt;
 
   if (contentType === 'text') {
     const mimeType =
@@ -600,7 +723,7 @@ async function applyEditorContent(
     };
   }
 
-  if (contentType === 'spreadsheet' && ext === 'xlsx') {
+  if (contentType === 'spreadsheet' && ['xlsx', 'xls', 'xlsm', 'xlsb'].includes(ext)) {
     // Client sends the full Syncfusion workbook JSON (lossless).
     // We do TWO things:
     //  1. Persist that JSON as a sidecar (`<key>.sfjson`) for lossless reload.
