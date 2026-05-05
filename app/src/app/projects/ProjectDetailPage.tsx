@@ -45,15 +45,14 @@ import {
   LuEyeOff,
   LuEye,
   LuCircleAlert,
-  LuCalendar,
   LuExternalLink,
   LuRefreshCw,
   LuUpload,
   LuX,
   LuFlag,
 } from 'react-icons/lu';
-import { useConfirm, IconBtn } from '../../client/ui';
-import { formatDate, formatDateForInput } from '../../shared/format';
+import { useConfirm, IconBtn, Modal } from '../../client/ui';
+import { formatDate } from '../../shared/format';
 
 // ─── Status & priority maps ───────────────────────────────────────────────────
 
@@ -297,20 +296,17 @@ function OverviewTab({ project }: { project: any }) {
 function TasksTab({ projectId, tasks }: { projectId: string; tasks: any[] }) {
   const [adding, setAdding] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [draggingId, setDraggingId] = useState<string | null>(null);
+  const [dragOverCol, setDragOverCol] = useState<string | null>(null);
   const { ask, Dialog } = useConfirm();
 
-  const todo = tasks.filter((t) => t.status === 'todo');
-  const inProgress = tasks.filter((t) => t.status === 'in_progress');
-  const done = tasks.filter((t) => t.status === 'done');
+  const columns = [
+    { status: 'todo', label: 'À faire' },
+    { status: 'in_progress', label: 'En cours' },
+    { status: 'done', label: 'Terminées' },
+  ] as const;
 
-  const toggleStatus = async (task: any) => {
-    const next = task.status === 'todo' ? 'in_progress' : task.status === 'in_progress' ? 'done' : 'todo';
-    try {
-      await updateProjectTask({ id: task.id, status: next });
-    } catch (err: any) {
-      toast.error(err?.message || 'Erreur');
-    }
-  };
+  const byStatus = (s: string) => tasks.filter((t) => t.status === s);
 
   const remove = async (task: any) => {
     if (await ask(`Supprimer « ${task.title} » ?`)) {
@@ -323,80 +319,117 @@ function TasksTab({ projectId, tasks }: { projectId: string; tasks: any[] }) {
     }
   };
 
-  const TaskGroup = ({ label, items, emptyText }: { label: string; items: any[]; emptyText: string }) => (
-    <div>
-      <h3 className='text-xs font-semibold uppercase tracking-wider text-muted mb-2'>{label} ({items.length})</h3>
-      {items.length === 0 ? (
-        <p className='text-sm text-muted italic pl-1'>{emptyText}</p>
-      ) : (
-        <div className='flex flex-col gap-2'>
-          {items.map((t) => (
-            <div key={t.id} className='card px-4 py-3 flex items-start gap-3 group'>
-              <button
-                onClick={() => toggleStatus(t)}
-                className={`mt-0.5 shrink-0 transition-colors ${TASK_STATUS[t.status]?.className}`}
-                title={`Statut : ${TASK_STATUS[t.status]?.label}`}
-              >
-                {TASK_STATUS[t.status]?.icon}
-              </button>
-              <div className='flex-1 min-w-0'>
-                {editingId === t.id ? (
-                  <TaskEditInline task={t} onClose={() => setEditingId(null)} />
-                ) : (
-                  <>
-                    <span className={`text-sm font-medium ${t.status === 'done' ? 'line-through text-muted' : 'text-ink'}`}>
-                      {t.title}
-                    </span>
-                    {t.description && <p className='text-xs text-muted mt-0.5'>{t.description}</p>}
-                    <div className='flex items-center gap-3 mt-1'>
-                      <span className={`text-xs font-medium flex items-center gap-1 ${TASK_PRIORITY[t.priority]?.className}`}>
-                        <LuFlag size={11} />
-                        {TASK_PRIORITY[t.priority]?.label}
-                      </span>
-                      {t.dueDate && (
-                        <span className='text-xs text-muted flex items-center gap-1'>
-                          <LuCalendar size={11} />
-                          {formatDate(t.dueDate)}
-                        </span>
-                      )}
-                    </div>
-                  </>
-                )}
-              </div>
-              {editingId !== t.id && (
-                <div className='flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity'>
-                  <IconBtn title='Modifier' onClick={() => setEditingId(t.id)}><LuPencil size={14} /></IconBtn>
-                  <IconBtn variant='danger' title='Supprimer' onClick={() => remove(t)}><LuTrash2 size={14} /></IconBtn>
-                </div>
-              )}
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
+  const moveTask = async (taskId: string, newStatus: string) => {
+    const task = tasks.find((t) => t.id === taskId);
+    if (!task || task.status === newStatus) return;
+    try {
+      await updateProjectTask({ id: taskId, status: newStatus });
+    } catch (err: any) {
+      toast.error(err?.message || 'Erreur');
+    }
+  };
+
+  const onDragStart = (e: React.DragEvent, taskId: string) => {
+    setDraggingId(taskId);
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', taskId);
+  };
+
+  const onDragEnd = () => {
+    setDraggingId(null);
+    setDragOverCol(null);
+  };
+
+  const onDragOver = (e: React.DragEvent, status: string) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    setDragOverCol(status);
+  };
+
+  const onDrop = (e: React.DragEvent, status: string) => {
+    e.preventDefault();
+    const taskId = e.dataTransfer.getData('text/plain');
+    if (taskId) moveTask(taskId, status);
+    setDragOverCol(null);
+    setDraggingId(null);
+  };
 
   return (
-    <div className='flex flex-col gap-6'>
+    <div className='flex flex-col gap-4'>
       <div className='flex justify-end'>
         <button className='btn-primary flex items-center gap-2' onClick={() => setAdding(true)}>
           <LuPlus size={16} /> Ajouter une tâche
         </button>
       </div>
 
-      {adding && <TaskAddForm projectId={projectId} onClose={() => setAdding(false)} />}
+      <div className='grid grid-cols-3 gap-4'>
+        {columns.map(({ status, label }) => {
+          const items = byStatus(status);
+          const isOver = dragOverCol === status;
+          return (
+            <div
+              key={status}
+              onDragOver={(e) => onDragOver(e, status)}
+              onDragLeave={() => setDragOverCol(null)}
+              onDrop={(e) => onDrop(e, status)}
+              className={`rounded-xl p-3 flex flex-col gap-2 min-h-[200px] transition-colors ${
+                isOver ? 'bg-accent/10 ring-2 ring-accent/40' : 'bg-canvas-100'
+              }`}
+            >
+              <div className='flex items-center justify-between mb-1'>
+                <h3 className='text-xs font-semibold uppercase tracking-wider text-muted'>{label}</h3>
+                <span className='text-xs text-muted bg-canvas-200 rounded-full px-2 py-0.5'>{items.length}</span>
+              </div>
 
-      <TaskGroup label='À faire' items={todo} emptyText='Aucune tâche à faire' />
-      <TaskGroup label='En cours' items={inProgress} emptyText='Aucune tâche en cours' />
-      <TaskGroup label='Terminées' items={done} emptyText='Aucune tâche terminée' />
+              {items.map((t) => (
+                <div
+                  key={t.id}
+                  draggable
+                  onDragStart={(e) => onDragStart(e, t.id)}
+                  onDragEnd={onDragEnd}
+                  className={`card px-3 py-2.5 flex flex-col gap-1.5 group cursor-grab active:cursor-grabbing transition-opacity ${
+                    draggingId === t.id ? 'opacity-40' : ''
+                  }`}
+                >
+                  {editingId === t.id ? (
+                    <TaskEditInline task={t} onClose={() => setEditingId(null)} />
+                  ) : (
+                    <>
+                      <div className='flex items-start justify-between gap-2'>
+                        <span className={`text-sm font-medium leading-snug ${t.status === 'done' ? 'line-through text-muted' : 'text-ink'}`}>
+                          {t.title}
+                        </span>
+                        <div className='flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0'>
+                          <IconBtn title='Modifier' onClick={() => setEditingId(t.id)}><LuPencil size={13} /></IconBtn>
+                          <IconBtn variant='danger' title='Supprimer' onClick={() => remove(t)}><LuTrash2 size={13} /></IconBtn>
+                        </div>
+                      </div>
+                      {t.description && <p className='text-xs text-muted leading-snug'>{t.description}</p>}
+                      <span className={`text-xs font-medium flex items-center gap-1 ${TASK_PRIORITY[t.priority]?.className}`}>
+                        <LuFlag size={11} />
+                        {TASK_PRIORITY[t.priority]?.label}
+                      </span>
+                    </>
+                  )}
+                </div>
+              ))}
+
+              {items.length === 0 && !isOver && (
+                <p className='text-xs text-muted italic text-center mt-4'>Glisser une tâche ici</p>
+              )}
+            </div>
+          );
+        })}
+      </div>
 
       {Dialog}
+      <TaskAddModal open={adding} projectId={projectId} onClose={() => setAdding(false)} />
     </div>
   );
 }
 
-function TaskAddForm({ projectId, onClose }: { projectId: string; onClose: () => void }) {
-  const [form, setForm] = useState({ title: '', description: '', priority: 'medium', dueDate: '' });
+function TaskAddModal({ open, projectId, onClose }: { open: boolean; projectId: string; onClose: () => void }) {
+  const [form, setForm] = useState({ title: '', description: '', priority: 'medium' });
   const [saving, setSaving] = useState(false);
 
   const submit = async (e: React.FormEvent) => {
@@ -408,9 +441,9 @@ function TaskAddForm({ projectId, onClose }: { projectId: string; onClose: () =>
         title: form.title,
         description: form.description || undefined,
         priority: form.priority,
-        dueDate: form.dueDate || null,
       });
       toast.success('Tâche ajoutée');
+      setForm({ title: '', description: '', priority: 'medium' });
       onClose();
     } catch (err: any) {
       toast.error(err?.message || 'Erreur');
@@ -420,34 +453,61 @@ function TaskAddForm({ projectId, onClose }: { projectId: string; onClose: () =>
   };
 
   return (
-    <div className='card p-4 border-2 border-accent/30'>
-      <form onSubmit={submit} className='flex flex-col gap-3'>
-        <input autoFocus className='input' required placeholder='Titre de la tâche…' value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} />
-        <textarea className='input text-sm' rows={2} placeholder='Description (optionnel)' value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} />
-        <div className='flex gap-3'>
-          <select className='input flex-1' value={form.priority} onChange={(e) => setForm({ ...form, priority: e.target.value })}>
+    <Modal
+      open={open}
+      onClose={onClose}
+      title='Nouvelle tâche'
+      footer={
+        <>
+          <button type='button' className='btn-secondary' onClick={onClose}>Annuler</button>
+          <button form='task-add-form' type='submit' className='btn-primary' disabled={saving}>
+            {saving ? 'Ajout…' : 'Ajouter'}
+          </button>
+        </>
+      }
+    >
+      <form id='task-add-form' onSubmit={submit} className='flex flex-col gap-4'>
+        <div>
+          <label className='label'>Titre *</label>
+          <input
+            autoFocus
+            className='input'
+            required
+            placeholder='Titre de la tâche…'
+            value={form.title}
+            onChange={(e) => setForm({ ...form, title: e.target.value })}
+          />
+        </div>
+        <div>
+          <label className='label'>Description</label>
+          <textarea
+            className='input'
+            rows={3}
+            placeholder='Description (optionnel)'
+            value={form.description}
+            onChange={(e) => setForm({ ...form, description: e.target.value })}
+          />
+        </div>
+        <div>
+          <label className='label'>Priorité</label>
+          <select className='input' value={form.priority} onChange={(e) => setForm({ ...form, priority: e.target.value })}>
             {Object.entries(TASK_PRIORITY).map(([v, { label }]) => <option key={v} value={v}>{label}</option>)}
           </select>
-          <input type='date' className='input flex-1' value={form.dueDate} onChange={(e) => setForm({ ...form, dueDate: e.target.value })} />
-        </div>
-        <div className='flex justify-end gap-2'>
-          <button type='button' className='btn-secondary text-sm' onClick={onClose}>Annuler</button>
-          <button type='submit' className='btn-primary text-sm' disabled={saving}>{saving ? '…' : 'Ajouter'}</button>
         </div>
       </form>
-    </div>
+    </Modal>
   );
 }
 
 function TaskEditInline({ task, onClose }: { task: any; onClose: () => void }) {
-  const [form, setForm] = useState({ title: task.title, description: task.description || '', priority: task.priority, dueDate: formatDateForInput(task.dueDate) });
+  const [form, setForm] = useState({ title: task.title, description: task.description || '', priority: task.priority });
   const [saving, setSaving] = useState(false);
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setSaving(true);
     try {
-      await updateProjectTask({ id: task.id, ...form, dueDate: form.dueDate || null });
+      await updateProjectTask({ id: task.id, ...form });
       toast.success('Tâche modifiée');
       onClose();
     } catch (err: any) {
@@ -461,12 +521,9 @@ function TaskEditInline({ task, onClose }: { task: any; onClose: () => void }) {
     <form onSubmit={submit} className='flex flex-col gap-2'>
       <input autoFocus className='input text-sm' required value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} />
       <textarea className='input text-sm' rows={2} value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} />
-      <div className='flex gap-2'>
-        <select className='input text-sm flex-1' value={form.priority} onChange={(e) => setForm({ ...form, priority: e.target.value })}>
-          {Object.entries(TASK_PRIORITY).map(([v, { label }]) => <option key={v} value={v}>{label}</option>)}
-        </select>
-        <input type='date' className='input text-sm flex-1' value={form.dueDate} onChange={(e) => setForm({ ...form, dueDate: e.target.value })} />
-      </div>
+      <select className='input text-sm' value={form.priority} onChange={(e) => setForm({ ...form, priority: e.target.value })}>
+        {Object.entries(TASK_PRIORITY).map(([v, { label }]) => <option key={v} value={v}>{label}</option>)}
+      </select>
       <div className='flex gap-2'>
         <button type='button' className='btn-secondary text-xs' onClick={onClose}>Annuler</button>
         <button type='submit' className='btn-primary text-xs' disabled={saving}>Enregistrer</button>

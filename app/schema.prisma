@@ -140,10 +140,9 @@ model ProjectTask {
 
   title       String
   description String?
-  status      String    @default("todo") // todo | in_progress | done
-  priority    String    @default("medium") // low | medium | high
-  dueDate     DateTime?
-  sortOrder   Int       @default(0)
+  status      String  @default("todo") // todo | in_progress | done
+  priority    String  @default("medium") // low | medium | high
+  sortOrder   Int     @default(0)
 }
 
 model ProjectNote {

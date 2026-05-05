@@ -196,7 +196,7 @@ export const updateProjectDetail = async (
 
 // ─── ProjectTask operations ───────────────────────────────────────────────────
 
-type CreateTaskArgs = { projectId: string; title: string; description?: string; priority?: string; dueDate?: string | null };
+type CreateTaskArgs = { projectId: string; title: string; description?: string; priority?: string };
 export const createProjectTask = async (args: CreateTaskArgs, context: any) => {
   const companyId = ensureCompany(context.user);
   await ensureProjectOwned(args.projectId, companyId, context.entities);
@@ -208,15 +208,14 @@ export const createProjectTask = async (args: CreateTaskArgs, context: any) => {
       title: args.title.trim(),
       description: args.description || null,
       priority: args.priority || 'medium',
-      dueDate: args.dueDate ? new Date(args.dueDate) : null,
       sortOrder: count,
     },
   });
 };
 
-type UpdateTaskArgs = { id: string; title?: string; description?: string; status?: string; priority?: string; dueDate?: string | null; sortOrder?: number };
+type UpdateTaskArgs = { id: string; title?: string; description?: string; status?: string; priority?: string; sortOrder?: number };
 export const updateProjectTask = async (
-  { id, dueDate, ...rest }: UpdateTaskArgs,
+  { id, ...rest }: UpdateTaskArgs,
   context: any,
 ) => {
   const companyId = ensureCompany(context.user);
@@ -225,10 +224,7 @@ export const updateProjectTask = async (
   await ensureProjectOwned(task.projectId, companyId, context.entities);
   return context.entities.ProjectTask.update({
     where: { id },
-    data: {
-      ...rest,
-      ...(dueDate !== undefined ? { dueDate: dueDate ? new Date(dueDate) : null } : {}),
-    },
+    data: rest,
   });
 };
 
