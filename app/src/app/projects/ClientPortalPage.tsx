@@ -36,9 +36,8 @@ const TASK_STATUS: Record<string, { label: string; icon: React.ReactNode; color:
 };
 
 const PORTAL_TABS = [
-  { id: 'overview', label: 'Aperçu', icon: <LuFolderOpen size={16} /> },
-  { id: 'tasks', label: 'Tâches', icon: <LuSquareCheck size={16} /> },
   { id: 'files', label: 'Fichiers', icon: <LuFolderOpen size={16} /> },
+  { id: 'tasks', label: 'Tâches', icon: <LuSquareCheck size={16} /> },
   { id: 'notes', label: 'Notes', icon: <LuMessageSquare size={16} /> },
 ] as const;
 
@@ -56,7 +55,7 @@ export default function ClientPortalPage() {
   const { token } = useParams<{ token: string }>();
   const [searchParams, setSearchParams] = useSearchParams();
   const rawTab = searchParams.get('tab') as PortalTab | null;
-  const activeTab: PortalTab = PORTAL_TABS.some((t) => t.id === rawTab) ? rawTab! : 'overview';
+  const activeTab: PortalTab = PORTAL_TABS.some((t) => t.id === rawTab) ? rawTab! : 'files';
   const setActiveTab = (id: PortalTab) => setSearchParams({ tab: id }, { replace: true });
   const { data, isLoading, error } = useQuery(getProjectByToken, { token: token! });
 
@@ -136,9 +135,8 @@ export default function ClientPortalPage() {
         ))}
       </div>
 
-      {activeTab === 'overview' && <PortalOverview project={project} tasks={tasks} files={files} />}
-      {activeTab === 'tasks' && <PortalTasks tasks={tasks} />}
       {activeTab === 'files' && <PortalFilesTab token={token!} />}
+      {activeTab === 'tasks' && <PortalTasks tasks={tasks} />}
       {activeTab === 'notes' && <PortalNotes notes={notes} token={token!} />}
     </PortalShell>
   );
