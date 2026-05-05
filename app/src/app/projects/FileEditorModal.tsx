@@ -217,7 +217,7 @@ export function FileEditorModal({ file, onClose, fetchContent, saveContent, onNa
 
   // Keyboard navigation
   useEffect(() => {
-    if (!onNavigate) return;
+    if (!onNavigate || !file) return;
     const handler = (e: KeyboardEvent) => {
       if (e.target instanceof HTMLTextAreaElement || e.target instanceof HTMLInputElement) return;
       if (e.key === 'ArrowLeft' && hasPrev) { e.preventDefault(); onNavigate('prev'); }
@@ -225,7 +225,7 @@ export function FileEditorModal({ file, onClose, fetchContent, saveContent, onNa
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [onNavigate, hasPrev, hasNext]);
+  }, [onNavigate, file, hasPrev, hasNext]);
 
   useEffect(() => {
     if (!file) return;

@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback, useEffect } from 'react';
+import { useState, useRef, useCallback, useEffect, useMemo } from 'react';
 import {
   FileManagerComponent,
   Inject,
@@ -316,13 +316,32 @@ export function SharedFileManager({ ops }: { ops: FileManagerOperations }) {
     }
     args.cancel = true;
     const ext = d.name.split('.').pop()?.toLowerCase() ?? '';
+    const sorted = (() => {
+      const fm = fmRef.current as any;
+      const viewData: any[] | undefined = fm?.detailsviewModule?.gridObj?.currentViewData;
+      if (viewData && viewData.length > 0) {
+        const idOrder = new Map<string, number>();
+        viewData.forEach((item: any, i: number) => { if (item?.id) idOrder.set(String(item.id), i); });
+        const base = fileSystemData.filter((f: any) => f.isFile && f.parentId === (currentFolderId ?? VIRTUAL_ROOT_ID));
+        const s = [...base].sort((a: any, b: any) => {
+          const ia = idOrder.has(String(a.id)) ? idOrder.get(String(a.id))! : 9999;
+          const ib = idOrder.has(String(b.id)) ? idOrder.get(String(b.id))! : 9999;
+          return ia - ib;
+        });
+        if (s.length) return s;
+      }
+      return fileSystemData
+        .filter((f: any) => f.isFile && f.parentId === (currentFolderId ?? VIRTUAL_ROOT_ID))
+        .sort((a: any, b: any) => (a.name ?? '').localeCompare(b.name ?? '', undefined, { sensitivity: 'base' }));
+    })();
+    sortedFilesRef.current = sorted;
     if (getEditorContent && EDITABLE_EXTS.has(ext)) {
       setEditorFile({ id: d.id, name: d.name, mimeType: d._mimeType ?? null, url: d._url ?? null });
     } else {
       setPreviewFileId(d.id);
       setPreviewFile({ name: d.name, mimeType: d._mimeType ?? null, url: d._url ?? null });
     }
-  }, [getEditorContent]);
+  }, [getEditorContent, fileSystemData, currentFolderId]);
 
   // ─── Syncfusion restoreFocus crash workaround ─────────────────────────────
 
@@ -334,6 +353,8 @@ export function SharedFileManager({ ops }: { ops: FileManagerOperations }) {
       fm.restoreFocus = () => { try { original(); } catch { /* suppress */ } };
     }
   }, []);
+
+
 
   // ─── Item-count badges (details view + nav pane) ──────────────────────────
 
@@ -424,16 +445,41 @@ export function SharedFileManager({ ops }: { ops: FileManagerOperations }) {
     return EDITABLE_EXTS.has(ext);
   };
 
-  // Use fileSystemData as source of truth — same data the FileManager renders,
-  // already with display names (+ extension). Syncfusion sorts files by name A→Z.
+  // Base list for the current folder. Sorted lazily at navigate time via getSortedFiles().
   const currentParentId = currentFolderId ?? VIRTUAL_ROOT_ID;
-  const navigableFiles = fileSystemData
-    .filter((f: any) => f.isFile && f.parentId === currentParentId)
-    .sort((a: any, b: any) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
+  const navigableFiles = useMemo(
+    () => fileSystemData.filter((f: any) => f.isFile && f.parentId === currentParentId),
+    [fileSystemData, currentParentId]
+  );
 
-  const openFileAtIdx = useCallback((idx: number) => {
-    const f = navigableFiles[idx] as any;
+  // Read current sort from the FM instance and return a sorted copy of navigableFiles.
+  const getSortedFiles = useCallback(() => {
+    const fm = fmRef.current as any;
+    // Use the grid's currentViewData — it reflects the actual rendered sort order
+    const viewData: any[] | undefined = fm?.detailsviewModule?.gridObj?.currentViewData;
+    if (viewData && viewData.length > 0) {
+      const idOrder = new Map<string, number>();
+      viewData.forEach((item: any, i: number) => { if (item?.id) idOrder.set(String(item.id), i); });
+      const sorted = [...navigableFiles].sort((a: any, b: any) => {
+        const ia = idOrder.has(String(a.id)) ? idOrder.get(String(a.id))! : 9999;
+        const ib = idOrder.has(String(b.id)) ? idOrder.get(String(b.id))! : 9999;
+        return ia - ib;
+      });
+      return sorted;
+    }
+    // Fallback: alphabetical
+    return [...navigableFiles].sort((a: any, b: any) =>
+      (a.name ?? '').localeCompare(b.name ?? '', undefined, { sensitivity: 'base' })
+    );
+  }, [navigableFiles]);
+
+  // Keeps the last-known sorted list so hasPrev/hasNext stay accurate between renders
+  const sortedFilesRef = useRef<any[]>([]);
+
+  const openFileAtIdx = useCallback((idx: number, files: any[]) => {
+    const f = files[idx] as any;
     if (!f) return;
+    sortedFilesRef.current = files;
     if (getEditorContent && isEditable(f)) {
       setPreviewFile(null);
       setPreviewFileId(null);
@@ -443,18 +489,21 @@ export function SharedFileManager({ ops }: { ops: FileManagerOperations }) {
       setPreviewFileId(f.id);
       setPreviewFile({ name: f.name, mimeType: f._mimeType ?? null, url: f._url ?? null });
     }
-  }, [navigableFiles, getEditorContent]);
+  }, [getEditorContent]);
 
-  // Current open file index (either editor or preview)
+  // Current open file index — use sortedFilesRef for accurate prev/next bounds
   const openFileId = editorFile?.id ?? previewFileId;
-  const openFileIdx = openFileId ? navigableFiles.findIndex((f: any) => f.id === openFileId) : -1;
+  const sortedList = sortedFilesRef.current.length ? sortedFilesRef.current : navigableFiles;
+  const openFileIdx = openFileId ? sortedList.findIndex((f: any) => f.id === openFileId) : -1;
 
   const handleNavigate = useCallback((dir: 'prev' | 'next') => {
-    const idx = openFileIdx + (dir === 'next' ? 1 : -1);
-    openFileAtIdx(idx);
-  }, [openFileIdx, openFileAtIdx]);
+    const sorted = getSortedFiles();
+    sortedFilesRef.current = sorted;
+    const idx = sorted.findIndex((f: any) => f.id === openFileId);
+    openFileAtIdx(idx + (dir === 'next' ? 1 : -1), sorted);
+  }, [getSortedFiles, openFileId, openFileAtIdx]);
 
-  const editorFileIdx = editorFile ? navigableFiles.findIndex((f: any) => f.id === editorFile.id) : -1;
+  const editorFileIdx = openFileIdx;
 
   const handleClosePreview = useCallback(() => {
     setPreviewFile(null);
@@ -535,7 +584,7 @@ export function SharedFileManager({ ops }: { ops: FileManagerOperations }) {
         onClose={handleClosePreview}
         onNavigate={handleNavigate}
         hasPrev={openFileIdx > 0}
-        hasNext={openFileIdx >= 0 && openFileIdx < navigableFiles.length - 1}
+        hasNext={openFileIdx >= 0 && openFileIdx < sortedList.length - 1}
       />
 
       {getEditorContent && (
@@ -546,7 +595,7 @@ export function SharedFileManager({ ops }: { ops: FileManagerOperations }) {
           saveContent={saveFileContent}
           onNavigate={handleNavigate}
           hasPrev={editorFileIdx > 0}
-          hasNext={editorFileIdx >= 0 && editorFileIdx < navigableFiles.length - 1}
+          hasNext={editorFileIdx >= 0 && editorFileIdx < sortedList.length - 1}
         />
       )}
     </div>

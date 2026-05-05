@@ -151,6 +151,7 @@ async function downloadFile(url: string, filename: string) {
 
 export function FilePreviewModal({ file, onClose, onNavigate, hasPrev, hasNext }: Props) {
   useEffect(() => {
+    if (!file) return;
     const handler = (e: KeyboardEvent) => {
       if (e.key === 'Escape') { onClose(); return; }
       if (e.key === 'ArrowLeft' && hasPrev && onNavigate) { e.preventDefault(); onNavigate('prev'); }
@@ -158,7 +159,7 @@ export function FilePreviewModal({ file, onClose, onNavigate, hasPrev, hasNext }
     };
     document.addEventListener('keydown', handler);
     return () => document.removeEventListener('keydown', handler);
-  }, [onClose, onNavigate, hasPrev, hasNext]);
+  }, [file, onClose, onNavigate, hasPrev, hasNext]);
 
   if (!file) return null;
 
