@@ -140,14 +140,14 @@ function SpreadsheetEditor({
   const dataRef = useRef({ workbook, sheets });
   dataRef.current = { workbook, sheets };
 
-  // Syncfusion fires 'created' inside its own setTimeout in React mode, which
-  // guarantees the full DOM (incl. e-selectall-container) is flushed before we
-  // call openFromJson. Doing the call here — instead of a useEffect — avoids the
-  // querySelectorAll-on-null crash that occurs when openFromJson is deferred to
-  // a later React render cycle.
-  const handleCreated = useCallback(() => {
+  // Syncfusion fires 'created' inside its own setTimeout in React mode.
+  // In React Strict Mode the component is mounted twice; we capture the instance
+  // at event-registration time so we only load data for the live mount.
+  const handleCreated = useCallback(function (this: SpreadsheetComponent) {
+    // `this` is the Syncfusion instance that fired the event — compare against
+    // the current ref to ensure we're operating on the mounted instance.
     const ss = ssRef.current;
-    if (!ss) return;
+    if (!ss || (ss as any) !== this) return;
     const { workbook: wb, sheets: sh } = dataRef.current;
     let workbookJson: any = wb;
     if (!workbookJson) {
