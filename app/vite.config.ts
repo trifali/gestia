@@ -6,4 +6,10 @@ export default defineConfig({
   server: {
     open: true,
   },
+  optimizeDeps: {
+    include: [
+      '@syncfusion/ej2-base',
+      '@syncfusion/ej2-react-filemanager',
+    ],
+  },
 })

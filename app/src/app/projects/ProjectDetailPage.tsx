@@ -13,9 +13,6 @@ import {
   createProjectNote,
   updateProjectNote,
   deleteProjectNote,
-  uploadProjectMedia,
-  updateProjectMedia,
-  deleteProjectMedia,
   createProjectClientAccess,
   revokeProjectClientAccess,
   createProjectLink,
@@ -25,7 +22,6 @@ import {
 import {
   LuLayoutDashboard,
   LuSquareCheck,
-  LuImage,
   LuFileText,
   LuLock,
   LuLink,
@@ -39,8 +35,6 @@ import {
   LuCircle,
   LuChevronDown,
   LuChevronUp,
-  LuDownload,
-  LuTag,
   LuCopy,
   LuEyeOff,
   LuEye,
@@ -49,9 +43,10 @@ import {
   LuRefreshCw,
   LuX,
   LuFlag,
+  LuFolderOpen,
 } from 'react-icons/lu';
 import { useConfirm, IconBtn, Modal } from '../../client/ui';
-import { MediaUploadZone } from './MediaUploadZone';
+import { ProjectFileManagerTab } from './ProjectFileManagerTab';
 import { formatDate } from '../../shared/format';
 
 // ─── Status & priority maps ───────────────────────────────────────────────────
@@ -90,11 +85,11 @@ const LINK_CATEGORIES: Record<string, { label: string; emoji: string }> = {
 const TABS = [
   { id: 'apercu', label: 'Aperçu', icon: <LuLayoutDashboard size={16} /> },
   { id: 'taches', label: 'Tâches', icon: <LuSquareCheck size={16} /> },
-  { id: 'medias', label: 'Médias', icon: <LuImage size={16} /> },
   { id: 'notes', label: 'Notes', icon: <LuFileText size={16} /> },
   { id: 'privees', label: 'Notes privées', icon: <LuLock size={16} /> },
   { id: 'ressources', label: 'Ressources', icon: <LuLink size={16} /> },
   { id: 'portail', label: 'Portail client', icon: <LuUsers size={16} /> },
+  { id: 'fichiers', label: 'Fichiers', icon: <LuFolderOpen size={16} /> },
 ] as const;
 
 type TabId = (typeof TABS)[number]['id'];
@@ -128,7 +123,7 @@ export default function ProjectDetailPage() {
     );
   }
 
-  const { project, tasks, notes, privateNotes, media, clientAccess, links } = data as any;
+  const { project, tasks, notes, privateNotes, clientAccess, links } = data as any;
   const doneTasks = tasks.filter((t: any) => t.status === 'done').length;
 
   return (
@@ -151,7 +146,6 @@ export default function ProjectDetailPage() {
       {/* Quick stats bar */}
       <div className='grid grid-cols-2 sm:grid-cols-4 gap-3 mb-5'>
         <StatCard label='Tâches' value={`${doneTasks} / ${tasks.length}`} sub='terminées' />
-        <StatCard label='Médias' value={String(media.length)} sub='fichiers' />
         <StatCard label='Notes' value={String(notes.length + privateNotes.length)} sub='au total' />
         <StatCard label='Accès client' value={String(clientAccess.filter((a: any) => !a.isRevoked).length)} sub='liens actifs' />
       </div>
@@ -181,11 +175,11 @@ export default function ProjectDetailPage() {
       <div>
         {activeTab === 'apercu' && <OverviewTab project={project} />}
         {activeTab === 'taches' && <TasksTab projectId={projectId!} tasks={tasks} />}
-        {activeTab === 'medias' && <MediaTab projectId={projectId!} media={media} />}
         {activeTab === 'notes' && <NotesTab projectId={projectId!} notes={notes} isPrivate={false} />}
         {activeTab === 'privees' && <NotesTab projectId={projectId!} notes={privateNotes} isPrivate={true} />}
         {activeTab === 'ressources' && <LinksTab projectId={projectId!} links={links} />}
         {activeTab === 'portail' && <PortalTab projectId={projectId!} clientAccess={clientAccess} />}
+        {activeTab === 'fichiers' && <ProjectFileManagerTab projectId={projectId!} />}
       </div>
     </div>
   );
@@ -532,216 +526,6 @@ function TaskEditInline({ task, onClose }: { task: any; onClose: () => void }) {
         <button type='submit' className='btn-primary text-xs' disabled={saving}>Enregistrer</button>
       </div>
     </form>
-  );
-}
-
-// ─── Tab: Médias ──────────────────────────────────────────────────────────────
-
-function MediaTab({ projectId, media }: { projectId: string; media: any[] }) {
-  const { ask, Dialog } = useConfirm();
-  const [uploading, setUploading] = useState(false);
-  const [tagFilter, setTagFilter] = useState('');
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const allTags = Array.from(new Set(media.flatMap((m) => m.tags || [])));
-
-  const displayMedia = tagFilter
-    ? media.filter((m) => (m.tags || []).includes(tagFilter))
-    : media;
-
-  const handleFiles = useCallback(async (files: FileList) => {
-    const arr = Array.from(files);
-    if (arr.length === 0) return;
-    setUploading(true);
-    let ok = 0;
-    let fail = 0;
-    for (const file of arr) {
-      try {
-        const dataUrl = await fileToDataUrl(file);
-        await uploadProjectMedia({ projectId, dataUrl, name: stripExt(file.name), originalName: file.name });
-        ok++;
-      } catch {
-        fail++;
-      }
-    }
-    setUploading(false);
-    if (ok > 0) toast.success(`${ok} fichier${ok > 1 ? 's' : ''} ajouté${ok > 1 ? 's' : ''}`);
-    if (fail > 0) toast.error(`${fail} fichier${fail > 1 ? 's' : ''} échoué${fail > 1 ? 's' : ''}`);
-  }, [projectId]);
-
-  const remove = async (m: any) => {
-    if (await ask(`Supprimer « ${m.name} » ?`)) {
-      try {
-        await deleteProjectMedia({ id: m.id });
-        toast.success('Fichier supprimé');
-      } catch (err: any) {
-        toast.error(err?.message);
-      }
-    }
-  };
-
-  return (
-    <div className='flex flex-col gap-5'>
-      <MediaUploadZone onFiles={handleFiles} uploading={uploading} />
-
-      {/* Tag filter */}
-      {allTags.length > 0 && (
-        <div className='flex flex-wrap gap-2'>
-          <button
-            onClick={() => setTagFilter('')}
-            className={`text-xs px-3 py-1 rounded-full border transition-colors ${tagFilter === '' ? 'bg-accent text-white border-accent' : 'border-line text-muted hover:border-accent'}`}
-          >
-            Tout
-          </button>
-          {allTags.map((tag) => (
-            <button
-              key={tag}
-              onClick={() => setTagFilter(tag === tagFilter ? '' : tag)}
-              className={`text-xs px-3 py-1 rounded-full border transition-colors ${tagFilter === tag ? 'bg-accent text-white border-accent' : 'border-line text-muted hover:border-accent'}`}
-            >
-              {tag}
-            </button>
-          ))}
-        </div>
-      )}
-
-      {/* Grid */}
-      {displayMedia.length === 0 ? (
-        <p className='text-muted text-sm text-center py-10'>Aucun fichier {tagFilter && `avec le tag « ${tagFilter} »`}</p>
-      ) : (
-        <div className='grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4'>
-          {displayMedia.map((m) => (
-            <MediaCard key={m.id} media={m} onDelete={() => remove(m)} />
-          ))}
-        </div>
-      )}
-      {Dialog}
-    </div>
-  );
-}
-
-function MediaCard({ media, onDelete }: { media: any; onDelete: () => void }) {
-  const [editing, setEditing] = useState(false);
-  const [name, setName] = useState(media.name);
-  const [tagInput, setTagInput] = useState('');
-  const [tags, setTags] = useState<string[]>(media.tags || []);
-  const [saving, setSaving] = useState(false);
-  const isImage = media.mimeType?.startsWith('image/');
-
-  const save = async () => {
-    setSaving(true);
-    try {
-      await updateProjectMedia({ id: media.id, name, tags });
-      toast.success('Mis à jour');
-      setEditing(false);
-    } catch (err: any) {
-      toast.error(err?.message);
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const addTag = () => {
-    const t = tagInput.trim().toLowerCase();
-    if (t && !tags.includes(t)) setTags([...tags, t]);
-    setTagInput('');
-  };
-
-  const removeTag = (tag: string) => setTags(tags.filter((t) => t !== tag));
-
-  const formatSize = (bytes: number) => {
-    if (bytes < 1024) return `${bytes} o`;
-    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} Ko`;
-    return `${(bytes / 1024 / 1024).toFixed(1)} Mo`;
-  };
-
-  return (
-    <div className='card overflow-hidden flex flex-col group'>
-      {/* Thumbnail */}
-      <div className='aspect-video bg-canvas-200 relative overflow-hidden'>
-        {isImage && media.url ? (
-          <img src={media.url} alt={media.name} className='w-full h-full object-cover' />
-        ) : (
-          <div className='w-full h-full flex items-center justify-center text-muted'>
-            <LuFileText size={32} />
-          </div>
-        )}
-        {media.isFromClient && (
-          <span className='absolute top-1.5 left-1.5 bg-blue-500 text-white text-xs px-1.5 py-0.5 rounded'>Client</span>
-        )}
-        {/* Hover actions */}
-        <div className='absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2'>
-          {media.url && (
-            <button
-              onClick={() => downloadFile(media.url, media.name + getExt(media))}
-              className='bg-white/90 p-2 rounded-lg hover:bg-white'
-              title='Télécharger'
-            >
-              <LuDownload size={16} />
-            </button>
-          )}
-          <button onClick={() => setEditing(!editing)} className='bg-white/90 p-2 rounded-lg hover:bg-white' title='Modifier'>
-            <LuPencil size={16} />
-          </button>
-          <button onClick={onDelete} className='bg-red-500/90 p-2 rounded-lg hover:bg-red-500 text-white' title='Supprimer'>
-            <LuTrash2 size={16} />
-          </button>
-        </div>
-      </div>
-
-      {/* Info */}
-      <div className='p-3 flex-1'>
-        {editing ? (
-          <div className='flex flex-col gap-2'>
-            <div className='flex items-center gap-1'>
-              <input
-                autoFocus
-                className='input text-xs flex-1'
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder='Nom du fichier'
-              />
-              <span className='text-xs text-muted shrink-0 font-mono'>{getExt(media)}</span>
-            </div>
-            <div className='flex flex-wrap gap-1'>
-              {tags.map((t) => (
-                <span key={t} className='flex items-center gap-1 text-xs bg-canvas-200 text-ink px-2 py-0.5 rounded-full'>
-                  {t}
-                  <button onClick={() => removeTag(t)} className='text-muted hover:text-danger'><LuX size={10} /></button>
-                </span>
-              ))}
-            </div>
-            <div className='flex gap-1'>
-              <input
-                className='input text-xs flex-1'
-                value={tagInput}
-                onChange={(e) => setTagInput(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), addTag())}
-                placeholder='Ajouter un tag…'
-              />
-              <button type='button' onClick={addTag} className='btn-secondary text-xs px-2'><LuTag size={12} /></button>
-            </div>
-            <div className='flex gap-1'>
-              <button className='btn-secondary text-xs flex-1' onClick={() => setEditing(false)}>Annuler</button>
-              <button className='btn-primary text-xs flex-1' onClick={save} disabled={saving}>OK</button>
-            </div>
-          </div>
-        ) : (
-          <>
-            <p className='text-sm font-medium text-ink truncate'>
-              {media.name}<span className='text-muted font-normal'>{getExt(media)}</span>
-            </p>
-            <p className='text-xs text-muted mt-0.5'>{formatSize(media.size)}</p>
-            {(tags.length > 0) && (
-              <div className='flex flex-wrap gap-1 mt-2'>
-                {tags.map((t) => (
-                  <span key={t} className='text-xs bg-canvas-200 text-muted px-1.5 py-0.5 rounded-full'>{t}</span>
-                ))}
-              </div>
-            )}
-          </>
-        )}
-      </div>
-    </div>
   );
 }
 
@@ -1179,40 +963,4 @@ function PortalTab({ projectId, clientAccess }: { projectId: string; clientAcces
       {Dialog}
     </div>
   );
-}
-
-// ─── Utility helpers ──────────────────────────────────────────────────────────
-
-function fileToDataUrl(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(reader.result as string);
-    reader.onerror = reject;
-    reader.readAsDataURL(file);
-  });
-}
-
-function stripExt(filename: string): string {
-  return filename.replace(/\.[^.]+$/, '');
-}
-
-/** Extension for a stored media item (images are always JPEG after server compression). */
-function getExt(media: any): string {
-  if (media.mimeType?.startsWith('image/')) return '.jpg';
-  const orig: string = media.originalName ?? '';
-  const dot = orig.lastIndexOf('.');
-  return dot >= 0 ? orig.slice(dot) : '';
-}
-
-/** Force-download via blob so cross-origin URLs don't open in a new tab. */
-async function downloadFile(url: string, filename: string) {
-  const res = await fetch(url);
-  const blob = await res.blob();
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  URL.revokeObjectURL(a.href);
 }

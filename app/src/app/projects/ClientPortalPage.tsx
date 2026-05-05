@@ -1,28 +1,29 @@
-import { useState, useCallback } from 'react';
+import { useState } from 'react';
 import { useParams, useSearchParams } from 'react-router';
 import toast from 'react-hot-toast';
-import { MediaUploadZone } from './MediaUploadZone';
 import {
   useQuery,
+  useAction,
   getProjectByToken,
-  submitClientMedia,
+  getProjectFilesByToken,
+  uploadPortalFile,
+  createPortalFolder,
+  deletePortalFiles,
+  renamePortalFile,
+  movePortalFiles,
   submitClientNote,
 } from 'wasp/client/operations';
 import {
   LuFolderOpen,
   LuSquareCheck,
-  LuImage,
   LuMessageSquare,
-  LuCircleAlert,
   LuCheck,
   LuClock,
   LuCircle,
-  LuDownload,
-  LuFileText,
   LuSend,
-  LuUser,
   LuLock,
 } from 'react-icons/lu';
+import { SharedFileManager } from './SharedFileManager';
 import { formatDate } from '../../shared/format';
 
 const TASK_STATUS: Record<string, { label: string; icon: React.ReactNode; color: string }> = {
@@ -34,7 +35,7 @@ const TASK_STATUS: Record<string, { label: string; icon: React.ReactNode; color:
 const PORTAL_TABS = [
   { id: 'overview', label: 'Aperçu', icon: <LuFolderOpen size={16} /> },
   { id: 'tasks', label: 'Tâches', icon: <LuSquareCheck size={16} /> },
-  { id: 'media', label: 'Médias', icon: <LuImage size={16} /> },
+  { id: 'files', label: 'Fichiers', icon: <LuFolderOpen size={16} /> },
   { id: 'notes', label: 'Notes', icon: <LuMessageSquare size={16} /> },
 ] as const;
 
@@ -80,7 +81,7 @@ export default function ClientPortalPage() {
     );
   }
 
-  const { project, tasks, notes, media } = data;
+  const { project, tasks, notes, files } = data;
   const doneTasks = tasks.filter((t: any) => t.status === 'done').length;
 
   return (
@@ -105,7 +106,7 @@ export default function ClientPortalPage() {
           <div className='text-xs text-muted'>tâches terminées</div>
         </div>
         <div className='card p-3 text-center'>
-          <div className='text-xl font-bold text-ink'>{media.length}</div>
+          <div className='text-xl font-bold text-ink'>{files.length}</div>
           <div className='text-xs text-muted'>fichiers</div>
         </div>
         <div className='card p-3 text-center'>
@@ -132,9 +133,9 @@ export default function ClientPortalPage() {
         ))}
       </div>
 
-      {activeTab === 'overview' && <PortalOverview project={project} tasks={tasks} media={media} />}
+      {activeTab === 'overview' && <PortalOverview project={project} tasks={tasks} files={files} />}
       {activeTab === 'tasks' && <PortalTasks tasks={tasks} />}
-      {activeTab === 'media' && <PortalMedia media={media} token={token!} />}
+      {activeTab === 'files' && <PortalFilesTab token={token!} />}
       {activeTab === 'notes' && <PortalNotes notes={notes} token={token!} />}
     </PortalShell>
   );
@@ -163,8 +164,8 @@ function PortalShell({ children, projectName }: { children: React.ReactNode; pro
 
 // ─── Overview ─────────────────────────────────────────────────────────────────
 
-function PortalOverview({ project, tasks, media }: { project: any; tasks: any[]; media: any[] }) {
-  const recent = media.slice(0, 4);
+function PortalOverview({ project, tasks, files }: { project: any; tasks: any[]; files: any[] }) {
+  const recent = files.slice(0, 4);
   const doneTasks = tasks.filter((t: any) => t.status === 'done').length;
   const progress = tasks.length > 0 ? Math.round((doneTasks / tasks.length) * 100) : 0;
 
@@ -187,14 +188,31 @@ function PortalOverview({ project, tasks, media }: { project: any; tasks: any[];
         </div>
       )}
 
-      {/* Recent media */}
+      {/* Recent files */}
       {recent.length > 0 && (
         <div>
           <h3 className='font-semibold text-ink mb-3'>Fichiers récents</h3>
           <div className='grid grid-cols-2 sm:grid-cols-4 gap-3'>
-            {recent.map((m: any) => (
-              <PortalMediaThumb key={m.id} media={m} />
-            ))}
+            {recent.map((f: any) => {
+              const isImage = f.mimeType?.startsWith('image/');
+              const dot = (f.name ?? '').lastIndexOf('.');
+              const ext = dot >= 0 ? f.name.slice(dot) : '';
+              const baseName = dot >= 0 ? f.name.slice(0, dot) : f.name;
+              return (
+                <div key={f.id} className='card overflow-hidden'>
+                  <div className='aspect-video bg-canvas-200 relative overflow-hidden flex items-center justify-center text-muted'>
+                    {isImage && f.url ? (
+                      <img src={f.url} alt={f.name} className='w-full h-full object-cover' />
+                    ) : (
+                      <span className='text-3xl'>📄</span>
+                    )}
+                  </div>
+                  <p className='text-xs font-medium text-ink truncate px-3 py-2'>
+                    {baseName}<span className='text-muted font-normal'>{ext}</span>
+                  </p>
+                </div>
+              );
+            })}
           </div>
         </div>
       )}
@@ -245,91 +263,35 @@ function PortalTasks({ tasks }: { tasks: any[] }) {
   );
 }
 
-// ─── Media ────────────────────────────────────────────────────────────────────
+// ─── Files (portal) ──────────────────────────────────────────────────────────
 
-function PortalMedia({ media, token }: { media: any[]; token: string }) {
-  const [uploading, setUploading] = useState(false);
-
-  const handleFiles = useCallback(async (files: FileList) => {
-    const arr = Array.from(files);
-    if (arr.length === 0) return;
-    setUploading(true);
-    let ok = 0;
-    let fail = 0;
-    for (const file of arr) {
-      try {
-        const dataUrl = await fileToDataUrl(file);
-        await submitClientMedia({ token, dataUrl, name: stripExt(file.name), originalName: file.name });
-        ok++;
-      } catch {
-        fail++;
-      }
-    }
-    setUploading(false);
-    if (ok > 0) toast.success(`${ok} fichier${ok > 1 ? 's' : ''} envoyé${ok > 1 ? 's' : ''}`);
-    if (fail > 0) toast.error(`${fail} fichier${fail > 1 ? 's' : ''} échoué${fail > 1 ? 's' : ''}`);
-  }, [token]);
+function PortalFilesTab({ token }: { token: string }) {
+  const { data: rawFiles, refetch, isFetching } = useQuery(getProjectFilesByToken, { token });
+  const upload = useAction(uploadPortalFile);
+  const createFolder = useAction(createPortalFolder);
+  const deleteFiles = useAction(deletePortalFiles);
+  const renameFile = useAction(renamePortalFile);
+  const moveFiles = useAction(movePortalFiles);
 
   return (
-    <div className='flex flex-col gap-5'>
-      <MediaUploadZone
-        onFiles={handleFiles}
-        uploading={uploading}
-        title='Déposer ou cliquer pour envoyer vos fichiers'
-        busyLabel='Envoi en cours…'
-        accept='image/*,.pdf,.doc,.docx,.zip,.txt'
-      />
-
-      {/* Grid */}
-      {media.length === 0 ? (
-        <p className='text-muted text-sm text-center py-6'>Aucun fichier partagé pour ce projet.</p>
-      ) : (
-        <div className='grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4'>
-          {media.map((m: any) => (
-            <PortalMediaThumb key={m.id} media={m} />
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function PortalMediaThumb({ media }: { media: any }) {
-  const isImage = media.mimeType?.startsWith('image/');
-  const formatSize = (bytes: number) => bytes < 1024 * 1024 ? `${(bytes / 1024).toFixed(0)} Ko` : `${(bytes / 1024 / 1024).toFixed(1)} Mo`;
-
-  return (
-    <div className='card overflow-hidden'>
-      <div className='aspect-video bg-canvas-200 relative overflow-hidden'>
-        {isImage && media.url ? (
-          <img src={media.url} alt={media.name} className='w-full h-full object-cover' />
-        ) : (
-          <div className='w-full h-full flex items-center justify-center text-muted'>
-            <LuFileText size={32} />
-          </div>
-        )}
-        {media.isFromClient && (
-          <span className='absolute top-1.5 left-1.5 bg-blue-500 text-white text-xs px-1.5 py-0.5 rounded'>
-            Vous
-          </span>
-        )}
-      </div>
-      <div className='p-3 flex items-center justify-between gap-2'>
-        <p className='text-xs font-medium text-ink truncate'>
-          {media.name}<span className='text-muted font-normal'>{getExt(media)}</span>
-        </p>
-        {media.url && (
-          <button
-            onClick={() => downloadFile(media.url, media.name + getExt(media))}
-            title='Télécharger'
-            className='text-muted hover:text-ink shrink-0'
-          >
-            <LuDownload size={14} />
-          </button>
-        )}
-      </div>
-      <p className='text-xs text-muted px-3 pb-3 -mt-1'>{formatSize(media.size)}</p>
-    </div>
+    <SharedFileManager
+      ops={{
+        files: rawFiles as any[] | undefined,
+        isFetching,
+        refetch,
+        upload: ({ dataUrl, name, originalName, parentId }) =>
+          upload({ token, dataUrl, name, originalName, parentId }),
+        createFolder: ({ name, parentId }) =>
+          createFolder({ token, name, parentId }),
+        deleteFiles: ({ ids }) =>
+          deleteFiles({ token, ids }),
+        renameFile: ({ id, name }) =>
+          renameFile({ token, id, name }),
+        moveFiles: ({ ids, targetParentId }) =>
+          moveFiles({ token, ids, targetParentId }),
+        instanceId: `portal-${token}`,
+      }}
+    />
   );
 }
 
@@ -412,38 +374,4 @@ function PortalNotes({ notes, token }: { notes: any[]; token: string }) {
       )}
     </div>
   );
-}
-
-// ─── Utility ─────────────────────────────────────────────────────────────────
-
-function fileToDataUrl(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(reader.result as string);
-    reader.onerror = reject;
-    reader.readAsDataURL(file);
-  });
-}
-
-function stripExt(filename: string): string {
-  return filename.replace(/\.[^.]+$/, '');
-}
-
-function getExt(media: any): string {
-  if (media.mimeType?.startsWith('image/')) return '.jpg';
-  const orig: string = media.originalName ?? '';
-  const dot = orig.lastIndexOf('.');
-  return dot >= 0 ? orig.slice(dot) : '';
-}
-
-async function downloadFile(url: string, filename: string) {
-  const res = await fetch(url);
-  const blob = await res.blob();
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  URL.revokeObjectURL(a.href);
 }

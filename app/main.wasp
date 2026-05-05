@@ -230,11 +230,15 @@ query getProjects {
 }
 query getProjectDetail {
   fn: import { getProjectDetail } from "@src/app/projects/projectDetailOperations",
-  entities: [User, Project, Client, ProjectTask, ProjectNote, ProjectMedia, ProjectClientAccess, ProjectLink]
+  entities: [User, Project, Client, ProjectTask, ProjectNote, ProjectClientAccess, ProjectLink]
 }
 query getProjectByToken {
   fn: import { getProjectByToken } from "@src/app/projects/projectDetailOperations",
-  entities: [Project, ProjectClientAccess, ProjectMedia, ProjectNote, ProjectTask]
+  entities: [Project, ProjectClientAccess, ProjectFile, ProjectNote, ProjectTask]
+}
+query getProjectFilesByToken {
+  fn: import { getProjectFilesByToken } from "@src/app/projects/projectFileOperations",
+  entities: [Project, ProjectFile, ProjectClientAccess]
 }
 action createProject {
   fn: import { createProject } from "@src/app/projects/operations",
@@ -276,18 +280,6 @@ action deleteProjectNote {
   fn: import { deleteProjectNote } from "@src/app/projects/projectDetailOperations",
   entities: [User, Project, ProjectNote]
 }
-action uploadProjectMedia {
-  fn: import { uploadProjectMedia } from "@src/app/projects/projectDetailOperations",
-  entities: [User, Project, ProjectMedia]
-}
-action updateProjectMedia {
-  fn: import { updateProjectMedia } from "@src/app/projects/projectDetailOperations",
-  entities: [User, Project, ProjectMedia]
-}
-action deleteProjectMedia {
-  fn: import { deleteProjectMedia } from "@src/app/projects/projectDetailOperations",
-  entities: [User, Project, ProjectMedia]
-}
 action createProjectClientAccess {
   fn: import { createProjectClientAccess } from "@src/app/projects/projectDetailOperations",
   entities: [User, Project, ProjectClientAccess]
@@ -308,13 +300,64 @@ action deleteProjectLink {
   fn: import { deleteProjectLink } from "@src/app/projects/projectDetailOperations",
   entities: [User, Project, ProjectLink]
 }
-action submitClientMedia {
-  fn: import { submitClientMedia } from "@src/app/projects/projectDetailOperations",
-  entities: [ProjectClientAccess, ProjectMedia]
+action submitPortalFile {
+  fn: import { submitPortalFile } from "@src/app/projects/projectFileOperations",
+  entities: [Project, ProjectFile, ProjectClientAccess]
+}
+action uploadPortalFile {
+  fn: import { uploadPortalFile } from "@src/app/projects/projectFileOperations",
+  entities: [Project, ProjectFile, ProjectClientAccess]
+}
+action createPortalFolder {
+  fn: import { createPortalFolder } from "@src/app/projects/projectFileOperations",
+  entities: [Project, ProjectFile, ProjectClientAccess]
+}
+action deletePortalFiles {
+  fn: import { deletePortalFiles } from "@src/app/projects/projectFileOperations",
+  entities: [Project, ProjectFile, ProjectClientAccess]
+}
+action renamePortalFile {
+  fn: import { renamePortalFile } from "@src/app/projects/projectFileOperations",
+  entities: [Project, ProjectFile, ProjectClientAccess]
+}
+action movePortalFiles {
+  fn: import { movePortalFiles } from "@src/app/projects/projectFileOperations",
+  entities: [Project, ProjectFile, ProjectClientAccess]
 }
 action submitClientNote {
   fn: import { submitClientNote } from "@src/app/projects/projectDetailOperations",
   entities: [ProjectClientAccess, ProjectNote]
+}
+
+// ─── Project File Manager ────────────────────────────────────────────────────
+
+query getProjectFiles {
+  fn: import { getProjectFiles } from "@src/app/projects/projectFileOperations",
+  entities: [User, Project, ProjectFile]
+}
+action createProjectFolder {
+  fn: import { createProjectFolder } from "@src/app/projects/projectFileOperations",
+  entities: [User, Project, ProjectFile]
+}
+action uploadProjectFile {
+  fn: import { uploadProjectFile } from "@src/app/projects/projectFileOperations",
+  entities: [User, Project, ProjectFile]
+}
+action deleteProjectFiles {
+  fn: import { deleteProjectFiles } from "@src/app/projects/projectFileOperations",
+  entities: [User, Project, ProjectFile]
+}
+action renameProjectFile {
+  fn: import { renameProjectFile } from "@src/app/projects/projectFileOperations",
+  entities: [User, Project, ProjectFile]
+}
+action moveProjectFiles {
+  fn: import { moveProjectFiles } from "@src/app/projects/projectFileOperations",
+  entities: [User, Project, ProjectFile]
+}
+action createNewProjectFile {
+  fn: import { createNewProjectFile } from "@src/app/projects/projectFileOperations",
+  entities: [User, Project, ProjectFile]
 }
 
 query getDocuments {

@@ -125,9 +125,9 @@ model Project {
   documents    Document[]
   tasks        ProjectTask[]
   notes        ProjectNote[]
-  media        ProjectMedia[]
   clientAccess ProjectClientAccess[]
   links        ProjectLink[]
+  files        ProjectFile[]
 }
 
 model ProjectTask {
@@ -162,22 +162,6 @@ model ProjectNote {
   userId String?
 }
 
-model ProjectMedia {
-  id        String   @id @default(uuid())
-  createdAt DateTime @default(now())
-
-  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  projectId String
-
-  key          String // MinIO object key
-  name         String // user-facing display name
-  originalName String // original upload filename
-  mimeType     String
-  size         Int
-  tags         String  @default("[]") // JSON array of tag strings
-  isFromClient Boolean @default(false)
-}
-
 model ProjectClientAccess {
   id        String   @id @default(uuid())
   createdAt DateTime @default(now())
@@ -204,6 +188,27 @@ model ProjectLink {
   description String?
   category    String  @default("autre") // design | dev | doc | credential | reference | autre
   sortOrder   Int     @default(0)
+}
+
+model ProjectFile {
+  id        String   @id @default(uuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  projectId String
+
+  name     String
+  isFolder Boolean @default(false)
+  parentId String? // null = root of project
+
+  // Only for files (isFolder = false)
+  key      String? // MinIO object key
+  mimeType String?
+  size     Int     @default(0)
+
+  parent   ProjectFile?  @relation("PFTree", fields: [parentId], references: [id], onDelete: Cascade)
+  children ProjectFile[] @relation("PFTree")
 }
 
 model Document {

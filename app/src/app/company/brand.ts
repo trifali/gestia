@@ -56,7 +56,14 @@ export const uploadCompanyLogo: UploadCompanyLogo<UploadArgs, Company> = async (
     throw new HttpError(400, "Impossible de traiter l'image : " + (e?.message || 'erreur sharp'));
   }
 
-  const key = `companies/${companyId}/logo.jpg`;
+  const key = `users/${context.user!.id}/logo.jpg`;
+
+  // Delete previous logo if it was stored under a different key
+  const existingCompany = await context.entities.Company.findUnique({ where: { id: companyId } });
+  if (existingCompany?.brandLogoKey && existingCompany.brandLogoKey !== key) {
+    await removeObject(existingCompany.brandLogoKey).catch(() => {});
+  }
+
   await putObject(key, optimized, 'image/jpeg');
 
   return context.entities.Company.update({

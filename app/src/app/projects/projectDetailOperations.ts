@@ -1,7 +1,6 @@
 import { HttpError } from 'wasp/server';
 import { randomBytes } from 'crypto';
-import sharp from 'sharp';
-import { putObject, removeObject, getPresignedUrl } from '../../server/storage';
+import { getPresignedUrl } from '../../server/storage';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -21,51 +20,6 @@ function generateToken(): string {
   return randomBytes(24).toString('hex');
 }
 
-const MAX_MEDIA_BYTES = 20 * 1024 * 1024; // 20 MB
-const IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/tiff', 'image/bmp', 'image/avif']);
-
-async function processAndStoreMedia(
-  dataUrl: string,
-  projectId: string,
-  originalName: string,
-): Promise<{ key: string; mimeType: string; size: number }> {
-  const m = /^data:([a-zA-Z0-9.+/\-]+);base64,(.+)$/.exec(dataUrl);
-  if (!m) throw new HttpError(400, 'Format de fichier invalide');
-  const inputMime = m[1];
-  const raw = Buffer.from(m[2], 'base64');
-  if (raw.length > MAX_MEDIA_BYTES) throw new HttpError(400, 'Fichier trop volumineux (max 20 Mo)');
-
-  const uid = randomBytes(12).toString('hex');
-
-  if (IMAGE_TYPES.has(inputMime)) {
-    // Compress and convert to JPEG
-    const optimized = await sharp(raw, { failOn: 'none' })
-      .rotate()
-      .flatten({ background: { r: 255, g: 255, b: 255 } })
-      .jpeg({ quality: 82, progressive: true, mozjpeg: true })
-      .toBuffer();
-    const key = `projects/${projectId}/media/${uid}.jpg`;
-    await putObject(key, optimized, 'image/jpeg');
-    return { key, mimeType: 'image/jpeg', size: optimized.length };
-  } else {
-    // Store other file types as-is (PDF, etc.)
-    const ext = originalName.includes('.') ? originalName.split('.').pop()!.toLowerCase() : 'bin';
-    const key = `projects/${projectId}/media/${uid}.${ext}`;
-    await putObject(key, raw, inputMime);
-    return { key, mimeType: inputMime, size: raw.length };
-  }
-}
-
-async function withPresignedUrls(mediaList: any[]): Promise<any[]> {
-  return Promise.all(
-    mediaList.map(async (m) => ({
-      ...m,
-      url: await getPresignedUrl(m.key).catch(() => null),
-      tags: JSON.parse(m.tags || '[]'),
-    })),
-  );
-}
-
 // ─── getProjectDetail ─────────────────────────────────────────────────────────
 
 type ProjectDetailResult = {
@@ -73,7 +27,6 @@ type ProjectDetailResult = {
   tasks: any[];
   notes: any[];
   privateNotes: any[];
-  media: any[];
   clientAccess: any[];
   links: any[];
 };
@@ -89,7 +42,7 @@ export const getProjectDetail = async (
   });
   if (!project || project.companyId !== companyId) throw new HttpError(404);
 
-  const [tasks, allNotes, rawMedia, clientAccess, links] = await Promise.all([
+  const [tasks, allNotes, clientAccess, links] = await Promise.all([
     context.entities.ProjectTask.findMany({
       where: { projectId },
       orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],
@@ -98,10 +51,6 @@ export const getProjectDetail = async (
       where: { projectId },
       orderBy: { createdAt: 'desc' },
       include: { user: { select: { fullName: true, email: true } } },
-    }),
-    context.entities.ProjectMedia.findMany({
-      where: { projectId },
-      orderBy: { createdAt: 'desc' },
     }),
     context.entities.ProjectClientAccess.findMany({
       where: { projectId },
@@ -115,9 +64,8 @@ export const getProjectDetail = async (
 
   const notes = allNotes.filter((n: any) => !n.isPrivate);
   const privateNotes = allNotes.filter((n: any) => n.isPrivate);
-  const media = await withPresignedUrls(rawMedia);
 
-  return { project, tasks, notes, privateNotes, media, clientAccess, links };
+  return { project, tasks, notes, privateNotes, clientAccess, links };
 };
 
 // ─── getProjectByToken (public – no auth) ─────────────────────────────────────
@@ -126,7 +74,7 @@ type PublicProjectResult = {
   project: { id: string; name: string; description: string | null; status: string };
   tasks: any[];
   notes: any[];
-  media: any[];
+  files: any[];
 };
 
 export const getProjectByToken = async (
@@ -146,7 +94,7 @@ export const getProjectByToken = async (
   const project = await context.entities.Project.findUnique({ where: { id: access.projectId } });
   if (!project) throw new HttpError(404);
 
-  const [tasks, notes, rawMedia] = await Promise.all([
+  const [tasks, notes, rawFiles] = await Promise.all([
     context.entities.ProjectTask.findMany({
       where: { projectId: access.projectId },
       orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],
@@ -155,19 +103,24 @@ export const getProjectByToken = async (
       where: { projectId: access.projectId, isPrivate: false },
       orderBy: { createdAt: 'desc' },
     }),
-    context.entities.ProjectMedia.findMany({
-      where: { projectId: access.projectId },
+    context.entities.ProjectFile.findMany({
+      where: { projectId: access.projectId, isFolder: false },
       orderBy: { createdAt: 'desc' },
     }),
   ]);
 
-  const media = await withPresignedUrls(rawMedia);
+  const files = await Promise.all(
+    rawFiles.map(async (f: any) => ({
+      ...f,
+      url: f.key ? await getPresignedUrl(f.key).catch(() => null) : null,
+    })),
+  );
 
   return {
     project: { id: project.id, name: project.name, description: project.description, status: project.status },
     tasks,
     notes,
-    media,
+    files,
   };
 };
 
@@ -277,52 +230,6 @@ export const deleteProjectNote = async ({ id }: { id: string }, context: any) =>
   return { id };
 };
 
-// ─── ProjectMedia operations ──────────────────────────────────────────────────
-
-type UploadMediaArgs = { projectId: string; dataUrl: string; name: string; originalName: string };
-export const uploadProjectMedia = async (args: UploadMediaArgs, context: any) => {
-  const companyId = ensureCompany(context.user);
-  await ensureProjectOwned(args.projectId, companyId, context.entities);
-  const { key, mimeType, size } = await processAndStoreMedia(args.dataUrl, args.projectId, args.originalName);
-  const record = await context.entities.ProjectMedia.create({
-    data: {
-      projectId: args.projectId,
-      key,
-      name: args.name || args.originalName,
-      originalName: args.originalName,
-      mimeType,
-      size,
-    },
-  });
-  return { ...record, url: await getPresignedUrl(key).catch(() => null), tags: [] };
-};
-
-type UpdateMediaArgs = { id: string; name?: string; tags?: string[] };
-export const updateProjectMedia = async ({ id, name, tags }: UpdateMediaArgs, context: any) => {
-  const companyId = ensureCompany(context.user);
-  const media = await context.entities.ProjectMedia.findUnique({ where: { id } });
-  if (!media) throw new HttpError(404);
-  await ensureProjectOwned(media.projectId, companyId, context.entities);
-  const updated = await context.entities.ProjectMedia.update({
-    where: { id },
-    data: {
-      ...(name !== undefined ? { name } : {}),
-      ...(tags !== undefined ? { tags: JSON.stringify(tags) } : {}),
-    },
-  });
-  return { ...updated, url: await getPresignedUrl(updated.key).catch(() => null), tags: JSON.parse(updated.tags || '[]') };
-};
-
-export const deleteProjectMedia = async ({ id }: { id: string }, context: any) => {
-  const companyId = ensureCompany(context.user);
-  const media = await context.entities.ProjectMedia.findUnique({ where: { id } });
-  if (!media) throw new HttpError(404);
-  await ensureProjectOwned(media.projectId, companyId, context.entities);
-  await removeObject(media.key);
-  await context.entities.ProjectMedia.delete({ where: { id } });
-  return { id };
-};
-
 // ─── ProjectClientAccess operations ───────────────────────────────────────────
 
 type CreateAccessArgs = { projectId: string; label?: string; expiresAt?: string | null };
@@ -393,24 +300,6 @@ async function validateToken(token: string, entities: any) {
   if (access.expiresAt && access.expiresAt < new Date()) throw new HttpError(403, 'Ce lien a expiré');
   return access;
 }
-
-type SubmitClientMediaArgs = { token: string; dataUrl: string; name: string; originalName: string };
-export const submitClientMedia = async (args: SubmitClientMediaArgs, context: any) => {
-  const access = await validateToken(args.token, context.entities);
-  const { key, mimeType, size } = await processAndStoreMedia(args.dataUrl, access.projectId, args.originalName);
-  const record = await context.entities.ProjectMedia.create({
-    data: {
-      projectId: access.projectId,
-      key,
-      name: args.name || args.originalName,
-      originalName: args.originalName,
-      mimeType,
-      size,
-      isFromClient: true,
-    },
-  });
-  return { ...record, url: await getPresignedUrl(key).catch(() => null), tags: [] };
-};
 
 type SubmitClientNoteArgs = { token: string; content: string; authorName?: string };
 export const submitClientNote = async (args: SubmitClientNoteArgs, context: any) => {

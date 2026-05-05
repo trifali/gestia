@@ -1,4 +1,5 @@
 import './Main.css';
+import { useEffect } from 'react';
 import { Outlet, useLocation } from 'react-router';
 import { useAuth } from 'wasp/client/auth';
 import { Toaster } from 'react-hot-toast';
@@ -7,15 +8,6 @@ import AppLayout from './AppLayout';
 // Le routeur est généré par Wasp et ne nous permet pas d'activer les `future`
 // flags de react-router v6. On masque les avertissements de dépréciation v7
 // puisque l'API publique de Wasp n'expose pas ces options.
-if (typeof window !== 'undefined' && !(window as any).__waspRRWarnPatched) {
-  (window as any).__waspRRWarnPatched = true;
-  const originalWarn = console.warn;
-  console.warn = (...args: any[]) => {
-    const msg = typeof args[0] === 'string' ? args[0] : '';
-    if (msg.includes('React Router Future Flag Warning')) return;
-    originalWarn.apply(console, args);
-  };
-}
 
 const PUBLIC_PATHS = new Set([
   '/',
@@ -29,6 +21,25 @@ const PUBLIC_PATHS = new Set([
 export default function App() {
   const location = useLocation();
   const { data: user, isLoading } = useAuth();
+
+  // Register Syncfusion license on client only (avoids SSR CJS interop issues)
+  useEffect(() => {
+    import('@syncfusion/ej2-base').then((m: any) => {
+      const fn = m.registerLicense ?? m.default?.registerLicense;
+      fn?.('Ngo9BigBOggjHTQxAR8/V1JHaF5cWWdCf1FpRmJGdld5fUVHYVZUTXxaS00DNHVRdkdlWXpedXRcRGFZUkZ3WkZWYEo=');
+    });
+
+    // Suppress React Router v6→v7 deprecation warnings (Wasp doesn't expose future flags)
+    if (!(window as any).__waspRRWarnPatched) {
+      (window as any).__waspRRWarnPatched = true;
+      const originalWarn = console.warn;
+      console.warn = (...args: any[]) => {
+        const msg = typeof args[0] === 'string' ? args[0] : '';
+        if (msg.includes('React Router Future Flag Warning')) return;
+        originalWarn.apply(console, args);
+      };
+    }
+  }, []);
 
   const isPublic = PUBLIC_PATHS.has(location.pathname);
 
