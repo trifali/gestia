@@ -1,7 +1,6 @@
 import { HttpError } from 'wasp/server';
 import { randomBytes } from 'crypto';
 import * as XLSX from 'xlsx';
-import { Document, Packer, Paragraph } from 'docx';
 import sharp from 'sharp';
 import { putObject, removeObject, getPresignedUrl, getObjectBuffer } from '../../server/storage';
 
@@ -249,38 +248,17 @@ export const moveProjectFiles = async (
 
 // ─── createNewProjectFile ─────────────────────────────────────────────────────
 
-type NewFileType = 'txt' | 'md' | 'json' | 'xlsx' | 'docx';
+type NewFileType = 'md';
 
-async function buildNewFileBuffer(type: NewFileType): Promise<{ buffer: Buffer; mimeType: string }> {
-  switch (type) {
-    case 'txt':
-      return { buffer: Buffer.from(''), mimeType: 'text/plain' };
-    case 'md':
-      return { buffer: Buffer.from('# Nouveau document\n\n'), mimeType: 'text/markdown' };
-    case 'json':
-      return { buffer: Buffer.from('{}'), mimeType: 'application/json' };
-    case 'xlsx': {
-      const wb = XLSX.utils.book_new();
-      const ws = XLSX.utils.aoa_to_sheet([['']]);
-      XLSX.utils.book_append_sheet(wb, ws, 'Feuille1');
-      const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
-      return { buffer: Buffer.from(buf), mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' };
-    }
-    case 'docx': {
-      const doc = new Document({
-        sections: [{ children: [new Paragraph('')] }],
-      });
-      const buf = await Packer.toBuffer(doc);
-      return { buffer: buf, mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' };
-    }
-  }
+function buildNewFileBuffer(): { buffer: Buffer; mimeType: string } {
+  return { buffer: Buffer.from('# Nouveau document\n\n'), mimeType: 'text/markdown' };
 }
 
 export const createNewProjectFile = async (
-  { projectId, name, type, parentId }: {
+  { projectId, name, parentId }: {
     projectId: string;
     name: string;
-    type: NewFileType;
+    type?: string; // kept for API compat, only 'md' is supported
     parentId?: string | null;
   },
   context: any,
@@ -298,9 +276,48 @@ export const createNewProjectFile = async (
     }
   }
 
-  const { buffer, mimeType } = await buildNewFileBuffer(type);
-  const filename = `${name.trim()}.${type}`;
-  const key = minioKey(companyId, projectId, `${uid()}.${type}`);
+  const { buffer, mimeType } = buildNewFileBuffer();
+  const filename = `${name.trim()}.md`;
+  const key = minioKey(companyId, projectId, `${uid()}.md`);
+  await putObject(key, buffer, mimeType);
+
+  return context.entities.ProjectFile.create({
+    data: {
+      projectId,
+      name: filename,
+      isFolder: false,
+      parentId: parentId ?? null,
+      key,
+      mimeType,
+      size: buffer.length,
+    },
+  });
+};
+
+// ─── createNewPortalFile ──────────────────────────────────────────────────────
+
+export const createNewPortalFile = async (
+  { token, name, parentId }: {
+    token: string;
+    name: string;
+    parentId?: string | null;
+  },
+  context: any,
+) => {
+  const { projectId, companyId } = await resolvePortalProject(token, context.entities);
+
+  if (!name?.trim()) throw new HttpError(400, 'Nom requis');
+
+  if (parentId) {
+    const parent = await context.entities.ProjectFile.findUnique({ where: { id: parentId } });
+    if (!parent || parent.projectId !== projectId || !parent.isFolder) {
+      throw new HttpError(400, 'Dossier parent invalide');
+    }
+  }
+
+  const { buffer, mimeType } = buildNewFileBuffer();
+  const filename = `${name.trim()}.md`;
+  const key = minioKey(companyId, projectId, `${uid()}.md`);
   await putObject(key, buffer, mimeType);
 
   return context.entities.ProjectFile.create({
@@ -505,17 +522,10 @@ export const movePortalFiles = async (
 type EditorContent =
   | { type: 'text'; content: string }
   | { type: 'docx'; base64: string }
-  | {
-      type: 'spreadsheet';
-      /** Syncfusion workbook JSON (sidecar or converted from xlsx with styles). */
-      workbook?: any;
-      /** Plain 2D cell values (kept as fallback for save round-trips). */
-      sheets: { name: string; data: any[][] }[];
-    };
+  | { type: 'spreadsheet'; workbook: any; sheets: { name: string; data: any[][] }[] };
 
 // ─── SheetJS → Syncfusion workbook JSON converter ────────────────────────────
 
-/** Map a SheetJS cell style object to a CSS string that Syncfusion accepts. */
 function sheetjsStyleToCSS(s: any): string {
   const parts: string[] = [];
   if (s.font) {
@@ -531,7 +541,7 @@ function sheetjsStyleToCSS(s: any): string {
     if (pat && pat !== 'none') {
       const raw = s.fill.fgColor?.rgb ?? s.fill.bgColor?.rgb;
       if (raw) {
-        const hex = raw.length === 8 ? raw.slice(2) : raw; // strip ARGB alpha
+        const hex = raw.length === 8 ? raw.slice(2) : raw;
         if (!/^FF?FF?FF$/i.test(hex)) parts.push(`background-color:#${hex}`);
       }
     }
@@ -548,7 +558,6 @@ function sheetjsStyleToCSS(s: any): string {
   return parts.join(';');
 }
 
-/** Convert a SheetJS workbook (parsed with cellStyles:true) to Syncfusion workbook JSON. */
 function xlsxToSyncfusionWorkbook(xlsxWb: XLSX.WorkBook): any {
   const sfSheets = xlsxWb.SheetNames.map((name) => {
     const sheet = xlsxWb.Sheets[name];
@@ -557,14 +566,10 @@ function xlsxToSyncfusionWorkbook(xlsxWb: XLSX.WorkBook): any {
     const range = XLSX.utils.decode_range(sheet['!ref']);
     const merges: XLSX.Range[] = (sheet['!merges'] as any) ?? [];
 
-    // Mark merged cells: top-left gets rowSpan/colSpan; covered cells are skipped
     const mergeInfo = new Map<string, { rowSpan: number; colSpan: number }>();
     const covered = new Set<string>();
     for (const m of merges) {
-      mergeInfo.set(`${m.s.r},${m.s.c}`, {
-        rowSpan: m.e.r - m.s.r + 1,
-        colSpan: m.e.c - m.s.c + 1,
-      });
+      mergeInfo.set(`${m.s.r},${m.s.c}`, { rowSpan: m.e.r - m.s.r + 1, colSpan: m.e.c - m.s.c + 1 });
       for (let r = m.s.r; r <= m.e.r; r++) {
         for (let c = m.s.c; c <= m.e.c; c++) {
           if (r === m.s.r && c === m.s.c) continue;
@@ -606,7 +611,7 @@ function xlsxToSyncfusionWorkbook(xlsxWb: XLSX.WorkBook): any {
     const rowHeights: any[] = (sheet['!rows'] as any) ?? [];
     const rows = Array.from(rowMap.values()).map((row) => {
       const h = rowHeights[row.index];
-      if (h?.hpt) row.height = Math.round(h.hpt * 1.333); // pt → px
+      if (h?.hpt) row.height = Math.round(h.hpt * 1.333);
       return row;
     });
 
@@ -623,21 +628,13 @@ function xlsxToSyncfusionWorkbook(xlsxWb: XLSX.WorkBook): any {
   return { sheets: sfSheets };
 }
 
-/** Sidecar key for the lossless Syncfusion workbook JSON. */
-function sfjsonKey(key: string): string {
-  return `${key}.sfjson`;
-}
-
 async function buildEditorContent(file: any): Promise<EditorContent> {
   if (!file.key) throw new HttpError(400, 'Ce fichier n\'a pas de contenu');
 
-  // Derive extension from the stored key (always has the correct ext, e.g. "abc123.xlsx")
-  // rather than file.name, which may have had its extension stripped on upload.
   const keyExt = file.key.split('.').pop()?.toLowerCase() ?? '';
   const nameExt = file.name.includes('.') ? file.name.split('.').pop()?.toLowerCase() ?? '' : '';
   const ext = keyExt || nameExt;
 
-  // Read directly from MinIO (no presigned URL / HTTP caching layer)
   const buffer = await getObjectBuffer(file.key);
 
   if (['txt', 'md', 'json', 'csv'].includes(ext)) {
@@ -649,27 +646,13 @@ async function buildEditorContent(file: any): Promise<EditorContent> {
   }
 
   if (['xlsx', 'xls', 'xlsm', 'xlsb'].includes(ext)) {
-    // Try to load the lossless Syncfusion sidecar first (only for xlsx)
-    let workbookJson: any | undefined;
-    if (ext === 'xlsx') {
-      try {
-        const sidecarBuf = await getObjectBuffer(sfjsonKey(file.key));
-        workbookJson = JSON.parse(sidecarBuf.toString('utf-8'));
-      } catch {
-        // No sidecar — file uploaded externally or saved before sidecar support
-      }
-    }
-    // Parse with cellStyles:true so we can convert styles even without a sidecar
     const wb = XLSX.read(buffer, { type: 'buffer', cellStyles: true });
-    if (!workbookJson) {
-      // Convert xlsx (with styles, merges, column widths) to Syncfusion workbook JSON
-      workbookJson = xlsxToSyncfusionWorkbook(wb);
-    }
+    const workbook = xlsxToSyncfusionWorkbook(wb);
     const sheets = wb.SheetNames.map((name) => ({
       name,
       data: XLSX.utils.sheet_to_json(wb.Sheets[name], { header: 1, defval: '' }) as any[][],
     }));
-    return { type: 'spreadsheet', workbook: workbookJson, sheets };
+    return { type: 'spreadsheet', workbook, sheets };
   }
 
   throw new HttpError(400, 'Type de fichier non supporté pour l\'édition');
@@ -691,54 +674,6 @@ async function applyEditorContent(
       ext === 'csv' ? 'text/csv' :
       'text/plain';
     return { buffer: Buffer.from(content, 'utf-8'), mimeType };
-  }
-
-  if (contentType === 'spreadsheet' && ['xlsx', 'xls', 'xlsm', 'xlsb'].includes(ext)) {
-    // Client sends the full Syncfusion workbook JSON (lossless).
-    // We do TWO things:
-    //  1. Persist that JSON as a sidecar (`<key>.sfjson`) for lossless reload.
-    //  2. Generate a real .xlsx from the cell values for Excel/download compatibility.
-    const workbook: any = JSON.parse(content);
-
-    // ── Build .xlsx from cell values (Syncfusion stores rows/cells sparsely with `index` props) ──
-    const xlsxWb = XLSX.utils.book_new();
-    const sheets: any[] = workbook?.sheets ?? [];
-    if (!sheets.length) {
-      const ws = XLSX.utils.aoa_to_sheet([['']]);
-      XLSX.utils.book_append_sheet(xlsxWb, ws, 'Sheet1');
-    } else {
-      for (const s of sheets) {
-        const data: any[][] = [];
-        for (const rowObj of (s.rows ?? [])) {
-          if (rowObj == null) continue;
-          const ri: number = rowObj.index ?? data.length;
-          while (data.length <= ri) data.push([]);
-          const row = data[ri];
-          for (const cellObj of (rowObj.cells ?? [])) {
-            if (cellObj == null) continue;
-            const ci: number = cellObj.index ?? row.length;
-            while (row.length <= ci) row.push('');
-            const v = cellObj.value;
-            row[ci] = v === null || v === undefined ? '' : v;
-          }
-        }
-        const ws = XLSX.utils.aoa_to_sheet(data);
-        XLSX.utils.book_append_sheet(xlsxWb, ws, s.name || 'Sheet');
-      }
-    }
-    const xlsxBuf = XLSX.write(xlsxWb, { type: 'buffer', bookType: 'xlsx' });
-
-    // ── Persist the lossless sidecar (best-effort — don't fail the save if it errors) ──
-    try {
-      await putObject(sfjsonKey(file.key), Buffer.from(content, 'utf-8'), 'application/json');
-    } catch (err) {
-      console.warn('[updateFileContent] failed to write sfjson sidecar:', err);
-    }
-
-    return {
-      buffer: Buffer.from(xlsxBuf),
-      mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-    };
   }
 
   throw new HttpError(400, 'Contenu invalide pour ce type de fichier');

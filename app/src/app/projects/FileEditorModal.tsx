@@ -17,11 +17,7 @@ import { renderAsync } from 'docx-preview';
 type EditorContent =
   | { type: 'text'; content: string }
   | { type: 'docx'; base64: string }
-  | {
-      type: 'spreadsheet';
-      workbook?: any;
-      sheets: { name: string; data: any[][] }[];
-    };
+  | { type: 'spreadsheet'; workbook: any; sheets: { name: string; data: any[][] }[] };
 
 type ContentType = 'text' | 'spreadsheet';
 
@@ -42,11 +38,20 @@ interface Props {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function downloadFile(url: string, name: string) {
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = name;
-  a.click();
+async function downloadFile(url: string, name: string) {
+  try {
+    const res = await fetch(url);
+    const blob = await res.blob();
+    const blobUrl = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = blobUrl;
+    a.download = name;
+    a.click();
+    URL.revokeObjectURL(blobUrl);
+  } catch {
+    // Fallback: open in new tab
+    window.open(url, '_blank');
+  }
 }
 
 // ─── Text Editor ──────────────────────────────────────────────────────────────
@@ -113,54 +118,51 @@ function DocxViewer({ base64 }: { base64: string }) {
 
 function SpreadsheetViewer({
   workbook,
-  sheets,
   ssRef,
 }: {
-  workbook?: any;
+  workbook: any;
   sheets: { name: string; data: any[][] }[];
   ssRef: React.RefObject<SpreadsheetComponent | null>;
 }) {
-  const dataRef = useRef({ workbook, sheets });
-  dataRef.current = { workbook, sheets };
+  const workbookRef = useRef(workbook);
+  workbookRef.current = workbook;
 
-  // Syncfusion fires 'created' inside its own setTimeout in React mode.
-  // In React Strict Mode the component is mounted twice; we capture the instance
-  // at event-registration time so we only load data for the live mount.
   const handleCreated = useCallback(function (this: SpreadsheetComponent) {
-    // `this` is the Syncfusion instance that fired the event — compare against
-    // the current ref to ensure we're operating on the mounted instance.
     const ss = ssRef.current;
     if (!ss || (ss as any) !== this) return;
-    const { workbook: wb, sheets: sh } = dataRef.current;
-    let workbookJson: any = wb;
-    if (!workbookJson) {
-      if (!sh.length) return;
-      workbookJson = {
-        sheets: sh.map((s) => ({
-          name: s.name,
-          rows: s.data.map((row, ri) => ({
-            index: ri,
-            cells: row.map((cell, ci) => ({
-              index: ci,
-              value: cell !== null && cell !== undefined ? String(cell) : '',
-            })),
-          })),
-        })),
-      };
-    }
-    ss.openFromJson({ file: { Workbook: workbookJson } as any });
+    ss.openFromJson({ file: { Workbook: workbookRef.current } as any });
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
-    <SpreadsheetComponent
-      ref={ssRef as any}
-      height='100%'
-      allowEditing={false}
-      created={handleCreated}
-      beforeOpen={(args: any) => { args.cancel = true; }}
-    >
-      <SSInject services={[Resize, Sort, Filter, Merge, WorkbookOpen]} />
-    </SpreadsheetComponent>
+    <div className='flex flex-col h-full'>
+      <div className='flex items-center gap-2 px-4 py-2 bg-amber-50 border-b border-amber-200 text-amber-800 text-xs shrink-0'>
+        <span>⚠️</span>
+        <span>L'aperçu Excel peut ne pas refléter le style exact du fichier.</span>
+        <span className='text-amber-600'>Téléchargez-le pour voir la mise en forme complète.</span>
+      </div>
+      <div className='flex-1 overflow-hidden'>
+        <style>{`.e-add-sheet-tab { display: none !important; }`}</style>
+        <SpreadsheetComponent
+          ref={ssRef as any}
+          height='100%'
+          allowEditing={false}
+          allowInsert={false}
+          showRibbon={false}
+          showFormulaBar={false}
+          created={handleCreated}
+          beforeOpen={(args: any) => { args.cancel = true; }}
+          contextMenuBeforeOpen={(args: any) => {
+            // Cancel the entire sheet-tab context menu (rename, duplicate, protect, etc.)
+            const target = (args.event?.target ?? args.target) as HTMLElement | null;
+            if (target?.closest('.e-sheet-tab-panel') || target?.closest('.e-spreadsheet-sheet-tab')) {
+              args.cancel = true;
+            }
+          }}
+        >
+          <SSInject services={[Resize, Sort, Filter, Merge, WorkbookOpen]} />
+        </SpreadsheetComponent>
+      </div>
+    </div>
   );
 }
 
@@ -271,19 +273,11 @@ export function FileEditorModal({ file, onClose, fetchContent, saveContent }: Pr
           )}
 
           {!loading && editorContent?.type === 'spreadsheet' && (
-            <div className='flex flex-col h-full'>
-              <div className='flex items-center gap-2 px-3 py-1.5 bg-amber-50 border-b border-amber-200 text-amber-700 text-xs'>
-                <span>⚠️</span>
-                <span>Les images intégrées dans le fichier Excel ne sont pas affichées dans l'aperçu.</span>
-              </div>
-              <div className='flex-1 min-h-0'>
-                <SpreadsheetViewer
-                  workbook={editorContent.workbook}
-                  sheets={editorContent.sheets}
-                  ssRef={ssRef}
-                />
-              </div>
-            </div>
+            <SpreadsheetViewer
+              workbook={editorContent.workbook}
+              sheets={editorContent.sheets}
+              ssRef={ssRef}
+            />
           )}
         </div>
       </div>

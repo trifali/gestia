@@ -14,6 +14,7 @@ import {
   submitClientNote,
   getPortalFileEditorContent,
   updatePortalFileContent,
+  createNewPortalFile,
 } from 'wasp/client/operations';
 import {
   LuFolderOpen,
@@ -275,6 +276,7 @@ function PortalFilesTab({ token }: { token: string }) {
   const renameFile = useAction(renamePortalFile);
   const moveFiles = useAction(movePortalFiles);
   const updateFileContent = useAction(updatePortalFileContent);
+  const createFile = useAction(createNewPortalFile);
 
   return (
     <SharedFileManager
@@ -292,6 +294,8 @@ function PortalFilesTab({ token }: { token: string }) {
           renameFile({ token, id, name }),
         moveFiles: ({ ids, targetParentId }) =>
           moveFiles({ token, ids, targetParentId }),
+        createNewFile: ({ name, parentId }) =>
+          createFile({ token, name, parentId }),
         getEditorContent: (id) => getPortalFileEditorContent({ token, id }),
         saveFileContent: (id, content, contentType) =>
           updateFileContent({ token, id, content, contentType }),

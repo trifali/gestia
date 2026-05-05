@@ -26,7 +26,6 @@
     "@types/pdfmake": "^0.3.2",
     "apexcharts": "3.41.0",
     "clsx": "^2.1.0",
-    "docx": "^9.6.1",
     "docx-preview": "^0.3.7",
     "esbuild": "^0.28.0",
     "googleapis": "^171.4.0",

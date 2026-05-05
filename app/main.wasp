@@ -348,6 +348,10 @@ action createNewProjectFile {
   fn: import { createNewProjectFile } from "@src/app/projects/projectFileOperations",
   entities: [User, Project, ProjectFile]
 }
+action createNewPortalFile {
+  fn: import { createNewPortalFile } from "@src/app/projects/projectFileOperations",
+  entities: [Project, ProjectFile, ProjectClientAccess]
+}
 query getFileEditorContent {
   fn: import { getFileEditorContent } from "@src/app/projects/projectFileOperations",
   entities: [User, Project, ProjectFile]

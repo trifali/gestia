@@ -14,14 +14,10 @@ import { FileEditorModal, type EditorFileInfo } from './FileEditorModal';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type NewFileType = 'txt' | 'md' | 'json' | 'xlsx' | 'docx';
+type NewFileType = 'md';
 
 const NEW_FILE_OPTIONS: { type: NewFileType; label: string; icon: string }[] = [
-  { type: 'txt', label: 'Fichier texte (.txt)', icon: '📄' },
-  { type: 'md', label: 'Markdown (.md)', icon: '📝' },
-  { type: 'json', label: 'JSON (.json)', icon: '🔧' },
-  { type: 'xlsx', label: 'Classeur Excel (.xlsx)', icon: '📊' },
-  { type: 'docx', label: 'Document Word (.docx)', icon: '📃' },
+  { type: 'md', label: 'Document Markdown (.md)', icon: '📝' },
 ];
 
 export interface FileManagerOperations {
@@ -139,7 +135,6 @@ function NewFileDialog({
   onConfirm: (name: string, type: NewFileType) => void;
 }) {
   const [name, setName] = useState('');
-  const [type, setType] = useState<NewFileType>('txt');
 
   return (
     <div
@@ -148,25 +143,8 @@ function NewFileDialog({
     >
       <div className='bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6 flex flex-col gap-4'>
         <div className='flex items-center justify-between'>
-          <h2 className='font-semibold text-ink'>Nouveau fichier</h2>
+          <h2 className='font-semibold text-ink'>Nouveau document Markdown</h2>
           <button onClick={onClose} className='p-1 rounded hover:bg-canvas-200'><LuX size={16} /></button>
-        </div>
-        <div>
-          <label className='label'>Type de fichier</label>
-          <div className='flex flex-col gap-1 mt-1'>
-            {NEW_FILE_OPTIONS.map((o) => (
-              <button
-                key={o.type}
-                onClick={() => setType(o.type)}
-                className={`flex items-center gap-3 px-3 py-2 rounded-lg border text-sm text-left transition-colors ${
-                  type === o.type ? 'border-accent bg-accent-50 text-accent' : 'border-line hover:border-accent'
-                }`}
-              >
-                <span>{o.icon}</span>
-                <span>{o.label}</span>
-              </button>
-            ))}
-          </div>
         </div>
         <div>
           <label className='label'>Nom (sans extension)</label>
@@ -175,8 +153,8 @@ function NewFileDialog({
             className='input mt-1 w-full'
             value={name}
             onChange={(e) => setName(e.target.value)}
-            placeholder='Ex. rapport-client'
-            onKeyDown={(e) => e.key === 'Enter' && name.trim() && onConfirm(name.trim(), type)}
+            placeholder='Ex. notes-projet'
+            onKeyDown={(e) => e.key === 'Enter' && name.trim() && onConfirm(name.trim(), 'md')}
           />
         </div>
         <div className='flex gap-2 justify-end'>
@@ -184,7 +162,7 @@ function NewFileDialog({
           <button
             className='btn-primary'
             disabled={!name.trim()}
-            onClick={() => name.trim() && onConfirm(name.trim(), type)}
+            onClick={() => name.trim() && onConfirm(name.trim(), 'md')}
           >
             Créer
           </button>
