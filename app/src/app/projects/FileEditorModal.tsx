@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { LuX, LuDownload, LuSave, LuLoader } from 'react-icons/lu';
+import { LuX, LuDownload, LuSave, LuLoader, LuChevronLeft, LuChevronRight } from 'react-icons/lu';
 import toast from 'react-hot-toast';
 import {
   SpreadsheetComponent,
@@ -34,6 +34,10 @@ interface Props {
   fetchContent: (id: string) => Promise<EditorContent>;
   /** If provided, text files show a Save button */
   saveContent?: (id: string, content: string, contentType: ContentType) => Promise<any>;
+  /** Navigate to previous / next file */
+  onNavigate?: (direction: 'prev' | 'next') => void;
+  hasPrev?: boolean;
+  hasNext?: boolean;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -80,9 +84,12 @@ function TextEditor({
 
 function DocxViewer({ base64 }: { base64: string }) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const [rendering, setRendering] = useState(true);
 
   useEffect(() => {
     if (!containerRef.current) return;
+    let cancelled = false;
+    setRendering(true);
     const binaryStr = atob(base64);
     const bytes = new Uint8Array(binaryStr.length);
     for (let i = 0; i < binaryStr.length; i++) bytes[i] = binaryStr.charCodeAt(i);
@@ -98,17 +105,31 @@ function DocxViewer({ base64 }: { base64: string }) {
       ignoreFonts: false,
       breakPages: true,
       useBase64URL: true,
-    }).catch((err) => {
-      if (containerRef.current) {
-        containerRef.current.innerHTML =
-          '<p style="color:#b91c1c;padding:1rem">Impossible d\'afficher ce document.</p>';
-      }
-      console.error('[DocxViewer]', err);
-    });
+    })
+      .catch((err) => {
+        if (cancelled) return;
+        if (containerRef.current) {
+          containerRef.current.innerHTML =
+            '<p style="color:#b91c1c;padding:1rem">Impossible d\'afficher ce document.</p>';
+        }
+        console.error('[DocxViewer]', err);
+      })
+      .finally(() => { if (!cancelled) setRendering(false); });
+    return () => { cancelled = true; };
   }, [base64]);
 
   return (
-    <div className='w-full h-full overflow-auto bg-gray-100 flex justify-center py-6'>
+    <div className='relative w-full h-full overflow-auto bg-gray-100 flex justify-center py-6'>
+      {rendering && (
+        <div className='absolute inset-0 flex items-center justify-center bg-gray-100 z-10'>
+          <div className='flex flex-col items-center gap-3'>
+            <div className='w-48 h-1.5 bg-gray-200 rounded-full overflow-hidden'>
+              <div className='h-full bg-primary rounded-full animate-[shimmer_1.2s_ease-in-out_infinite]' style={{ width: '60%', animation: 'indeterminate 1.4s ease-in-out infinite' }} />
+            </div>
+            <span className='text-xs text-muted'>Rendu du document…</span>
+          </div>
+        </div>
+      )}
       <div ref={containerRef} className='w-full max-w-4xl' />
     </div>
   );
@@ -126,12 +147,16 @@ function SpreadsheetViewer({
 }) {
   const workbookRef = useRef(workbook);
   workbookRef.current = workbook;
+  const [rendering, setRendering] = useState(true);
 
   const handleCreated = useCallback(function (this: SpreadsheetComponent) {
     const ss = ssRef.current;
     if (!ss || (ss as any) !== this) return;
     ss.openFromJson({ file: { Workbook: workbookRef.current } as any });
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Reset loading overlay whenever workbook changes (new file opened)
+  useEffect(() => { setRendering(true); }, [workbook]);
 
   return (
     <div className='flex flex-col h-full'>
@@ -140,8 +165,19 @@ function SpreadsheetViewer({
         <span>L'aperçu Excel peut ne pas refléter le style exact du fichier.</span>
         <span className='text-amber-600'>Téléchargez-le pour voir la mise en forme complète.</span>
       </div>
-      <div className='flex-1 overflow-hidden'>
-        <style>{`.e-add-sheet-tab { display: none !important; }`}</style>
+      <div className='flex-1 overflow-hidden relative'>
+        {rendering && (
+          <div className='absolute inset-0 flex items-center justify-center bg-white z-10'>
+            <div className='flex flex-col items-center gap-3'>
+              <div className='w-48 h-1.5 bg-gray-200 rounded-full overflow-hidden'>
+                <div className='h-full bg-primary rounded-full' style={{ width: '70%', animation: 'indeterminate 1.4s ease-in-out infinite' }} />
+              </div>
+              <span className='text-xs text-muted'>Chargement du tableur…</span>
+            </div>
+          </div>
+        )}
+        <style>{`.e-add-sheet-tab { display: none !important; }
+@keyframes indeterminate { 0% { transform: translateX(-100%); } 100% { transform: translateX(250%); } }`}</style>
         <SpreadsheetComponent
           ref={ssRef as any}
           height='100%'
@@ -150,6 +186,7 @@ function SpreadsheetViewer({
           showRibbon={false}
           showFormulaBar={false}
           created={handleCreated}
+          dataBound={() => setRendering(false)}
           beforeOpen={(args: any) => { args.cancel = true; }}
           contextMenuBeforeOpen={(args: any) => {
             // Cancel the entire sheet-tab context menu (rename, duplicate, protect, etc.)
@@ -168,7 +205,7 @@ function SpreadsheetViewer({
 
 // ─── Main Modal ───────────────────────────────────────────────────────────────
 
-export function FileEditorModal({ file, onClose, fetchContent, saveContent }: Props) {
+export function FileEditorModal({ file, onClose, fetchContent, saveContent, onNavigate, hasPrev, hasNext }: Props) {
   const [editorContent, setEditorContent] = useState<EditorContent | null>(null);
   const [textValue, setTextValue] = useState('');
   const [loading, setLoading] = useState(false);
@@ -178,20 +215,38 @@ export function FileEditorModal({ file, onClose, fetchContent, saveContent }: Pr
 
   const canSave = !!saveContent && editorContent?.type === 'text';
 
+  // Keyboard navigation
+  useEffect(() => {
+    if (!onNavigate) return;
+    const handler = (e: KeyboardEvent) => {
+      if (e.target instanceof HTMLTextAreaElement || e.target instanceof HTMLInputElement) return;
+      if (e.key === 'ArrowLeft' && hasPrev) { e.preventDefault(); onNavigate('prev'); }
+      if (e.key === 'ArrowRight' && hasNext) { e.preventDefault(); onNavigate('next'); }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [onNavigate, hasPrev, hasNext]);
+
   useEffect(() => {
     if (!file) return;
+    let cancelled = false;
     setEditorContent(null);
     setTextValue('');
     setLoading(true);
     fetchContent(file.id)
       .then((data) => {
+        if (cancelled) return;
         setEditorContent(data);
         if (data.type === 'text') setTextValue(data.content);
       })
       .catch((err: any) => {
+        if (cancelled) return;
         toast.error(err?.message || 'Impossible de charger le fichier');
       })
-      .finally(() => setLoading(false));
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => { cancelled = true; };
   }, [file?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleSave = useCallback(async () => {
@@ -218,7 +273,29 @@ export function FileEditorModal({ file, onClose, fetchContent, saveContent }: Pr
 
         {/* Header */}
         <div className='flex items-center justify-between px-5 py-3 border-b border-line shrink-0'>
-          <p className='text-sm font-semibold text-ink truncate max-w-lg'>{file.name}</p>
+          <div className='flex items-center gap-2 min-w-0'>
+            {onNavigate && (
+              <button
+                onClick={() => onNavigate('prev')}
+                disabled={!hasPrev}
+                className='p-1 rounded hover:bg-canvas-200 transition-colors disabled:opacity-30 shrink-0'
+                title='Fichier précédent (←)'
+              >
+                <LuChevronLeft size={18} />
+              </button>
+            )}
+            <p className='text-sm font-semibold text-ink truncate max-w-lg'>{file.name}</p>
+            {onNavigate && (
+              <button
+                onClick={() => onNavigate('next')}
+                disabled={!hasNext}
+                className='p-1 rounded hover:bg-canvas-200 transition-colors disabled:opacity-30 shrink-0'
+                title='Fichier suivant (→)'
+              >
+                <LuChevronRight size={18} />
+              </button>
+            )}
+          </div>
           <div className='flex items-center gap-2'>
             {file.url && (
               <button

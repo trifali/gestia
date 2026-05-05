@@ -180,6 +180,7 @@ export function SharedFileManager({ ops }: { ops: FileManagerOperations }) {
   const [fileSystemData, setFileSystemData] = useState<FileData[]>(() => toFileData([]));
   const [dataReady, setDataReady] = useState(false);
   const [previewFile, setPreviewFile] = useState<{ name: string; mimeType: string | null; url: string | null } | null>(null);
+  const [previewFileId, setPreviewFileId] = useState<string | null>(null);
   const [editorFile, setEditorFile] = useState<EditorFileInfo | null>(null);
   const [showNewFileDialog, setShowNewFileDialog] = useState(false);
   const [currentFolderId, setCurrentFolderId] = useState<string | null>(null);
@@ -317,6 +318,7 @@ export function SharedFileManager({ ops }: { ops: FileManagerOperations }) {
     if (getEditorContent && EDITABLE_EXTS.has(ext)) {
       setEditorFile({ id: d.id, name: d.name, mimeType: d._mimeType ?? null, url: d._url ?? null });
     } else {
+      setPreviewFileId(d.id);
       setPreviewFile({ name: d.name, mimeType: d._mimeType ?? null, url: d._url ?? null });
     }
   }, [getEditorContent]);
@@ -344,6 +346,56 @@ export function SharedFileManager({ ops }: { ops: FileManagerOperations }) {
       toast.error(err?.message || 'Erreur lors de la création');
     }
   }, [currentFolderId, createNewFile, refetch]);
+
+  // ─── Navigable files (all non-folder files) ──────────────────────────────
+
+  const EDITABLE_MIMES = new Set([
+    'text/plain', 'text/markdown', 'application/json', 'text/csv',
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    'application/msword',
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    'application/vnd.ms-excel',
+    'application/vnd.ms-excel.sheet.macroEnabled.12',
+    'application/vnd.ms-excel.sheet.binary.macroEnabled.12',
+  ]);
+
+  const isEditable = (f: any) => {
+    if (f.mimeType && EDITABLE_MIMES.has(f.mimeType)) return true;
+    const ext = (f.name ?? '').split('.').pop()?.toLowerCase() ?? '';
+    return EDITABLE_EXTS.has(ext);
+  };
+
+  const navigableFiles = (rawFiles ?? []).filter((f: any) => !f.isFolder);
+
+  const openFileAtIdx = useCallback((idx: number) => {
+    const f = navigableFiles[idx];
+    if (!f) return;
+    if (getEditorContent && isEditable(f)) {
+      setPreviewFile(null);
+      setPreviewFileId(null);
+      setEditorFile({ id: f.id, name: f.name, mimeType: f.mimeType ?? null, url: f.url ?? null });
+    } else {
+      setEditorFile(null);
+      setPreviewFileId(f.id);
+      setPreviewFile({ name: f.name, mimeType: f.mimeType ?? null, url: f.url ?? null });
+    }
+  }, [navigableFiles, getEditorContent]);
+
+  // Current open file index (either editor or preview)
+  const openFileId = editorFile?.id ?? previewFileId;
+  const openFileIdx = openFileId ? navigableFiles.findIndex((f: any) => f.id === openFileId) : -1;
+
+  const handleNavigate = useCallback((dir: 'prev' | 'next') => {
+    const idx = openFileIdx + (dir === 'next' ? 1 : -1);
+    openFileAtIdx(idx);
+  }, [openFileIdx, openFileAtIdx]);
+
+  const editorFileIdx = editorFile ? navigableFiles.findIndex((f: any) => f.id === editorFile.id) : -1;
+
+  const handleClosePreview = useCallback(() => {
+    setPreviewFile(null);
+    setPreviewFileId(null);
+  }, []);
 
   return (
     <div className='flex flex-col gap-3'>
@@ -414,7 +466,13 @@ export function SharedFileManager({ ops }: { ops: FileManagerOperations }) {
         />
       )}
 
-      <FilePreviewModal file={previewFile} onClose={() => setPreviewFile(null)} />
+      <FilePreviewModal
+        file={previewFile}
+        onClose={handleClosePreview}
+        onNavigate={handleNavigate}
+        hasPrev={openFileIdx > 0}
+        hasNext={openFileIdx >= 0 && openFileIdx < navigableFiles.length - 1}
+      />
 
       {getEditorContent && (
         <FileEditorModal
@@ -422,6 +480,9 @@ export function SharedFileManager({ ops }: { ops: FileManagerOperations }) {
           onClose={() => setEditorFile(null)}
           fetchContent={getEditorContent}
           saveContent={saveFileContent}
+          onNavigate={handleNavigate}
+          hasPrev={editorFileIdx > 0}
+          hasNext={editorFileIdx >= 0 && editorFileIdx < navigableFiles.length - 1}
         />
       )}
     </div>

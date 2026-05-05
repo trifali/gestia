@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { LuX, LuDownload, LuFileText, LuZoomIn, LuZoomOut } from 'react-icons/lu';
+import { LuX, LuDownload, LuFileText, LuZoomIn, LuZoomOut, LuChevronLeft, LuChevronRight } from 'react-icons/lu';
 
 interface PreviewFile {
   name: string;
@@ -10,6 +10,9 @@ interface PreviewFile {
 interface Props {
   file: PreviewFile | null;
   onClose: () => void;
+  onNavigate?: (direction: 'prev' | 'next') => void;
+  hasPrev?: boolean;
+  hasNext?: boolean;
 }
 
 function getCategory(mimeType: string | null, name: string): 'image' | 'pdf' | 'text' | 'video' | 'audio' | 'other' {
@@ -146,12 +149,16 @@ async function downloadFile(url: string, filename: string) {
   URL.revokeObjectURL(a.href);
 }
 
-export function FilePreviewModal({ file, onClose }: Props) {
+export function FilePreviewModal({ file, onClose, onNavigate, hasPrev, hasNext }: Props) {
   useEffect(() => {
-    const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') { onClose(); return; }
+      if (e.key === 'ArrowLeft' && hasPrev && onNavigate) { e.preventDefault(); onNavigate('prev'); }
+      if (e.key === 'ArrowRight' && hasNext && onNavigate) { e.preventDefault(); onNavigate('next'); }
+    };
     document.addEventListener('keydown', handler);
     return () => document.removeEventListener('keydown', handler);
-  }, [onClose]);
+  }, [onClose, onNavigate, hasPrev, hasNext]);
 
   if (!file) return null;
 
@@ -165,7 +172,29 @@ export function FilePreviewModal({ file, onClose }: Props) {
       <div className='bg-white rounded-2xl shadow-2xl flex flex-col w-full max-w-5xl' style={{ height: '90vh' }}>
         {/* Header */}
         <div className='flex items-center justify-between px-5 py-3 border-b border-line shrink-0'>
-          <p className='text-sm font-semibold text-ink truncate max-w-lg'>{file.name}</p>
+          <div className='flex items-center gap-2 min-w-0'>
+            {onNavigate && (
+              <button
+                onClick={() => onNavigate('prev')}
+                disabled={!hasPrev}
+                className='p-1 rounded hover:bg-canvas-200 transition-colors disabled:opacity-30 shrink-0'
+                title='Fichier précédent (←)'
+              >
+                <LuChevronLeft size={18} />
+              </button>
+            )}
+            <p className='text-sm font-semibold text-ink truncate max-w-lg'>{file.name}</p>
+            {onNavigate && (
+              <button
+                onClick={() => onNavigate('next')}
+                disabled={!hasNext}
+                className='p-1 rounded hover:bg-canvas-200 transition-colors disabled:opacity-30 shrink-0'
+                title='Fichier suivant (→)'
+              >
+                <LuChevronRight size={18} />
+              </button>
+            )}
+          </div>
           <div className='flex items-center gap-2'>
             {file.url && (
               <button
