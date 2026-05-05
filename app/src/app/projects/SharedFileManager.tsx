@@ -115,6 +115,7 @@ export function toFileData(files: any[]): FileData[] {
       dateModified: new Date(f.updatedAt ?? f.createdAt),
       filterPath: buildFilterPath(f.parentId, idToItem),
       hasChild: f.isFolder && files.some((c) => c.parentId === f.id && c.isFolder),
+      _itemCount: f.isFolder ? files.filter((c) => c.parentId === f.id).length : 0,
       imageUrl: f.mimeType?.startsWith('image/') && f.url ? f.url : undefined,
       _mimeType: f.mimeType,
       _url: f.url,
@@ -333,6 +334,63 @@ export function SharedFileManager({ ops }: { ops: FileManagerOperations }) {
       fm.restoreFocus = () => { try { original(); } catch { /* suppress */ } };
     }
   }, []);
+
+  // ─── Item-count badges (details view + nav pane) ──────────────────────────
+
+  useEffect(() => {
+    if (!dataReady) return;
+    const container = (fmRef.current as any)?.element as HTMLElement | undefined;
+    if (!container) return;
+
+    // Build name→count map for folders that have children
+    const folderCounts = new Map<string, number>();
+    fileSystemData.forEach((f: any) => {
+      if (!f.isFile && f._itemCount > 0) folderCounts.set(f.name, f._itemCount);
+    });
+
+    const applyBadge = (nameEl: HTMLElement, rawName: string) => {
+      const existing = nameEl.querySelector('.fm-count-badge') as HTMLElement | null;
+      const count = folderCounts.get(rawName);
+      if (!count) { existing?.remove(); return; }
+      const countStr = String(count);
+      if (existing) { existing.textContent = countStr; return; }
+      const badge = document.createElement('span');
+      badge.className = 'fm-count-badge';
+      badge.style.cssText = 'margin-left:6px;font-size:10px;padding:1px 5px;border-radius:9px;background:#e5e7eb;color:#6b7280;font-weight:500;vertical-align:middle;white-space:nowrap';
+      badge.textContent = countStr;
+      nameEl.appendChild(badge);
+    };
+
+    const injectBadges = () => {
+      // Details view rows
+      container.querySelectorAll('.e-row').forEach((row) => {
+        if (!row.querySelector('.e-fe-folder')) return;
+        const nameCell = row.querySelector('.e-fe-text') as HTMLElement | null;
+        if (!nameCell) return;
+        const rawName = Array.from(nameCell.childNodes)
+          .filter((n) => n.nodeType === Node.TEXT_NODE)
+          .map((n) => n.textContent?.trim()).join('') || nameCell.textContent?.trim() || '';
+        applyBadge(nameCell, rawName);
+      });
+      // Navigation pane tree nodes
+      container.querySelectorAll('.e-list-item .e-list-text').forEach((el) => {
+        const textEl = el as HTMLElement;
+        const rawName = Array.from(textEl.childNodes)
+          .filter((n) => n.nodeType === Node.TEXT_NODE)
+          .map((n) => n.textContent?.trim()).join('') || textEl.textContent?.trim() || '';
+        applyBadge(textEl, rawName);
+      });
+    };
+
+    const observer = new MutationObserver(() => {
+      observer.disconnect();
+      injectBadges();
+      observer.observe(container, { childList: true, subtree: true });
+    });
+    injectBadges();
+    observer.observe(container, { childList: true, subtree: true });
+    return () => observer.disconnect();
+  }, [dataReady, fileSystemData]);
 
   // ─── New file ─────────────────────────────────────────────────────────────
 
