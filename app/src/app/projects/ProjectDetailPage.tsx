@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback } from 'react';
-import { useParams, Link } from 'react-router';
+import { useParams, Link, useSearchParams } from 'react-router';
 import toast from 'react-hot-toast';
 import {
   useQuery,
@@ -47,11 +47,11 @@ import {
   LuCircleAlert,
   LuExternalLink,
   LuRefreshCw,
-  LuUpload,
   LuX,
   LuFlag,
 } from 'react-icons/lu';
 import { useConfirm, IconBtn, Modal } from '../../client/ui';
+import { MediaUploadZone } from './MediaUploadZone';
 import { formatDate } from '../../shared/format';
 
 // ─── Status & priority maps ───────────────────────────────────────────────────
@@ -103,7 +103,10 @@ type TabId = (typeof TABS)[number]['id'];
 
 export default function ProjectDetailPage() {
   const { projectId } = useParams<{ projectId: string }>();
-  const [activeTab, setActiveTab] = useState<TabId>('apercu');
+  const [searchParams, setSearchParams] = useSearchParams();
+  const rawTab = searchParams.get('tab') as TabId | null;
+  const activeTab: TabId = TABS.some((t) => t.id === rawTab) ? rawTab! : 'apercu';
+  const setActiveTab = (id: TabId) => setSearchParams({ tab: id }, { replace: true });
   const { data, isLoading, error } = useQuery(getProjectDetail, { projectId: projectId! });
 
   if (isLoading) {
@@ -539,16 +542,13 @@ function MediaTab({ projectId, media }: { projectId: string; media: any[] }) {
   const [uploading, setUploading] = useState(false);
   const [tagFilter, setTagFilter] = useState('');
   const [editingId, setEditingId] = useState<string | null>(null);
-  const fileRef = useRef<HTMLInputElement>(null);
-  const dropRef = useRef<HTMLDivElement>(null);
-
   const allTags = Array.from(new Set(media.flatMap((m) => m.tags || [])));
 
   const displayMedia = tagFilter
     ? media.filter((m) => (m.tags || []).includes(tagFilter))
     : media;
 
-  const handleFiles = useCallback(async (files: FileList | File[]) => {
+  const handleFiles = useCallback(async (files: FileList) => {
     const arr = Array.from(files);
     if (arr.length === 0) return;
     setUploading(true);
@@ -568,11 +568,6 @@ function MediaTab({ projectId, media }: { projectId: string; media: any[] }) {
     if (fail > 0) toast.error(`${fail} fichier${fail > 1 ? 's' : ''} échoué${fail > 1 ? 's' : ''}`);
   }, [projectId]);
 
-  const onDrop = (e: React.DragEvent) => {
-    e.preventDefault();
-    handleFiles(e.dataTransfer.files);
-  };
-
   const remove = async (m: any) => {
     if (await ask(`Supprimer « ${m.name} » ?`)) {
       try {
@@ -586,28 +581,7 @@ function MediaTab({ projectId, media }: { projectId: string; media: any[] }) {
 
   return (
     <div className='flex flex-col gap-5'>
-      {/* Upload zone */}
-      <div
-        ref={dropRef}
-        onDrop={onDrop}
-        onDragOver={(e) => e.preventDefault()}
-        onClick={() => fileRef.current?.click()}
-        className='border-2 border-dashed border-line hover:border-accent cursor-pointer rounded-xl p-8 text-center transition-colors'
-      >
-        <LuUpload size={28} className='mx-auto mb-2 text-muted' />
-        <p className='text-sm font-medium text-ink'>Déposer ou cliquer pour téléverser</p>
-        <p className='text-xs text-muted mt-1'>Images (PNG, JPG, WEBP…) et PDF — max 50 Mo par fichier</p>
-        <p className='text-xs text-muted'>Les images sont automatiquement converties et compressées en JPEG</p>
-        {uploading && <p className='text-sm text-accent mt-2 font-medium'>Traitement en cours…</p>}
-        <input
-          ref={fileRef}
-          type='file'
-          multiple
-          accept='image/*,.pdf,.doc,.docx,.xls,.xlsx,.zip,.txt'
-          className='hidden'
-          onChange={(e) => e.target.files && handleFiles(e.target.files)}
-        />
-      </div>
+      <MediaUploadZone onFiles={handleFiles} uploading={uploading} />
 
       {/* Tag filter */}
       {allTags.length > 0 && (

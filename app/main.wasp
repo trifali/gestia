@@ -44,6 +44,10 @@ app gestia {
     rootComponent: import App from "@src/client/App",
   },
 
+  server: {
+    setupFn: import { serverSetup } from "@src/server/setup",
+  },
+
   emailSender: {
     provider: SMTP,
     defaultFrom: {

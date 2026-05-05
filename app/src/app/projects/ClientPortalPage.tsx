@@ -1,6 +1,7 @@
-import { useState, useRef, useCallback } from 'react';
-import { useParams } from 'react-router';
+import { useState, useCallback } from 'react';
+import { useParams, useSearchParams } from 'react-router';
 import toast from 'react-hot-toast';
+import { MediaUploadZone } from './MediaUploadZone';
 import {
   useQuery,
   getProjectByToken,
@@ -12,7 +13,6 @@ import {
   LuSquareCheck,
   LuImage,
   LuMessageSquare,
-  LuUpload,
   LuCircleAlert,
   LuCheck,
   LuClock,
@@ -50,7 +50,10 @@ const PROJECT_STATUS: Record<string, { label: string; className: string }> = {
 
 export default function ClientPortalPage() {
   const { token } = useParams<{ token: string }>();
-  const [activeTab, setActiveTab] = useState<PortalTab>('overview');
+  const [searchParams, setSearchParams] = useSearchParams();
+  const rawTab = searchParams.get('tab') as PortalTab | null;
+  const activeTab: PortalTab = PORTAL_TABS.some((t) => t.id === rawTab) ? rawTab! : 'overview';
+  const setActiveTab = (id: PortalTab) => setSearchParams({ tab: id }, { replace: true });
   const { data, isLoading, error } = useQuery(getProjectByToken, { token: token! });
 
   if (isLoading) {
@@ -246,9 +249,8 @@ function PortalTasks({ tasks }: { tasks: any[] }) {
 
 function PortalMedia({ media, token }: { media: any[]; token: string }) {
   const [uploading, setUploading] = useState(false);
-  const fileRef = useRef<HTMLInputElement>(null);
 
-  const handleFiles = useCallback(async (files: FileList | File[]) => {
+  const handleFiles = useCallback(async (files: FileList) => {
     const arr = Array.from(files);
     if (arr.length === 0) return;
     setUploading(true);
@@ -268,33 +270,15 @@ function PortalMedia({ media, token }: { media: any[]; token: string }) {
     if (fail > 0) toast.error(`${fail} fichier${fail > 1 ? 's' : ''} échoué${fail > 1 ? 's' : ''}`);
   }, [token]);
 
-  const onDrop = (e: React.DragEvent) => {
-    e.preventDefault();
-    handleFiles(e.dataTransfer.files);
-  };
-
   return (
     <div className='flex flex-col gap-5'>
-      {/* Upload zone */}
-      <div
-        onDrop={onDrop}
-        onDragOver={(e) => e.preventDefault()}
-        onClick={() => fileRef.current?.click()}
-        className='border-2 border-dashed border-line hover:border-accent cursor-pointer rounded-xl p-8 text-center transition-colors'
-      >
-        <LuUpload size={28} className='mx-auto mb-2 text-muted' />
-        <p className='text-sm font-medium text-ink'>Déposer ou cliquer pour envoyer vos fichiers</p>
-        <p className='text-xs text-muted mt-1'>Images et documents — max 50 Mo</p>
-        {uploading && <p className='text-sm text-accent mt-2 font-medium'>Envoi en cours…</p>}
-        <input
-          ref={fileRef}
-          type='file'
-          multiple
-          accept='image/*,.pdf,.doc,.docx,.zip,.txt'
-          className='hidden'
-          onChange={(e) => e.target.files && handleFiles(e.target.files)}
-        />
-      </div>
+      <MediaUploadZone
+        onFiles={handleFiles}
+        uploading={uploading}
+        title='Déposer ou cliquer pour envoyer vos fichiers'
+        busyLabel='Envoi en cours…'
+        accept='image/*,.pdf,.doc,.docx,.zip,.txt'
+      />
 
       {/* Grid */}
       {media.length === 0 ? (

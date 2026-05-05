@@ -21,7 +21,7 @@ function generateToken(): string {
   return randomBytes(24).toString('hex');
 }
 
-const MAX_MEDIA_BYTES = 50 * 1024 * 1024; // 50 MB
+const MAX_MEDIA_BYTES = 20 * 1024 * 1024; // 20 MB
 const IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/tiff', 'image/bmp', 'image/avif']);
 
 async function processAndStoreMedia(
@@ -33,7 +33,7 @@ async function processAndStoreMedia(
   if (!m) throw new HttpError(400, 'Format de fichier invalide');
   const inputMime = m[1];
   const raw = Buffer.from(m[2], 'base64');
-  if (raw.length > MAX_MEDIA_BYTES) throw new HttpError(400, 'Fichier trop volumineux (max 50 Mo)');
+  if (raw.length > MAX_MEDIA_BYTES) throw new HttpError(400, 'Fichier trop volumineux (max 20 Mo)');
 
   const uid = randomBytes(12).toString('hex');
 
