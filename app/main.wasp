@@ -537,10 +537,10 @@ action magicCorrect {
 
 // Hourly background sweep that advances document statuses based on time
 // (quotes → expiree after validUntil, invoices → en_retard after dueDate).
-// `getDocuments` also performs the same transitions lazily on read so the UI
-// is never stale, but this job ensures the DB itself stays current even when
-// nobody is browsing — a prerequisite for triggering future status-based
-// emails / automations.
+// Runs every hour to advance document statuses based on time:
+//   - quotes 'envoyee' past dueDate      → 'expiree'
+//   - invoices 'envoyee'/'acompte_recu'
+//     past dueDate                       → 'en_retard'
 job documentLifecycleSweep {
   executor: PgBoss,
   perform: {

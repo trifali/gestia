@@ -46,17 +46,6 @@ export const INVOICE_STATUSES = [
 
 // Map legacy values created before the lifecycle refactor onto the new set,
 // keeping read paths backwards-compatible.
-function normalizeStatus(type: string, status: string): string {
-  if (type === 'quote') {
-    if (status === 'actif') return 'envoyee';
-    if (status === 'expire') return 'expiree';
-    return status;
-  }
-  if (status === 'actif') return 'envoyee';
-  if (status === 'expire') return 'en_retard';
-  return status;
-}
-
 export type GetDocumentsArgs = {
   search?: string;
   type?: string;
@@ -122,28 +111,6 @@ export const getDocuments: GetDocuments<GetDocumentsArgs, GetDocumentsResult> = 
     context.entities.Document.count({ where }),
   ]);
 
-  // Lazy lifecycle transitions — applied to the current page docs
-  const now = Date.now();
-  const updates: Promise<unknown>[] = [];
-  for (const d of docs) {
-    const normalized = normalizeStatus(d.type, d.status);
-    let next = normalized;
-    if (d.type === 'quote' && next === 'envoyee' && d.dueDate && new Date(d.dueDate).getTime() < now) {
-      next = 'expiree';
-    } else if (
-      d.type === 'invoice' &&
-      (next === 'envoyee' || next === 'acompte_recu') &&
-      d.dueDate &&
-      new Date(d.dueDate).getTime() < now
-    ) {
-      next = 'en_retard';
-    }
-    if (next !== d.status) {
-      d.status = next;
-      updates.push(context.entities.Document.update({ where: { id: d.id }, data: { status: next } }));
-    }
-  }
-  if (updates.length) await Promise.all(updates);
   return { data: docs, total };
 };
 
