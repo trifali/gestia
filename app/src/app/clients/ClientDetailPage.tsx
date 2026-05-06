@@ -22,6 +22,7 @@ import type { Client } from 'wasp/entities';
 import type { ClientDetail } from './operations';
 import { DocumentForm } from '../shared/DocumentForm';
 import { DocumentTable } from '../shared/DocumentTable';
+import { ClientFileManagerTab } from './ClientFileManagerTab';
 import { MeetingForm } from '../meetings/MeetingForm';
 import { PaymentsSection } from '../payments/PaymentsSection';
 import { downloadDocumentPdf } from '../documents/pdf';
@@ -75,7 +76,7 @@ function ProjectStatusSelect({ project }: { project: any }) {
 }
 
 // ─── Tabs ─────────────────────────────────────────────────────────────────────
-type Tab = 'resume' | 'documents' | 'paiements' | 'rencontres' | 'projets';
+type Tab = 'resume' | 'documents' | 'paiements' | 'rencontres' | 'projets' | 'fichiers';
 
 const TABS: { id: Tab; label: string }[] = [
   { id: 'resume', label: 'Résumé' },
@@ -83,6 +84,7 @@ const TABS: { id: Tab; label: string }[] = [
   { id: 'paiements', label: 'Paiements' },
   { id: 'rencontres', label: 'Rencontres' },
   { id: 'projets', label: 'Projets' },
+  { id: 'fichiers', label: 'Fichiers' },
 ];
 
 // ─── Main page ────────────────────────────────────────────────────────────────
@@ -164,6 +166,7 @@ export default function ClientDetailPage() {
       {tab === 'paiements' && <PaiementsTab client={client} />}
       {tab === 'rencontres' && <RencontresTab client={client} />}
       {tab === 'projets' && <ProjetsTab clientId={client.id} projects={clientProjects} />}
+      {tab === 'fichiers' && <ClientFileManagerTab clientId={client.id} />}
 
       {editingClient && <ClientEditModal client={client} onClose={() => setEditingClient(false)} />}
     </>

@@ -105,6 +105,25 @@ model Client {
   documents  Document[]
   meetings   Meeting[]
   activities ActivityLog[]
+  files      ClientFile[]
+}
+
+model ClientFile {
+  id        String   @id @default(uuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  client   Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  clientId String
+
+  name     String
+  isFolder Boolean @default(false)
+  parentId String?
+  key      String?
+  mimeType String?
+  size     Int     @default(0)
+
+  @@index([clientId])
 }
 
 model Project {

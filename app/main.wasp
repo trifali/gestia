@@ -224,6 +224,45 @@ action deleteClient {
   entities: [User, Client]
 }
 
+// ─── Client File Manager ─────────────────────────────────────────────────────
+
+query getClientFiles {
+  fn: import { getClientFiles } from "@src/app/clients/clientFileOperations",
+  entities: [User, Client, ClientFile]
+}
+action createClientFolder {
+  fn: import { createClientFolder } from "@src/app/clients/clientFileOperations",
+  entities: [User, Client, ClientFile]
+}
+action uploadClientFile {
+  fn: import { uploadClientFile } from "@src/app/clients/clientFileOperations",
+  entities: [User, Client, ClientFile]
+}
+action deleteClientFiles {
+  fn: import { deleteClientFiles } from "@src/app/clients/clientFileOperations",
+  entities: [User, Client, ClientFile]
+}
+action renameClientFile {
+  fn: import { renameClientFile } from "@src/app/clients/clientFileOperations",
+  entities: [User, Client, ClientFile]
+}
+action moveClientFiles {
+  fn: import { moveClientFiles } from "@src/app/clients/clientFileOperations",
+  entities: [User, Client, ClientFile]
+}
+action createNewClientFile {
+  fn: import { createNewClientFile } from "@src/app/clients/clientFileOperations",
+  entities: [User, Client, ClientFile]
+}
+query getClientFileEditorContent {
+  fn: import { getClientFileEditorContent } from "@src/app/clients/clientFileOperations",
+  entities: [User, Client, ClientFile]
+}
+action updateClientFileContent {
+  fn: import { updateClientFileContent } from "@src/app/clients/clientFileOperations",
+  entities: [User, Client, ClientFile]
+}
+
 query getProjects {
   fn: import { getProjects } from "@src/app/projects/operations",
   entities: [User, Project, Client]
