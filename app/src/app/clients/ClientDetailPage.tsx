@@ -166,7 +166,7 @@ export default function ClientDetailPage() {
       {tab === 'paiements' && <PaiementsTab client={client} />}
       {tab === 'rencontres' && <RencontresTab client={client} />}
       {tab === 'projets' && <ProjetsTab clientId={client.id} projects={clientProjects} />}
-      {tab === 'fichiers' && <ClientFileManagerTab clientId={client.id} />}
+      {tab === 'fichiers' && <ClientFileManagerTab clientId={client.id} clientName={client.name} />}
 
       {editingClient && <ClientEditModal client={client} onClose={() => setEditingClient(false)} />}
     </>

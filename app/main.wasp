@@ -254,6 +254,10 @@ action createNewClientFile {
   fn: import { createNewClientFile } from "@src/app/clients/clientFileOperations",
   entities: [User, Client, ClientFile]
 }
+action createClientFileFromTemplate {
+  fn: import { createClientFileFromTemplate } from "@src/app/clients/clientFileOperations",
+  entities: [User, Client, ClientFile, DocumentTemplate, Company]
+}
 query getClientFileEditorContent {
   fn: import { getClientFileEditorContent } from "@src/app/clients/clientFileOperations",
   entities: [User, Client, ClientFile]

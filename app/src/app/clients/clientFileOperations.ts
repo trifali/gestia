@@ -390,6 +390,86 @@ export const getClientFileEditorContent = async (
   return buildEditorContent(file);
 };
 
+// ─── createClientFileFromTemplate ────────────────────────────────────────────
+
+export const createClientFileFromTemplate = async (
+  { clientId, templateId, name, parentId, extraVars }: {
+    clientId: string;
+    templateId: string;
+    name: string;
+    parentId?: string | null;
+    extraVars?: { date_expiry?: string; payment_link?: string };
+  },
+  context: any,
+) => {
+  const companyId = ensureCompany(context.user);
+  await ensureClientOwned(clientId, companyId, context.entities);
+
+  const template = await context.entities.DocumentTemplate.findUnique({ where: { id: templateId } });
+  if (!template || template.companyId !== companyId) throw new HttpError(404, 'Modèle introuvable');
+
+  const client = await context.entities.Client.findUnique({ where: { id: clientId } });
+  if (!client) throw new HttpError(404);
+
+  const company = await context.entities.Company.findUnique({ where: { id: companyId } });
+  if (!company) throw new HttpError(404);
+
+  const now = new Date();
+  const dateStr = now.toLocaleDateString('fr-CA', { day: 'numeric', month: 'long', year: 'numeric' });
+  const clientAddress = [client.address, client.city, client.province, client.postalCode]
+    .filter(Boolean).join(', ');
+  const companyAddress = [company.address, company.city, company.province, company.postalCode]
+    .filter(Boolean).join(', ');
+
+  const vars: Record<string, string> = {
+    '{{date}}':            dateStr,
+    '{{date_expiry}}':     extraVars?.date_expiry ?? '',
+    '{{client.name}}':    client.contactName ?? client.name,
+    '{{client.company}}': client.name,
+    '{{client.email}}':   client.email ?? '',
+    '{{client.phone}}':   client.phone ?? '',
+    '{{client.address}}': clientAddress,
+    '{{company.name}}':    company.name,
+    '{{company.email}}':   company.email ?? '',
+    '{{company.phone}}':   company.phone ?? '',
+    '{{company.address}}': companyAddress,
+    '{{company.neq}}':     company.neq ?? '',
+    '{{company.tps}}':     company.taxNumberGst ?? '',
+    '{{company.tvq}}':     company.taxNumberQst ?? '',
+    '{{payment.link}}':    extraVars?.payment_link ?? '',
+  };
+
+  let content = template.content;
+  for (const [key, value] of Object.entries(vars)) {
+    content = content.split(key).join(value);
+  }
+
+  if (parentId) {
+    const parent = await context.entities.ClientFile.findUnique({ where: { id: parentId } });
+    if (!parent || parent.clientId !== clientId || !parent.isFolder) {
+      throw new HttpError(400, 'Dossier parent invalide');
+    }
+  }
+
+  const safeName = (name.trim() || template.name).replace(/[/\\?%*:|"<>]/g, '-');
+  const filename = safeName.endsWith('.md') ? safeName : `${safeName}.md`;
+  const buffer = Buffer.from(content, 'utf-8');
+  const key = clientFileKey(companyId, clientId, `${uid()}.md`);
+  await putObject(key, buffer, 'text/markdown');
+
+  return context.entities.ClientFile.create({
+    data: {
+      clientId,
+      name: filename,
+      isFolder: false,
+      parentId: parentId ?? null,
+      key,
+      mimeType: 'text/markdown',
+      size: buffer.length,
+    },
+  });
+};
+
 // ─── updateClientFileContent ──────────────────────────────────────────────────
 
 export const updateClientFileContent = async (

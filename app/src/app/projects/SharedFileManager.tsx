@@ -38,6 +38,8 @@ export interface FileManagerOperations {
   saveFileContent?: (id: string, content: string, contentType: 'text' | 'spreadsheet') => Promise<any>;
   /** Unique DOM id suffix (prevents collisions when both are on screen) */
   instanceId: string;
+  /** Called whenever the user navigates into/out of a folder */
+  onFolderChange?: (folderId: string | null) => void;
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -176,7 +178,7 @@ function NewFileDialog({
 // ─── Shared File Manager ──────────────────────────────────────────────────────
 
 export function SharedFileManager({ ops }: { ops: FileManagerOperations }) {
-  const { files: rawFiles, isFetching, refetch, upload, createFolder, deleteFiles, renameFile, moveFiles, createNewFile, getEditorContent, saveFileContent, instanceId } = ops;
+  const { files: rawFiles, isFetching, refetch, upload, createFolder, deleteFiles, renameFile, moveFiles, createNewFile, getEditorContent, saveFileContent, instanceId, onFolderChange } = ops;
 
   const [fileSystemData, setFileSystemData] = useState<FileData[]>(() => toFileData([]));
   const [dataReady, setDataReady] = useState(false);
@@ -185,6 +187,11 @@ export function SharedFileManager({ ops }: { ops: FileManagerOperations }) {
   const [editorFile, setEditorFile] = useState<EditorFileInfo | null>(null);
   const [showNewFileDialog, setShowNewFileDialog] = useState(false);
   const [currentFolderId, setCurrentFolderId] = useState<string | null>(null);
+
+  const updateFolder = useCallback((id: string | null) => {
+    setCurrentFolderId(id);
+    onFolderChange?.(id);
+  }, [onFolderChange]);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const fmRef = useRef<FileManagerComponent>(null);
@@ -311,7 +318,7 @@ export function SharedFileManager({ ops }: { ops: FileManagerOperations }) {
     const d = args?.fileDetails as any;
     if (!d) return;
     if (!d.isFile) {
-      setCurrentFolderId(d.id === VIRTUAL_ROOT_ID ? null : d.id);
+      updateFolder(d.id === VIRTUAL_ROOT_ID ? null : d.id);
       return;
     }
     args.cancel = true;
