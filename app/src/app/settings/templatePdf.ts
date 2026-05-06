@@ -68,8 +68,11 @@ export const TEMPLATE_VARIABLE_GROUPS: TemplateVarGroup[] = [
     group: 'Document',
     vars: [
       { key: '{{document.number}}', label: 'Numéro de document', sample: 'CONT-2026-001' },
-      { key: '{{amount.total}}', label: 'Montant total', sample: '2 500,00 $' },
+      { key: '{{amount.total}}', label: 'Montant total (HT)', sample: '2 500,00 $' },
       { key: '{{amount.deposit}}', label: 'Acompte', sample: '625,00 $' },
+      { key: '{{amount.tps}}', label: 'TPS (5%)', sample: '125,00 $' },
+      { key: '{{amount.tvq}}', label: 'TVQ (9,975%)', sample: '249,38 $' },
+      { key: '{{amount.total_ttc}}', label: 'Montant total (TTC)', sample: '2 874,38 $' },
     ],
   },
   {

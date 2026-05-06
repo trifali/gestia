@@ -25,10 +25,11 @@ import {
   createDocumentTemplate,
   updateDocumentTemplate,
   deleteDocumentTemplate,
+  generateTemplateContent,
 } from 'wasp/client/operations';
 import { useAuth } from 'wasp/client/auth';
 import { PAYMENT_METHOD_OPTIONS } from '../payments/PaymentForm';
-import { LuPlus, LuSearch, LuFileText, LuCopy, LuEye, LuX, LuChevronRight } from 'react-icons/lu';
+import { LuPlus, LuSearch, LuFileText, LuCopy, LuEye, LuX, LuChevronRight, LuWand } from 'react-icons/lu';
 import { PageHeader, IconBtn, EditIcon, TrashIcon, useConfirm, Modal, EmptyState } from '../../client/ui';
 import { MagicInput, MagicTextarea } from '../../client/magic';
 import { formatCurrency } from '../../shared/format';
@@ -1536,6 +1537,28 @@ function TemplateEditorModal({
   const [saving, setSaving] = useState(false);
   const [previewing, setPreviewing] = useState(false);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [aiOpen, setAiOpen] = useState(false);
+  const [aiPrompt, setAiPrompt] = useState('');
+  const [aiLoading, setAiLoading] = useState(false);
+  const generateContent = useAction(generateTemplateContent);
+
+  const handleGenerate = async () => {
+    if (!aiPrompt.trim()) return;
+    setAiLoading(true);
+    try {
+      const hasContent = content.trim().length > 0;
+      const res = await generateContent({ description: aiPrompt.trim(), type, currentContent: hasContent ? content : undefined }) as { markdown: string };
+      setContent(res.markdown);
+      setAiOpen(false);
+      setAiPrompt('');
+      toast.success(hasContent ? 'Document mis à jour !' : 'Contenu généré !');
+    } catch (e: any) {
+      toast.error(e?.message || 'Erreur de génération IA');
+    } finally {
+      setAiLoading(false);
+    }
+  };
+
   const mdEditorRef = useRef<{ textarea?: HTMLTextAreaElement }>(null);
 
   // Cleanup blob URL on unmount
@@ -1656,7 +1679,7 @@ function TemplateEditorModal({
                 disabled={!canEdit}
               />
             </div>
-            <div className='flex-1 min-h-0 overflow-auto' data-color-mode='light'>
+            <div className='flex-1 min-h-0 overflow-auto relative' data-color-mode='light'>
               <MDEditor
                 ref={mdEditorRef as any}
                 value={content}
@@ -1668,6 +1691,60 @@ function TemplateEditorModal({
                 style={{ height: '100%', borderRadius: 0, border: 'none', boxShadow: 'none' }}
                 textareaProps={{ placeholder: 'Rédigez votre modèle en Markdown…', spellCheck: false, disabled: !canEdit }}
               />
+              {/* AI generation button */}
+              <button
+                onClick={() => setAiOpen((v) => !v)}
+                title='Générer avec l’IA'
+                className='absolute bottom-3 right-3 z-10 flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-amber-500 text-white text-xs font-semibold shadow-lg hover:bg-amber-600 transition-colors'
+              >
+                <LuWand size={13} />
+                IA
+              </button>
+              {/* AI popover */}
+              {aiOpen && (() => {
+                const hasContent = content.trim().length > 0;
+                return (
+                <div className='absolute bottom-12 right-3 z-20 w-80 bg-white rounded-xl shadow-2xl border border-line p-4 flex flex-col gap-3'>
+                  <div className='flex items-center justify-between'>
+                    <div className='flex items-center gap-1.5'>
+                      <LuWand size={14} className='text-amber-500' />
+                      <p className='text-sm font-semibold'>{hasContent ? 'Modifier avec l’IA' : 'Générer avec l’IA'}</p>
+                    </div>
+                    <button onClick={() => setAiOpen(false)} className='text-muted hover:text-ink'><LuX size={14} /></button>
+                  </div>
+                  <p className='text-xs text-muted'>
+                    {hasContent
+                      ? 'Décrivez la modification souhaitée. L’IA conservera le reste du document intact.'
+                      : 'Décrivez le document souhaité. L’IA utilisera les variables dynamiques et les modalités de votre entreprise.'}
+                  </p>
+                  <textarea
+                    className='border border-line rounded-lg p-2.5 text-sm resize-none h-24 outline-none focus:ring-2 focus:ring-amber-400 focus:border-amber-400'
+                    placeholder={hasContent
+                      ? `Ex : Ajoute une section sur la propriété intellectuelle… / Modifie la clause de paiement pour ajouter les taxes…`
+                      : `Ex : Contrat de maintenance mensuelle pour site WordPress, 6 mois, avec clause de renouvellement automatique…`}
+                    value={aiPrompt}
+                    onChange={(e) => setAiPrompt(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) handleGenerate(); }}
+                    autoFocus
+                  />
+                  <p className='text-xs text-muted/70'>Type actif : <span className='font-medium text-ink'>{TEMPLATE_TYPES.find(t => t.value === type)?.label ?? type}</span></p>
+                  <div className='flex justify-end gap-2'>
+                    <button className='btn-ghost text-xs' onClick={() => setAiOpen(false)}>Annuler</button>
+                    <button
+                      className='flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-500 text-white text-xs font-semibold hover:bg-amber-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors'
+                      onClick={handleGenerate}
+                      disabled={aiLoading || !aiPrompt.trim()}
+                    >
+                      {aiLoading ? (
+                        <><span className='animate-spin inline-block w-3 h-3 border-2 border-white/40 border-t-white rounded-full' /> {hasContent ? 'Modification…' : 'Génération…'}</>
+                      ) : (
+                        <><LuWand size={12} /> {hasContent ? 'Modifier' : 'Générer'}</>
+                      )}
+                    </button>
+                  </div>
+                </div>
+                );
+              })()}
             </div>
           </div>
 

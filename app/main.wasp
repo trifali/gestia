@@ -593,6 +593,11 @@ action magicCorrect {
   entities: []
 }
 
+action generateTemplateContent {
+  fn: import { generateTemplateContent } from "@src/app/ai/operations",
+  entities: [User, Company]
+}
+
 // Hourly background sweep that advances document statuses based on time
 // (quotes → expiree after validUntil, invoices → en_retard after dueDate).
 // Runs every hour to advance document statuses based on time:
