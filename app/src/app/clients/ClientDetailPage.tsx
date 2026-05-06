@@ -34,6 +34,46 @@ const CLIENT_STATUS: Record<string, { label: string; className: string }> = {
   inactif: { label: 'Inactif', className: 'badge-neutral' },
 };
 
+const PROJECT_STATUS_MAP: Record<string, { label: string; className: string }> = {
+  brouillon: { label: 'Brouillon', className: 'badge-neutral' },
+  en_cours: { label: 'En cours', className: 'badge-info' },
+  en_pause: { label: 'En pause', className: 'badge-warning' },
+  termine: { label: 'Terminé', className: 'badge-success' },
+  annule: { label: 'Annulé', className: 'badge-danger' },
+};
+
+function ProjectStatusSelect({ project }: { project: any }) {
+  const [saving, setSaving] = useState(false);
+  const meta = PROJECT_STATUS_MAP[project.status];
+  const className = (meta?.className ?? 'badge-neutral') + ' cursor-pointer pr-1';
+  const onChange = async (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const next = e.target.value;
+    if (next === project.status) return;
+    setSaving(true);
+    try {
+      await updateProject({ id: project.id, status: next });
+      toast.success('Statut mis à jour');
+    } catch (err: any) {
+      toast.error(err?.message || 'Erreur');
+    } finally {
+      setSaving(false);
+    }
+  };
+  return (
+    <select
+      value={project.status}
+      onChange={onChange}
+      disabled={saving}
+      className={className}
+      style={{ appearance: 'none', WebkitAppearance: 'none', MozAppearance: 'none', border: 'none', outline: 'none' }}
+    >
+      {Object.entries(PROJECT_STATUS_MAP).map(([val, { label }]) => (
+        <option key={val} value={val}>{label}</option>
+      ))}
+    </select>
+  );
+}
+
 // ─── Tabs ─────────────────────────────────────────────────────────────────────
 type Tab = 'resume' | 'documents' | 'paiements' | 'rencontres' | 'projets';
 
@@ -535,13 +575,6 @@ function ClientEditModal({ client, onClose }: { client: Client; onClose: () => v
 }
 
 // ─── Projets ─────────────────────────────────────────────────────────────────
-const PROJECT_STATUS: Record<string, { label: string; className: string }> = {
-  brouillon: { label: 'Brouillon', className: 'badge-neutral' },
-  en_cours: { label: 'En cours', className: 'badge-info' },
-  en_pause: { label: 'En pause', className: 'badge-warning' },
-  termine: { label: 'Terminé', className: 'badge-success' },
-  annule: { label: 'Annulé', className: 'badge-danger' },
-};
 
 function ProjetsTab({ clientId, projects }: { clientId: string; projects: any[] }) {
   const { ask, Dialog: ConfirmDialog } = useConfirm();
@@ -568,7 +601,7 @@ function ProjetsTab({ clientId, projects }: { clientId: string; projects: any[] 
           />
           <select className='input w-auto' value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)}>
             <option value=''>Tous les statuts</option>
-            {Object.entries(PROJECT_STATUS).map(([val, { label }]) => (
+            {Object.entries(PROJECT_STATUS_MAP).map(([val, { label }]) => (
               <option key={val} value={val}>{label}</option>
             ))}
           </select>
@@ -576,6 +609,7 @@ function ProjetsTab({ clientId, projects }: { clientId: string; projects: any[] 
         </div>
         <button className='btn-primary shrink-0' onClick={() => setCreating(true)}>Nouveau projet</button>
       </div>
+      <p className='text-xs text-muted mb-3'>Astuce: cliquez le statut dans le tableau pour le modifier directement.</p>
 
       {projects.length === 0 ? (
         <div className='text-center py-12 text-muted'>
@@ -611,9 +645,7 @@ function ProjetsTab({ clientId, projects }: { clientId: string; projects: any[] 
                     </a>
                   </td>
                   <td>
-                    <span className={PROJECT_STATUS[p.status]?.className || 'badge-neutral'}>
-                      {PROJECT_STATUS[p.status]?.label || p.status}
-                    </span>
+                    <ProjectStatusSelect project={p} />
                   </td>
                   <td className='text-muted'>{formatDate(p.createdAt)}</td>
                   <td className='text-right'>

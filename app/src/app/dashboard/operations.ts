@@ -19,8 +19,10 @@ export type AlertDocument = {
 
 export type DashboardStats = {
   clientsCount: number;
-  activeProjectsCount: number;
+  prospectsCount: number;
+  inProgressProjectsCount: number;
   pendingQuotesCount: number;
+  acompteRecuCount: number;
   unpaidInvoicesCount: number;
   unpaidTotal: number;
   paidThisMonth: number;
@@ -37,11 +39,13 @@ export const getDashboardStats: GetDashboardStats<void, DashboardStats> = async 
   const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
   const sixMonthsAgo = new Date(now.getFullYear(), now.getMonth() - 5, 1);
 
-  const [clientsCount, activeProjectsCount, pendingQuotesCount, unpaidInvoices, paidPayments, meetings, recentInvoicesRaw, overdueInvoicesRaw, expiredQuotesRaw] =
+  const [clientsCount, prospectsCount, inProgressProjectsCount, pendingQuotesCount, acompteRecuCount, unpaidInvoices, paidPayments, meetings, recentInvoicesRaw, overdueInvoicesRaw, expiredQuotesRaw] =
     await Promise.all([
       context.entities.Client.count({ where: { companyId } }),
-      context.entities.Project.count({ where: { companyId, status: { in: ['en_cours', 'brouillon'] } } }),
-      context.entities.Document.count({ where: { companyId, type: 'quote', status: { in: ['brouillon', 'envoyee'] } } }),
+      context.entities.Client.count({ where: { companyId, status: 'prospect' } }),
+      context.entities.Project.count({ where: { companyId, status: 'en_cours' } }),
+      context.entities.Document.count({ where: { companyId, type: 'quote', status: 'envoyee' } }),
+      context.entities.Document.count({ where: { companyId, type: 'invoice', status: 'acompte_recu' } }),
       context.entities.Document.findMany({
         where: { companyId, type: 'invoice', status: { in: ['brouillon', 'envoyee', 'en_retard'] } },
         select: { id: true, total: true, amountPaid: true },
@@ -99,8 +103,10 @@ export const getDashboardStats: GetDashboardStats<void, DashboardStats> = async 
 
   return {
     clientsCount,
-    activeProjectsCount,
+    prospectsCount,
+    inProgressProjectsCount,
     pendingQuotesCount,
+    acompteRecuCount,
     unpaidInvoicesCount: unpaidInvoices.length,
     unpaidTotal: +unpaidTotal.toFixed(2),
     paidThisMonth: +paidThisMonth.toFixed(2),

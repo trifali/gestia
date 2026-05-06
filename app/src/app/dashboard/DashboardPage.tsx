@@ -73,60 +73,72 @@ export default function DashboardPage() {
         <div className='text-muted'>Chargement des données…</div>
       ) : (
         <>
-          {(stats.overdueInvoices.length > 0 || stats.expiredQuotes.length > 0) && (
-            <div className='space-y-3 mb-6'>
-              {stats.overdueInvoices.length > 0 && (
-                <div className='rounded-xl border border-red-200 bg-red-50 overflow-hidden'>
-                  <div className='flex items-center gap-2 px-5 py-3 bg-red-100 border-b border-red-200'>
-                    <LuTriangleAlert className='text-red-600 shrink-0' size={18} />
-                    <h2 className='font-semibold text-red-800'>
-                      {stats.overdueInvoices.length} facture{stats.overdueInvoices.length > 1 ? 's' : ''} en retard
-                    </h2>
-                    <span className='text-xs text-red-600 ml-auto'>La date d'échéance est dépassée — contactez le client</span>
-                  </div>
-                  <ul className='divide-y divide-red-100'>
-                    {stats.overdueInvoices.map((doc) => (
-                      <AlertRow key={doc.id} doc={doc} clientLinkTo={`/clients/${doc.clientId}?tab=documents&type=invoice&status=en_retard`} amountValue={doc.total - doc.amountPaid} />
-                    ))}
-                  </ul>
+          <div className='mb-6'>
+            <div className='flex items-center gap-2 mb-2'>
+              <LuTriangleAlert size={15} className='text-muted' />
+              <h2 className='text-sm font-semibold text-muted uppercase tracking-wide'>Alertes</h2>
+              <span className='text-xs text-muted font-normal ml-1'>— factures en retard et soumissions expirées nécessitant une action</span>
+            </div>
+            <div className='space-y-3'>
+              {stats.overdueInvoices.length === 0 && stats.expiredQuotes.length === 0 ? (
+                <div className='rounded-xl border border-line bg-canvas px-5 py-4 text-sm text-muted'>
+                  Aucune alerte pour le moment — toutes vos factures et soumissions sont à jour.
                 </div>
-              )}
-              {stats.expiredQuotes.length > 0 && (
-                <div className='rounded-xl border border-amber-200 bg-amber-50 overflow-hidden'>
-                  <div className='flex items-center gap-2 px-5 py-3 bg-amber-100 border-b border-amber-200'>
-                    <LuClock className='text-amber-600 shrink-0' size={18} />
-                    <h2 className='font-semibold text-amber-800'>
-                      {stats.expiredQuotes.length} soumission{stats.expiredQuotes.length > 1 ? 's' : ''} expirée{stats.expiredQuotes.length > 1 ? 's' : ''}
-                    </h2>
-                    <span className='text-xs text-amber-700 ml-auto'>Date d'échéance dépassée — relancez ou fermez</span>
-                  </div>
-                  <ul className='divide-y divide-amber-100'>
-                    {stats.expiredQuotes.map((doc) => (
-                      <AlertRow key={doc.id} doc={doc} clientLinkTo={`/clients/${doc.clientId}?tab=documents&type=quote&status=expiree`} amountValue={doc.total} />
-                    ))}
-                  </ul>
-                </div>
+              ) : (
+                <>
+                  {stats.overdueInvoices.length > 0 && (
+                    <div className='rounded-xl border border-red-200 bg-red-50 overflow-hidden'>
+                      <div className='flex items-center gap-2 px-5 py-3 bg-red-100 border-b border-red-200'>
+                        <LuTriangleAlert className='text-red-600 shrink-0' size={18} />
+                        <h2 className='font-semibold text-red-800'>
+                          {stats.overdueInvoices.length} facture{stats.overdueInvoices.length > 1 ? 's' : ''} en retard
+                        </h2>
+                        <span className='text-xs text-red-600 ml-auto'>La date d'échéance est dépassée — contactez le client</span>
+                      </div>
+                      <ul className='divide-y divide-red-100'>
+                        {stats.overdueInvoices.map((doc) => (
+                          <AlertRow key={doc.id} doc={doc} clientLinkTo={`/clients/${doc.clientId}?tab=documents&type=invoice&status=en_retard`} amountValue={doc.total - doc.amountPaid} />
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                  {stats.expiredQuotes.length > 0 && (
+                    <div className='rounded-xl border border-amber-200 bg-amber-50 overflow-hidden'>
+                      <div className='flex items-center gap-2 px-5 py-3 bg-amber-100 border-b border-amber-200'>
+                        <LuClock className='text-amber-600 shrink-0' size={18} />
+                        <h2 className='font-semibold text-amber-800'>
+                          {stats.expiredQuotes.length} soumission{stats.expiredQuotes.length > 1 ? 's' : ''} expirée{stats.expiredQuotes.length > 1 ? 's' : ''}
+                        </h2>
+                        <span className='text-xs text-amber-700 ml-auto'>Date d'échéance dépassée — relancez ou fermez</span>
+                      </div>
+                      <ul className='divide-y divide-amber-100'>
+                        {stats.expiredQuotes.map((doc) => (
+                          <AlertRow key={doc.id} doc={doc} clientLinkTo={`/clients/${doc.clientId}?tab=documents&type=quote&status=expiree`} amountValue={doc.total} />
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                </>
               )}
             </div>
-          )}
+          </div>
 
           <div className='grid grid-cols-2 lg:grid-cols-4 gap-4'>
-            <Link to='/clients' className='stat-card hover:border-accent/40 transition-colors cursor-pointer'>
-              <div className='stat-label'>Clients</div>
-              <div className='stat-value'>{stats.clientsCount}</div>
+            <Link to='/clients?status=prospect' className='stat-card hover:border-accent/40 transition-colors cursor-pointer'>
+              <div className='stat-label'>Prospects</div>
+              <div className='stat-value'>{stats.prospectsCount}</div>
             </Link>
-            <Link to='/projets' className='stat-card hover:border-accent/40 transition-colors cursor-pointer'>
-              <div className='stat-label'>Projets actifs</div>
-              <div className='stat-value'>{stats.activeProjectsCount}</div>
+            <Link to='/projets?status=en_cours' className='stat-card hover:border-accent/40 transition-colors cursor-pointer'>
+              <div className='stat-label'>Projets en cours</div>
+              <div className='stat-value'>{stats.inProgressProjectsCount}</div>
             </Link>
-            <Link to='/facturation?type=quote' className='stat-card hover:border-accent/40 transition-colors cursor-pointer'>
+            <Link to='/facturation?type=quote&status=envoyee' className='stat-card hover:border-accent/40 transition-colors cursor-pointer'>
               <div className='stat-label'>Soumissions en attente</div>
               <div className='stat-value'>{stats.pendingQuotesCount}</div>
             </Link>
-            <Link to='/facturation?type=invoice' className='stat-card hover:border-accent/40 transition-colors cursor-pointer'>
-              <div className='stat-label'>Factures impayées</div>
-              <div className='stat-value'>{stats.unpaidInvoicesCount}</div>
-              <div className='text-xs text-muted mt-1'>{formatCurrency(stats.unpaidTotal)}</div>
+            <Link to='/facturation?type=invoice&status=acompte_recu' className='stat-card hover:border-accent/40 transition-colors cursor-pointer'>
+              <div className='stat-label'>Acomptes reçus</div>
+              <div className='stat-value'>{stats.acompteRecuCount}</div>
             </Link>
           </div>
 

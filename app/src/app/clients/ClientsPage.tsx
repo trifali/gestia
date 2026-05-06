@@ -1,5 +1,5 @@
 import { Fragment, useState } from 'react';
-import { useNavigate } from 'react-router';
+import { useNavigate, useSearchParams } from 'react-router';
 import { LuChevronDown, LuChevronUp, LuArrowRight } from 'react-icons/lu';
 import toast from 'react-hot-toast';
 import { useQuery, getClients, createClient, updateClient, deleteClient } from 'wasp/client/operations';
@@ -32,6 +32,8 @@ export default function ClientsPage() {
   const { data: clients, isLoading } = useQuery(getClients);
   const { ask, Dialog: ConfirmDialog } = useConfirm();
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const filterStatus = searchParams.get('status') ?? '';
   const [search, setSearch] = useState('');
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
 
@@ -45,12 +47,11 @@ export default function ClientsPage() {
   const [editing, setEditing] = useState<Client | null>(null);
   const [creating, setCreating] = useState(false);
 
-  const filtered = (clients || []).filter((c) =>
-    !search ||
-    c.name.toLowerCase().includes(search.toLowerCase()) ||
-    (c.email || '').toLowerCase().includes(search.toLowerCase()) ||
-    (c.contactName || '').toLowerCase().includes(search.toLowerCase())
-  );
+  const filtered = (clients || []).filter((c) => {
+    if (filterStatus && c.status !== filterStatus) return false;
+    if (search && !c.name.toLowerCase().includes(search.toLowerCase()) && !(c.email || '').toLowerCase().includes(search.toLowerCase()) && !(c.contactName || '').toLowerCase().includes(search.toLowerCase())) return false;
+    return true;
+  });
 
   return (
     <>
@@ -67,6 +68,20 @@ export default function ClientsPage() {
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />
+        <select
+          className='input w-auto'
+          value={filterStatus}
+          onChange={(e) => {
+            const v = e.target.value;
+            if (v) setSearchParams({ status: v }, { replace: true });
+            else setSearchParams({}, { replace: true });
+          }}
+        >
+          <option value=''>Tous les statuts</option>
+          {Object.entries(STATUS).map(([val, { label }]) => (
+            <option key={val} value={val}>{label}</option>
+          ))}
+        </select>
         <span className='text-sm text-muted'>{filtered.length} client(s)</span>
       </div>
 

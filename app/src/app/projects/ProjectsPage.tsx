@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Link } from 'react-router';
+import { Link, useSearchParams } from 'react-router';
 import toast from 'react-hot-toast';
 import {
   useQuery,
@@ -20,14 +20,47 @@ const STATUS: Record<string, { label: string; className: string }> = {
   annule: { label: 'Annulé', className: 'badge-danger' },
 };
 
+function ProjectStatusSelect({ project }: { project: any }) {
+  const [saving, setSaving] = useState(false);
+  const meta = STATUS[project.status];
+  const className = (meta?.className ?? 'badge-neutral') + ' cursor-pointer pr-1';
+  const onChange = async (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const next = e.target.value;
+    if (next === project.status) return;
+    setSaving(true);
+    try {
+      await updateProject({ id: project.id, status: next });
+      toast.success('Statut mis à jour');
+    } catch (err: any) {
+      toast.error(err?.message || 'Erreur');
+    } finally {
+      setSaving(false);
+    }
+  };
+  return (
+    <select
+      value={project.status}
+      onChange={onChange}
+      disabled={saving}
+      className={className}
+      style={{ appearance: 'none', WebkitAppearance: 'none', MozAppearance: 'none', border: 'none', outline: 'none' }}
+    >
+      {Object.entries(STATUS).map(([val, { label }]) => (
+        <option key={val} value={val}>{label}</option>
+      ))}
+    </select>
+  );
+}
+
 export default function ProjectsPage() {
   const { data: projects, isLoading } = useQuery(getProjects);
   const { data: clients } = useQuery(getClients);
   const { ask, Dialog: ConfirmDialog } = useConfirm();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const filterStatus = searchParams.get('status') ?? '';
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState<any>(null);
   const [search, setSearch] = useState('');
-  const [filterStatus, setFilterStatus] = useState('');
   const [filterClient, setFilterClient] = useState('');
 
   const filtered = (projects || []).filter((p: any) => {
@@ -41,7 +74,7 @@ export default function ProjectsPage() {
     <>
       <PageHeader
         title='Projets'
-        subtitle='Suivez vos mandats et accédez aux détails de chaque projet.'
+        subtitle="Suivez vos mandats et accédez aux détails de chaque projet. Cliquez le statut dans le tableau pour le modifier directement (Brouillon → En cours → Terminé, etc.)."
         actions={<button className='btn-primary' onClick={() => setCreating(true)}>Nouveau projet</button>}
       />
 
@@ -52,7 +85,11 @@ export default function ProjectsPage() {
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />
-        <select className='input w-auto' value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)}>
+        <select className='input w-auto' value={filterStatus} onChange={(e) => {
+          const v = e.target.value;
+          if (v) setSearchParams({ status: v }, { replace: true });
+          else setSearchParams({}, { replace: true });
+        }}>
           <option value=''>Tous les statuts</option>
           {Object.entries(STATUS).map(([val, { label }]) => (
             <option key={val} value={val}>{label}</option>
@@ -105,9 +142,7 @@ export default function ProjectsPage() {
                   </td>
                   <td className='text-muted'>{p.client?.name || '—'}</td>
                   <td>
-                    <span className={STATUS[p.status]?.className || 'badge-neutral'}>
-                      {STATUS[p.status]?.label || p.status}
-                    </span>
+                    <ProjectStatusSelect project={p} />
                   </td>
                   <td className='text-right'>
                     <div className='flex items-center justify-end gap-1'>
