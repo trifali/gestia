@@ -399,6 +399,8 @@ export const sendDocumentEmail: SendDocumentEmail<SendDocumentEmailArgs, { ok: t
     args.type === 'invoice'
       ? { emailSubjectInvoice: args.subject, emailBodyInvoice: args.message }
       : { emailSubjectQuote: args.subject, emailBodyQuote: args.message };
+  updateData.emailTo = args.to.trim() || null;
+  updateData.emailCc = args.cc?.trim() || null;
   if (currentStatus !== 'envoyee') {
     updateData.status = 'envoyee';
   }
@@ -423,20 +425,20 @@ export const sendDocumentEmail: SendDocumentEmail<SendDocumentEmailArgs, { ok: t
 };
 
 export const saveDocumentEmailDraft: SaveDocumentEmailDraft<
-  { id: string; type: DocumentType; subject?: string | null; body?: string | null },
+  { id: string; type: DocumentType; subject?: string | null; body?: string | null; to?: string | null; cc?: string | null },
   { ok: true }
-> = async ({ id, type, subject, body }, context) => {
+> = async ({ id, type, subject, body, to, cc }, context) => {
   const companyId = ensureCompany(context.user);
   const existing = await context.entities.Document.findUnique({ where: { id } });
   if (!existing || (existing as any).companyId !== companyId) throw new HttpError(404);
   const cleanSubject = subject?.trim() || null;
   const cleanBody = body ?? null;
-  await context.entities.Document.update({
-    where: { id },
-    data:
-      type === 'invoice'
-        ? { emailSubjectInvoice: cleanSubject, emailBodyInvoice: cleanBody }
-        : { emailSubjectQuote: cleanSubject, emailBodyQuote: cleanBody },
-  });
+  const emailFields: any =
+    type === 'invoice'
+      ? { emailSubjectInvoice: cleanSubject, emailBodyInvoice: cleanBody }
+      : { emailSubjectQuote: cleanSubject, emailBodyQuote: cleanBody };
+  if (to !== undefined) emailFields.emailTo = to?.trim() || null;
+  if (cc !== undefined) emailFields.emailCc = cc?.trim() || null;
+  await context.entities.Document.update({ where: { id }, data: emailFields });
   return { ok: true } as const;
 };

@@ -101,9 +101,11 @@ export function SendDocumentEmailModal({ doc, company, brand, activities, onClos
 
   const initialPrev =
     lastSentByType[initialType] || lastSentByType.quote || lastSentByType.invoice;
-  const [to, setTo] = useState<string>(initialPrev?.metadata?.to || doc.client.email || '');
+  const [to, setTo] = useState<string>(
+    docAny.emailTo || initialPrev?.metadata?.to || doc.client.email || '',
+  );
   const [cc, setCc] = useState<string>(
-    initialPrev?.metadata?.cc ?? ((company as any)?.email || ''),
+    docAny.emailCc ?? initialPrev?.metadata?.cc ?? ((company as any)?.email || ''),
   );
   const [sending, setSending] = useState(false);
   const [savingDraft, setSavingDraft] = useState(false);
@@ -122,7 +124,7 @@ export function SendDocumentEmailModal({ doc, company, brand, activities, onClos
   const saveDraft = async () => {
     setSavingDraft(true);
     try {
-      await saveDocumentEmailDraft({ id: doc.id, type: activeType, subject, body });
+      await saveDocumentEmailDraft({ id: doc.id, type: activeType, subject, body, to: to.trim() || null, cc: cc.trim() || null });
       toast.success('Brouillon enregistré');
     } catch (err: any) {
       toast.error(err?.message || "Erreur lors de l'enregistrement");

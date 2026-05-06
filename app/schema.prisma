@@ -257,6 +257,8 @@ model Document {
   emailBodyQuote      String?
   emailSubjectInvoice String?
   emailBodyInvoice    String?
+  emailTo             String?
+  emailCc             String?
 
   items      DocumentItem[]
   payments   Payment[]
