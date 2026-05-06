@@ -28,6 +28,12 @@ export interface EditorFileInfo {
   url: string | null;
   /** Set when the file was created from a DocumentTemplate */
   sourceTemplateType?: string | null;
+  /** The client that owns this file (for template variable resolution) */
+  clientId?: string | null;
+  /** Stored variable overrides for this file (JSON string from DB) */
+  dynamicVars?: string | null;
+  /** When true, open the variable editor panel immediately on mount */
+  openVarEditor?: boolean;
 }
 
 interface Props {

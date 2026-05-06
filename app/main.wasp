@@ -266,6 +266,10 @@ action updateClientFileContent {
   fn: import { updateClientFileContent } from "@src/app/clients/clientFileOperations",
   entities: [User, Client, ClientFile]
 }
+action updateClientFileDynamicVars {
+  fn: import { updateClientFileDynamicVars } from "@src/app/clients/clientFileOperations",
+  entities: [User, Client, ClientFile]
+}
 
 query getProjects {
   fn: import { getProjects } from "@src/app/projects/operations",

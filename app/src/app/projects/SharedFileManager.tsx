@@ -11,7 +11,7 @@ import toast from 'react-hot-toast';
 import { LuUpload, LuFilePlus, LuX, LuFileText, LuChevronDown } from 'react-icons/lu';
 import { FilePreviewModal } from './FilePreviewModal';
 import { FileEditorModal, type EditorFileInfo } from './FileEditorModal';
-import { ClientDocEditorModal } from '../clients/ClientDocEditorModal';
+import { ClientDocEditorModal, StandaloneEditDynamicVarsModal } from '../clients/ClientDocEditorModal';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -126,6 +126,8 @@ export function toFileData(files: any[]): FileData[] {
       _url: f.url,
       _key: f.key,
       _sourceTemplateType: f.sourceTemplateType ?? null,
+      _clientId: f.clientId ?? null,
+      _dynamicVars: f.dynamicVars ?? null,
     } as any;
   });
 
@@ -236,6 +238,10 @@ export function SharedFileManager({ ops }: { ops: FileManagerOperations }) {
   const [editorFile, setEditorFile] = useState<EditorFileInfo | null>(null);
   const [showNewFileDialog, setShowNewFileDialog] = useState(false);
   const [currentFolderId, setCurrentFolderId] = useState<string | null>(null);
+  // Track dynamicVars per file id so we can refresh the editor without a full refetch
+  const [dynVarsCache, setDynVarsCache] = useState<Record<string, string>>({});
+  // File targeted by the right-click "Modifier les variables" action (no editor, just vars modal)
+  const [ctxVarsFile, setCtxVarsFile] = useState<{ id: string; clientId: string | null; dynamicVars: string | null } | null>(null);
 
   const updateFolder = useCallback((id: string | null) => {
     setCurrentFolderId(id);
@@ -392,7 +398,7 @@ export function SharedFileManager({ ops }: { ops: FileManagerOperations }) {
     })();
     sortedFilesRef.current = sorted;
     if (getEditorContent && EDITABLE_EXTS.has(ext)) {
-      setEditorFile({ id: d.id, name: d.name, mimeType: d._mimeType ?? null, url: d._url ?? null, sourceTemplateType: d._sourceTemplateType ?? null });
+      setEditorFile({ id: d.id, name: d.name, mimeType: d._mimeType ?? null, url: d._url ?? null, sourceTemplateType: d._sourceTemplateType ?? null, clientId: d._clientId ?? null, dynamicVars: d._dynamicVars ?? null });
     } else {
       setPreviewFileId(d.id);
       setPreviewFile({ name: d.name, mimeType: d._mimeType ?? null, url: d._url ?? null });
@@ -410,9 +416,43 @@ export function SharedFileManager({ ops }: { ops: FileManagerOperations }) {
     }
   }, []);
 
+  // ─── Context menu: inject "Modifier les variables" for template .md files ──
+
+  // ─── Context menu: show "Modifier les variables" only for template files ───
+
+  const handleMenuOpen = useCallback((args: any) => {
+    if (!args.items) return;
+    // args.fileDetails contains the Syncfusion FileData object(s) for the target
+    const fileDetails: any[] = Array.isArray(args.fileDetails) ? args.fileDetails : (args.fileDetails ? [args.fileDetails] : []);
+    const target = fileDetails[0];
+    const isTemplateFile = target?._sourceTemplateType;
+    // Remove the custom item when the file is not a template
+    if (!isTemplateFile) {
+      args.items = args.items.filter((i: any) => i.text !== 'Modifier les variables');
+    } else {
+      // Add icon to the item
+      for (const item of args.items) {
+        if (item.text === 'Modifier les variables') {
+          item.iconCss = 'e-icons e-settings';
+        }
+      }
+    }
+  }, []);
+
+  const handleMenuClick = useCallback((args: any) => {
+    if (args.item?.text !== 'Modifier les variables') return;
+    const fileDetails: any[] = Array.isArray(args.fileDetails) ? args.fileDetails : (args.fileDetails ? [args.fileDetails] : []);
+    const target = fileDetails[0];
+    if (!target) return;
+    // Open vars modal directly — no need to open the full editor
+    setCtxVarsFile({
+      id: target.id,
+      clientId: target._clientId ?? null,
+      dynamicVars: dynVarsCache[target.id] ?? target._dynamicVars ?? null,
+    });
+  }, [dynVarsCache]);
 
 
-  // ─── Item-count badges + template-type badges ─────────────────────────────
 
   useEffect(() => {
     if (!dataReady) return;
@@ -570,7 +610,7 @@ export function SharedFileManager({ ops }: { ops: FileManagerOperations }) {
     if (getEditorContent && isEditable(f)) {
       setPreviewFile(null);
       setPreviewFileId(null);
-      setEditorFile({ id: f.id, name: f.name, mimeType: f._mimeType ?? null, url: f._url ?? null, sourceTemplateType: f._sourceTemplateType ?? null });
+      setEditorFile({ id: f.id, name: f.name, mimeType: f._mimeType ?? null, url: f._url ?? null, sourceTemplateType: f._sourceTemplateType ?? null, clientId: f._clientId ?? null, dynamicVars: f._dynamicVars ?? null });
     } else {
       setEditorFile(null);
       setPreviewFileId(f.id);
@@ -598,6 +638,7 @@ export function SharedFileManager({ ops }: { ops: FileManagerOperations }) {
   }, []);
 
   return (
+    <>
     <div className='flex flex-col gap-3'>
       {/* Hidden file input */}
       <input
@@ -648,7 +689,7 @@ export function SharedFileManager({ ops }: { ops: FileManagerOperations }) {
               items: ['NewFolder', '|', 'Cut', 'Copy', 'Paste', 'Delete', 'Rename', 'Refresh', '|', 'SortBy', 'Details'],
             }}
             contextMenuSettings={{
-              file: ['Open', '|', 'Cut', 'Copy', 'Delete', 'Rename', '|', 'Details'],
+              file: ['Open', '|', 'Modifier les variables', '|', 'Cut', 'Copy', 'Delete', 'Rename', '|', 'Details'],
               folder: ['Open', '|', 'Cut', 'Copy', 'Paste', 'Delete', 'Rename'],
               layout: ['Refresh', '|', 'NewFolder', 'Paste', '|', 'Details'],
             }}
@@ -659,6 +700,8 @@ export function SharedFileManager({ ops }: { ops: FileManagerOperations }) {
             beforeRename={handleRename}
             beforeMove={handleMove}
             fileOpen={handleFileOpen}
+            menuOpen={handleMenuOpen}
+            menuClick={handleMenuClick}
           >
             <Inject services={[DetailsView, NavigationPane, Toolbar]} />
           </FileManagerComponent>
@@ -689,6 +732,11 @@ export function SharedFileManager({ ops }: { ops: FileManagerOperations }) {
           onNavigate={handleNavigate}
           hasPrev={editorFileIdx > 0}
           hasNext={editorFileIdx >= 0 && editorFileIdx < sortedList.length - 1}
+          clientId={editorFile.clientId ?? null}
+          dynamicVars={dynVarsCache[editorFile.id] ?? editorFile.dynamicVars ?? null}
+          onDynamicVarsUpdated={(newJson) => {
+            setDynVarsCache((prev) => ({ ...prev, [editorFile.id]: newJson }));
+          }}
         />
       ) : getEditorContent && (
         <FileEditorModal
@@ -702,5 +750,18 @@ export function SharedFileManager({ ops }: { ops: FileManagerOperations }) {
         />
       )}
     </div>
+
+    {ctxVarsFile && (
+      <StandaloneEditDynamicVarsModal
+        fileId={ctxVarsFile.id}
+        clientId={ctxVarsFile.clientId}
+        dynamicVars={ctxVarsFile.dynamicVars}
+        onSave={(newJson) => {
+          setDynVarsCache((prev) => ({ ...prev, [ctxVarsFile.id]: newJson }));
+        }}
+        onClose={() => setCtxVarsFile(null)}
+      />
+    )}
+    </>
   );
 }

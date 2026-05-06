@@ -126,6 +126,7 @@ model ClientFile {
 
   sourceTemplateId   String?
   sourceTemplateType String?
+  dynamicVars        String? // JSON: Record<string, string> of variable overrides
   sourceTemplate     DocumentTemplate? @relation(fields: [sourceTemplateId], references: [id], onDelete: SetNull)
 
   @@index([clientId])

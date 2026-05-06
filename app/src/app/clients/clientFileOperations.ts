@@ -457,6 +457,10 @@ export const createClientFileFromTemplate = async (
   const key = clientFileKey(companyId, clientId, `${uid()}.md`);
   await putObject(key, buffer, 'text/markdown');
 
+  const dynVarsRecord: Record<string, string> = {};
+  if (extraVars?.date_expiry) dynVarsRecord['{{date_expiry}}'] = extraVars.date_expiry;
+  if (extraVars?.payment_link) dynVarsRecord['{{payment.link}}'] = extraVars.payment_link;
+
   return context.entities.ClientFile.create({
     data: {
       clientId,
@@ -468,6 +472,7 @@ export const createClientFileFromTemplate = async (
       size: buffer.length,
       sourceTemplateId: template.id,
       sourceTemplateType: template.type,
+      dynamicVars: Object.keys(dynVarsRecord).length ? JSON.stringify(dynVarsRecord) : null,
     },
   });
 };
@@ -491,5 +496,21 @@ export const updateClientFileContent = async (
   return context.entities.ClientFile.update({
     where: { id },
     data: { size: buffer.length },
+  });
+};
+
+// ─── updateClientFileDynamicVars ──────────────────────────────────────────────
+
+export const updateClientFileDynamicVars = async (
+  { id, vars }: { id: string; vars: Record<string, string> },
+  context: any,
+) => {
+  const companyId = ensureCompany(context.user);
+  const file = await context.entities.ClientFile.findUnique({ where: { id } });
+  if (!file || file.isFolder) throw new HttpError(404);
+  await ensureClientOwned(file.clientId, companyId, context.entities);
+  return context.entities.ClientFile.update({
+    where: { id },
+    data: { dynamicVars: JSON.stringify(vars) },
   });
 };
