@@ -242,10 +242,6 @@ export function SharedFileManager({ ops }: { ops: FileManagerOperations }) {
   const [dynVarsCache, setDynVarsCache] = useState<Record<string, string>>({});
   // File targeted by the right-click "Modifier les variables" action (no editor, just vars modal)
   const [ctxVarsFile, setCtxVarsFile] = useState<{ id: string; clientId: string | null; dynamicVars: string | null } | null>(null);
-  // Template file currently selected in the file list (drives toolbar button)
-  const [selectionVarFile, setSelectionVarFile] = useState<{ id: string; clientId: string | null; dynamicVars: string | null } | null>(null);
-  // Track this in a ref too so toolbarClick closure always sees the latest value
-  const selectionVarFileRef = useRef<typeof selectionVarFile>(null);
 
   const updateFolder = useCallback((id: string | null) => {
     setCurrentFolderId(id);
@@ -434,26 +430,6 @@ export function SharedFileManager({ ops }: { ops: FileManagerOperations }) {
     }
   }, []);
 
-  const handleToolbarCreate = useCallback((_args: any) => {
-    // Fires on every toolbar (re)creation — restore correct enable/disable state and fix label
-    setTimeout(() => {
-      if (selectionVarFileRef.current) {
-        fmRef.current?.enableToolbarItems(['EditVars']);
-      } else {
-        fmRef.current?.disableToolbarItems(['EditVars']);
-      }
-      const container = (fmRef.current as any)?.element as HTMLElement | undefined;
-      if (!container) return;
-      container.querySelectorAll('.e-toolbar-item .e-tbar-btn-text').forEach((el: Element) => {
-        if ((el as HTMLElement).textContent?.trim() === 'EditVars') {
-          (el as HTMLElement).textContent = 'Modifier les variables';
-        }
-      });
-    }, 50);
-  }, []);
-
-  // ─── Context menu: inject "Modifier les variables" for template .md files ──
-
   // ─── Context menu: show "Modifier les variables" only for template files ───
 
   const handleMenuOpen = useCallback((args: any) => {
@@ -472,33 +448,6 @@ export function SharedFileManager({ ops }: { ops: FileManagerOperations }) {
           item.iconCss = 'e-icons e-settings';
         }
       }
-    }
-  }, []);
-
-  const handleFileSelect = useCallback((args: any) => {
-    if (args?.action === 'unselect') {
-      setSelectionVarFile(null);
-      selectionVarFileRef.current = null;
-      fmRef.current?.disableToolbarItems(['EditVars']);
-      return;
-    }
-    const details = args?.fileDetails;
-    if (details?.isFile && details?._sourceTemplateType) {
-      const val = { id: details.id, clientId: details._clientId ?? null, dynamicVars: details._dynamicVars ?? null };
-      setSelectionVarFile(val);
-      selectionVarFileRef.current = val;
-      fmRef.current?.enableToolbarItems(['EditVars']);
-    } else {
-      setSelectionVarFile(null);
-      selectionVarFileRef.current = null;
-      fmRef.current?.disableToolbarItems(['EditVars']);
-    }
-  }, []);
-
-  const handleToolbarClick = useCallback((args: any) => {
-    if (args?.item?.id?.endsWith('_tb_EditVars') || args?.item?.text === 'Modifier les variables') {
-      const target = selectionVarFileRef.current;
-      if (target) setCtxVarsFile(target);
     }
   }, []);
 
@@ -754,7 +703,7 @@ export function SharedFileManager({ ops }: { ops: FileManagerOperations }) {
               layout: ['Refresh', '|', 'NewFolder', 'Paste', '|', 'Details'],
             }}
             toolbarSettings={{
-              items: ['NewFolder', '|', 'Cut', 'Copy', 'Paste', 'Delete', 'Rename', 'Refresh', '|', 'SortBy', 'Details', 'EditVars'] as any,
+              items: ['NewFolder', '|', 'Cut', 'Copy', 'Paste', 'Delete', 'Rename', 'Refresh', '|', 'SortBy', 'Details'],
             }}
             allowDragAndDrop={true}
             created={handleCreated}
@@ -765,9 +714,6 @@ export function SharedFileManager({ ops }: { ops: FileManagerOperations }) {
             fileOpen={handleFileOpen}
             menuOpen={handleMenuOpen}
             menuClick={handleMenuClick}
-            fileSelect={handleFileSelect}
-            toolbarClick={handleToolbarClick}
-            toolbarCreate={handleToolbarCreate}
           >
             <Inject services={[DetailsView, NavigationPane, Toolbar]} />
           </FileManagerComponent>
