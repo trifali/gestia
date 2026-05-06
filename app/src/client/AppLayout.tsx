@@ -6,6 +6,7 @@ import {
   LuLayoutDashboard, LuUsers, LuFolder, LuFileText,
   LuCreditCard, LuCalendar, LuZap, LuSettings, LuMenu, LuX
 } from 'react-icons/lu';
+import Logo from './Logo';
 
 type AppLayoutProps = {
   user: any;
@@ -41,11 +42,8 @@ export default function AppLayout({ user, children }: AppLayoutProps) {
     <aside className='w-64 shrink-0 bg-white border-r border-line flex flex-col h-screen sticky top-0'>
       <div className='px-5 py-5 border-b border-line'>
         <Link to='/tableau-de-bord' className='flex items-center gap-2'>
-          <span className='inline-flex w-8 h-8 rounded-lg bg-ink items-center justify-center text-white font-bold'>G</span>
-          <div>
-            <div className='font-semibold text-ink leading-none'>Gestia</div>
-            <div className='text-[11px] text-muted mt-0.5'>{company?.name || 'Configurez votre entreprise'}</div>
-          </div>
+          <Logo height={28} />
+          <div className='text-[11px] text-muted mt-0.5'>{company?.name || 'Configurez votre entreprise'}</div>
         </Link>
       </div>
 
@@ -106,7 +104,7 @@ export default function AppLayout({ user, children }: AppLayoutProps) {
           <button onClick={() => setMobileOpen(true)} className='btn-ghost'>
             <LuMenu size={20} />
           </button>
-          <span className='font-semibold'>Gestia</span>
+          <Logo height={24} />
           <span className='w-9' />
         </header>
 

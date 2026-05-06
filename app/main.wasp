@@ -6,7 +6,9 @@ app gestia {
   title: "Gestia — Gestion intelligente pour entreprises québécoises",
 
   head: [
-    "<link rel='icon' href='/favicon.ico' />",
+    "<link rel='icon' type='image/x-icon' href='/favicon.ico' />",
+    "<link rel='icon' type='image/png' sizes='64x64' href='/favicon-64.png' />",
+    "<link rel='apple-touch-icon' href='/favicon-64.png' />",
     "<meta name='description' content='Gestia — La plateforme tout-en-un pour gérer clients, projets, soumissions, factures et paiements au Québec.' />",
     "<meta name='author' content='Gestia' />",
     "<meta name='keywords' content='SaaS, Québec, gestion, clients, projets, soumissions, factures, paiements, entreprise' />",

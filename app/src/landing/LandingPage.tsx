@@ -1,5 +1,6 @@
 import { Link } from 'react-router';
 import { useAuth } from 'wasp/client/auth';
+import Logo from '../client/Logo';
 
 const FEATURES = [
   { title: 'Clients', desc: 'Centralisez vos contacts, prospects et clients actifs en un seul endroit.' },
@@ -21,8 +22,7 @@ export default function LandingPage() {
       <header className='border-b border-line bg-white/70 backdrop-blur sticky top-0 z-30'>
         <div className='max-w-6xl mx-auto px-6 h-16 flex items-center justify-between'>
           <Link to='/' className='flex items-center gap-2'>
-            <span className='inline-flex w-8 h-8 rounded-lg bg-ink text-white items-center justify-center font-bold'>G</span>
-            <span className='font-semibold'>Gestia</span>
+            <Logo height={32} />
           </Link>
           <nav className='hidden md:flex items-center gap-6 text-sm'>
             <a href='#fonctionnalites' className='text-muted hover:text-ink'>Fonctionnalités</a>
