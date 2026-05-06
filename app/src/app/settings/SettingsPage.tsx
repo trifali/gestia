@@ -1,7 +1,9 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import toast from 'react-hot-toast';
 import {
   useQuery,
+  useAction,
   getCurrentCompany,
   updateCompany,
   uploadCompanyLogo,
@@ -19,18 +21,25 @@ import {
   getGoogleCalendarStatus,
   getGoogleCalendarAuthUrl,
   disconnectGoogleCalendar,
+  getDocumentTemplates,
+  createDocumentTemplate,
+  updateDocumentTemplate,
+  deleteDocumentTemplate,
 } from 'wasp/client/operations';
 import { useAuth } from 'wasp/client/auth';
 import { PAYMENT_METHOD_OPTIONS } from '../payments/PaymentForm';
-import { LuPlus, LuSearch } from 'react-icons/lu';
+import { LuPlus, LuSearch, LuFileText, LuCopy, LuEye, LuX, LuChevronRight } from 'react-icons/lu';
 import { PageHeader, IconBtn, EditIcon, TrashIcon, useConfirm, Modal, EmptyState } from '../../client/ui';
 import { MagicInput, MagicTextarea } from '../../client/magic';
 import { formatCurrency } from '../../shared/format';
+import { TEMPLATE_TYPES, TEMPLATE_VARIABLE_GROUPS, getTemplatePdfBase64 } from './templatePdf';
+import MDEditor from '@uiw/react-md-editor';
+import type { BrandAssets } from '../documents/pdf';
 
 export default function SettingsPage() {
   const { data: user } = useAuth();
   const { data: company, isLoading } = useQuery(getCurrentCompany);
-  const [tab, setTab] = useState<'entreprise' | 'marque' | 'catalogue' | 'modalites' | 'compte' | 'localisation' | 'integrations'>('entreprise');
+  const [tab, setTab] = useState<'entreprise' | 'marque' | 'catalogue' | 'modalites' | 'compte' | 'localisation' | 'integrations' | 'modeles'>('entreprise');
 
   if (isLoading) return <div className='text-muted'>Chargement…</div>;
   if (!company) return <div className='text-muted'>Aucune entreprise associée.</div>;
@@ -45,6 +54,7 @@ export default function SettingsPage() {
         <TabButton active={tab === 'entreprise'} onClick={() => setTab('entreprise')}>Entreprise</TabButton>
         <TabButton active={tab === 'marque'} onClick={() => setTab('marque')}>Marque</TabButton>
         <TabButton active={tab === 'catalogue'} onClick={() => setTab('catalogue')}>Catalogue</TabButton>
+        <TabButton active={tab === 'modeles'} onClick={() => setTab('modeles')}>Modèles</TabButton>
         <TabButton active={tab === 'modalites'} onClick={() => setTab('modalites')}>Modalités</TabButton>
         <TabButton active={tab === 'compte'} onClick={() => setTab('compte')}>Compte</TabButton>
         <TabButton active={tab === 'localisation'} onClick={() => setTab('localisation')}>Localisation</TabButton>
@@ -55,6 +65,7 @@ export default function SettingsPage() {
       {tab === 'integrations' && <IntegrationsTab />}
       {tab === 'marque' && <BrandForm company={company} canEdit={!!isAdmin} />}
       {tab === 'catalogue' && <PriceList canEdit={!!isAdmin} />}
+      {tab === 'modeles' && <TemplateList canEdit={!!isAdmin} company={company} />}
       {tab === 'modalites' && <ModalitesForm company={company} canEdit={!!isAdmin} />}
       {tab === 'compte' && <AccountInfo user={user} role={(user as any)?.role || 'client'} />}
       {tab === 'localisation' && <LocalizationInfo />}
@@ -1273,3 +1284,459 @@ function IntegrationsTab() {
     </div>
   );
 }
+
+// ─── TemplateList ─────────────────────────────────────────────────────────────
+
+type DocTemplate = {
+  id: string;
+  name: string;
+  type: string;
+  description: string | null;
+  content: string;
+  isActive: boolean;
+  createdAt: string | Date;
+  updatedAt: string | Date;
+};
+
+function TemplateList({ canEdit, company }: { canEdit: boolean; company: any }) {
+  const { data: templates, isLoading, refetch } = useQuery(getDocumentTemplates);
+  const createTmpl = useAction(createDocumentTemplate);
+  const deleteTmpl = useAction(deleteDocumentTemplate);
+  const [editing, setEditing] = useState<DocTemplate | null>(null);
+  const [creating, setCreating] = useState(false);
+  const [previewing, setPreviewing] = useState<DocTemplate | null>(null);
+  const { data: brand } = useQuery(getCompanyBrandAssets);
+  const { ask, Dialog } = useConfirm();
+
+  const onDelete = async (t: DocTemplate) => {
+    const ok = await ask(`Supprimer le modèle « ${t.name} » ?`);
+    if (!ok) return;
+    try {
+      await deleteTmpl({ id: t.id });
+      toast.success('Modèle supprimé');
+      refetch();
+    } catch (e: any) {
+      toast.error(e?.message || 'Erreur');
+    }
+  };
+
+  if (isLoading) return <div className='text-muted'>Chargement…</div>;
+  const list = (templates || []) as DocTemplate[];
+
+  return (
+    <div className='space-y-4'>
+      {Dialog}
+      <div className='flex justify-between items-center'>
+        <p className='text-xs text-muted'>
+          Créez des modèles réutilisables (contrats, cahiers des charges, …) avec des variables dynamiques.
+        </p>
+        {canEdit && (
+          <button className='btn-primary' onClick={() => setCreating(true)}>
+            <LuPlus size={16} className='mr-1.5' /> Nouveau modèle
+          </button>
+        )}
+      </div>
+
+      {list.length === 0 ? (
+        <EmptyState
+          title='Aucun modèle'
+          description='Créez votre premier modèle de document pour le réutiliser avec vos clients.'
+          action={canEdit ? <button className='btn-primary' onClick={() => setCreating(true)}>Créer un modèle</button> : undefined}
+        />
+      ) : (
+        <div className='card overflow-hidden'>
+          <table className='w-full text-sm'>
+            <thead className='bg-canvas-100 text-muted'>
+              <tr>
+                <th className='text-left px-3 py-2 font-medium text-xs'>Nom</th>
+                <th className='text-left px-3 py-2 font-medium text-xs'>Type</th>
+                <th className='text-center px-3 py-2 font-medium text-xs'>Statut</th>
+                <th className='px-3 py-2 w-28' />
+              </tr>
+            </thead>
+            <tbody>
+              {list.map((t) => (
+                <tr
+                  key={t.id}
+                  className='border-t border-line hover:bg-canvas-50 cursor-pointer'
+                  onClick={() => setEditing(t)}
+                >
+                  <td className='px-3 py-2'>
+                    <div className='font-medium text-ink flex items-center gap-1.5'>
+                      <LuFileText size={13} className='text-muted shrink-0' />
+                      {t.name}
+                    </div>
+                    {t.description && <div className='text-xs text-muted mt-0.5'>{t.description}</div>}
+                  </td>
+                  <td className='px-3 py-2 text-xs text-muted'>
+                    {TEMPLATE_TYPES.find((x) => x.value === t.type)?.label ?? t.type}
+                  </td>
+                  <td className='px-3 py-2 text-center'>
+                    <span className={t.isActive ? 'badge-success' : 'badge-neutral'}>
+                      {t.isActive ? 'Actif' : 'Inactif'}
+                    </span>
+                  </td>
+                  <td className='px-3 py-2' onClick={(e) => e.stopPropagation()}>
+                      <div className='flex justify-end gap-1'>
+                        <IconBtn title='Aperçu PDF' onClick={() => setPreviewing(t)}><LuEye size={14} /></IconBtn>
+                        <IconBtn title='Modifier' onClick={() => setEditing(t)}><EditIcon /></IconBtn>
+                        {canEdit && <IconBtn variant='danger' title='Supprimer' onClick={() => onDelete(t)}><TrashIcon /></IconBtn>}
+                      </div>
+                    </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {(creating || editing) && (
+        <TemplateEditorModal
+          initial={editing}
+          canEdit={canEdit}
+          company={company}
+          onClose={() => { setCreating(false); setEditing(null); }}
+          onSaved={() => { setCreating(false); setEditing(null); refetch(); }}
+        />
+      )}
+      {previewing && (
+        <TemplatePdfPreviewModal
+          template={previewing}
+          brand={(brand as BrandAssets) ?? null}
+          companyName={company?.name ?? ''}
+          onClose={() => setPreviewing(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+// ─── TemplatePdfPreviewModal ──────────────────────────────────────────────────
+
+function TemplatePdfPreviewModal({
+  template,
+  brand,
+  companyName,
+  onClose,
+}: {
+  template: DocTemplate;
+  brand: BrandAssets;
+  companyName: string;
+  onClose: () => void;
+}) {
+  const [url, setUrl] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let blobUrl: string | null = null;
+    let cancelled = false;
+    (async () => {
+      try {
+        const b64 = await getTemplatePdfBase64(template, brand, companyName);
+        if (cancelled) return;
+        const bytes = atob(b64);
+        const arr = new Uint8Array(bytes.length);
+        for (let i = 0; i < bytes.length; i++) arr[i] = bytes.charCodeAt(i);
+        blobUrl = URL.createObjectURL(new Blob([arr], { type: 'application/pdf' }));
+        setUrl(blobUrl);
+      } catch (e: any) {
+        if (!cancelled) setError(e?.message || 'Erreur de génération');
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => { cancelled = true; if (blobUrl) URL.revokeObjectURL(blobUrl); };
+  }, [template, brand, companyName]);
+
+  return createPortal(
+    <div className='fixed inset-0 bg-ink/50 backdrop-blur-sm z-50 flex items-center justify-center p-4'>
+      <div className='bg-white rounded-2xl shadow-2xl flex flex-col w-full max-w-4xl h-[90vh] overflow-hidden'>
+        <div className='shrink-0 px-5 py-3 border-b border-line flex items-center justify-between'>
+          <div className='flex items-center gap-2'>
+            <LuEye size={16} className='text-muted' />
+            <span className='font-semibold'>{template.name}</span>
+            <span className='text-xs text-muted'>— Aperçu PDF</span>
+          </div>
+          <button onClick={onClose} className='text-muted hover:text-ink'><LuX size={18} /></button>
+        </div>
+        <div className='flex-1 min-h-0 relative'>
+          {loading && (
+            <div className='absolute inset-0 flex items-center justify-center text-sm text-muted'>
+              Génération du PDF…
+            </div>
+          )}
+          {error && (
+            <div className='absolute inset-0 flex items-center justify-center text-sm text-red-500'>
+              {error}
+            </div>
+          )}
+          {url && <iframe src={url} className='w-full h-full' title='Aperçu PDF' />}
+        </div>
+        <div className='shrink-0 px-5 py-3 border-t border-line flex justify-end bg-canvas-50'>
+          <button className='btn-secondary' onClick={onClose}>Fermer</button>
+        </div>
+      </div>
+    </div>,
+    document.body,
+  );
+}
+
+// ─── TemplateEditorModal ──────────────────────────────────────────────────────
+
+const DEFAULT_CONTENT = `# Titre du document
+
+Bonjour **{{client.name}}**,
+
+Ce document a été préparé le {{date}} par {{company.name}}.
+
+---
+
+## 1. Objet
+
+Décrivez ici l'objet du document.
+
+## 2. Conditions
+
+- Condition 1
+- Condition 2
+- Condition 3
+
+## 3. Signatures
+
+| Partie | Nom | Date | Signature |
+|--------|-----|------|-----------|
+| Prestataire | {{company.name}} | {{date}} | |
+| Client | {{client.name}} | {{date_signed}} | |
+`;
+
+function TemplateEditorModal({
+  initial,
+  canEdit,
+  company,
+  onClose,
+  onSaved,
+}: {
+  initial: DocTemplate | null;
+  canEdit: boolean;
+  company: any;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const isNew = !initial;
+  const createTmpl = useAction(createDocumentTemplate);
+  const updateTmpl = useAction(updateDocumentTemplate);
+  const { data: brand } = useQuery(getCompanyBrandAssets);
+
+  const [name, setName] = useState(initial?.name ?? '');
+  const [type, setType] = useState(initial?.type ?? 'contract');
+  const [description, setDescription] = useState(initial?.description ?? '');
+  const [content, setContent] = useState(initial?.content ?? DEFAULT_CONTENT);
+  const [isActive, setIsActive] = useState(initial?.isActive ?? true);
+  const [saving, setSaving] = useState(false);
+  const [previewing, setPreviewing] = useState(false);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const mdEditorRef = useRef<{ textarea?: HTMLTextAreaElement }>(null);
+
+  // Cleanup blob URL on unmount
+  useEffect(() => {
+    return () => { if (previewUrl) URL.revokeObjectURL(previewUrl); };
+  }, [previewUrl]);
+
+  const insertVariable = useCallback((key: string) => {
+    const el = mdEditorRef.current?.textarea;
+    if (!el) {
+      setContent((c) => c + key);
+      return;
+    }
+    const start = el.selectionStart;
+    const end = el.selectionEnd;
+    const newContent = content.slice(0, start) + key + content.slice(end);
+    setContent(newContent);
+    setTimeout(() => {
+      el.focus();
+      el.setSelectionRange(start + key.length, start + key.length);
+    }, 0);
+  }, [content]);
+
+  const handlePreview = async () => {
+    if (previewing) return;
+    setPreviewing(true);
+    try {
+      if (previewUrl) URL.revokeObjectURL(previewUrl);
+      const b64 = await getTemplatePdfBase64(
+        { name: name || 'Modèle', type, description, content },
+        (brand as BrandAssets) ?? null,
+        company?.name ?? 'Mon Entreprise',
+      );
+      const bytes = atob(b64);
+      const arr = new Uint8Array(bytes.length);
+      for (let i = 0; i < bytes.length; i++) arr[i] = bytes.charCodeAt(i);
+      const blob = new Blob([arr], { type: 'application/pdf' });
+      setPreviewUrl(URL.createObjectURL(blob));
+    } catch (e: any) {
+      toast.error(e?.message || 'Erreur lors de la génération du PDF');
+    } finally {
+      setPreviewing(false);
+    }
+  };
+
+  const handleSave = async () => {
+    if (!name.trim()) { toast.error('Nom requis'); return; }
+    setSaving(true);
+    try {
+      if (isNew) {
+        await createTmpl({ name, type, description, content, isActive });
+        toast.success('Modèle créé');
+      } else {
+        await updateTmpl({ id: initial!.id, name, type, description, content, isActive });
+        toast.success('Modèle sauvegardé');
+      }
+      onSaved();
+    } catch (e: any) {
+      toast.error(e?.message || 'Erreur lors de la sauvegarde');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return createPortal(
+    <div className='fixed inset-0 bg-ink/40 backdrop-blur-sm z-40 flex items-center justify-center p-4'>
+      <div
+        className='bg-white rounded-2xl shadow-2xl flex flex-col w-full max-w-6xl max-h-[92vh] overflow-hidden'
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className='shrink-0 px-5 py-3 border-b border-line flex items-center gap-3'>
+          <LuFileText size={16} className='text-muted shrink-0' />
+          <input
+            className='flex-1 font-semibold text-lg bg-transparent outline-none placeholder:text-muted/50'
+            placeholder='Nom du modèle…'
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            disabled={!canEdit}
+          />
+          <div className='flex items-center gap-2 shrink-0'>
+            <select
+              value={type}
+              onChange={(e) => setType(e.target.value)}
+              className='input text-sm py-1 h-8'
+              disabled={!canEdit}
+            >
+              {TEMPLATE_TYPES.map((t) => (
+                <option key={t.value} value={t.value}>{t.label}</option>
+              ))}
+            </select>
+            <label className='flex items-center gap-1.5 text-xs text-muted cursor-pointer select-none'>
+              <input
+                type='checkbox'
+                checked={isActive}
+                onChange={(e) => setIsActive(e.target.checked)}
+                className='checkbox checkbox-sm'
+                disabled={!canEdit}
+              />
+              Actif
+            </label>
+            <button onClick={onClose} className='text-muted hover:text-ink p-1' aria-label='Fermer'>
+              <LuX size={18} />
+            </button>
+          </div>
+        </div>
+
+        {/* Body: editor + variables + preview */}
+        <div className='flex flex-1 min-h-0 overflow-hidden'>
+          {/* Editor panel */}
+          <div className='flex flex-col flex-1 min-w-0 border-r border-line'>
+            <div className='px-4 py-2 border-b border-line'>
+              <input
+                className='w-full text-xs text-muted bg-transparent outline-none placeholder:text-muted/40'
+                placeholder='Description courte (optionnel)…'
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                disabled={!canEdit}
+              />
+            </div>
+            <div className='flex-1 min-h-0 overflow-auto' data-color-mode='light'>
+              <MDEditor
+                ref={mdEditorRef as any}
+                value={content}
+                onChange={(v) => setContent(v ?? '')}
+                preview='edit'
+                hideToolbar={false}
+                height='100%'
+                visibleDragbar={false}
+                style={{ height: '100%', borderRadius: 0, border: 'none', boxShadow: 'none' }}
+                textareaProps={{ placeholder: 'Rédigez votre modèle en Markdown…', spellCheck: false, disabled: !canEdit }}
+              />
+            </div>
+          </div>
+
+          {/* Variables sidebar */}
+          <div className='w-60 shrink-0 flex flex-col overflow-y-auto border-r border-line bg-canvas-50'>
+            <div className='px-3 py-2.5 border-b border-line'>
+              <p className='text-xs font-semibold text-muted uppercase tracking-wide'>Variables</p>
+              <p className='text-xs text-muted mt-0.5'>Cliquez pour insérer</p>
+            </div>
+            <div className='flex-1 overflow-y-auto py-1'>
+              {TEMPLATE_VARIABLE_GROUPS.map((group) => (
+                <div key={group.group} className='mb-1'>
+                  <p className='px-3 py-1.5 text-xs font-medium text-muted uppercase tracking-wide'>{group.group}</p>
+                  {group.vars.map((v) => (
+                    <button
+                      key={v.key}
+                      onClick={() => insertVariable(v.key)}
+                      disabled={!canEdit}
+                      title={`Exemple : ${v.sample}`}
+                      className='w-full flex items-center justify-between px-3 py-1 text-left hover:bg-canvas-100 disabled:opacity-50 disabled:cursor-not-allowed group'
+                    >
+                      <span className='text-xs text-ink truncate'>{v.label}</span>
+                      <LuCopy size={10} className='text-muted opacity-0 group-hover:opacity-100 shrink-0 ml-1' />
+                    </button>
+                  ))}
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* PDF preview panel — wider split pane */}
+          {previewUrl && (
+            <div className='w-[45%] shrink-0 flex flex-col border-l border-line bg-canvas-50'>
+              <div className='px-3 py-2.5 border-b border-line flex items-center justify-between'>
+                <p className='text-xs font-semibold text-muted'>Aperçu PDF</p>
+                <button onClick={() => { URL.revokeObjectURL(previewUrl); setPreviewUrl(null); }} className='text-muted hover:text-ink'>
+                  <LuX size={14} />
+                </button>
+              </div>
+              <iframe src={previewUrl} className='flex-1 w-full' title='Aperçu PDF' />
+            </div>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div className='shrink-0 px-5 py-3 border-t border-line flex justify-between items-center bg-canvas-50'>
+          <p className='text-xs text-muted'>
+            Syntaxe Markdown supportée · Les <span className='text-amber-600 font-medium'>{'{{variables}}'}</span> sont surlignées dans l'aperçu
+          </p>
+          <div className='flex gap-2'>
+            <button className='btn-ghost' onClick={onClose}>Annuler</button>
+            <button
+              className='btn-secondary flex items-center gap-1.5'
+              onClick={handlePreview}
+              disabled={previewing}
+            >
+              <LuEye size={14} />
+              {previewing ? 'Génération…' : 'Aperçu PDF'}
+            </button>
+            {canEdit && (
+              <button className='btn-primary' onClick={handleSave} disabled={saving}>
+                {saving ? 'Sauvegarde…' : isNew ? 'Créer' : 'Sauvegarder'}
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>,
+    document.body,
+  );
+}
+

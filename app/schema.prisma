@@ -80,6 +80,7 @@ model Company {
   priceItems      PriceItem[]
   priceCategories PriceCategory[]
   activities      ActivityLog[]
+  templates       DocumentTemplate[]
 }
 
 model Client {
@@ -386,4 +387,21 @@ model ActivityLog {
   @@index([companyId, createdAt])
   @@index([clientId, createdAt])
   @@index([projectId, createdAt])
+}
+
+model DocumentTemplate {
+  id        String   @id @default(uuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  companyId String
+
+  name        String
+  type        String  @default("autre") // contract | cahier_des_charges | hebergement | maintenance | autre
+  description String?
+  content     String  @default("") // Markdown body
+  isActive    Boolean @default(true)
+
+  @@index([companyId])
 }

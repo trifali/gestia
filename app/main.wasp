@@ -564,6 +564,25 @@ action deletePriceCategory {
   entities: [User, PriceCategory]
 }
 
+// ─── Document Templates ───────────────────────────────────────────────────────
+
+query getDocumentTemplates {
+  fn: import { getDocumentTemplates } from "@src/app/settings/templateOperations",
+  entities: [User, DocumentTemplate]
+}
+action createDocumentTemplate {
+  fn: import { createDocumentTemplate } from "@src/app/settings/templateOperations",
+  entities: [User, DocumentTemplate]
+}
+action updateDocumentTemplate {
+  fn: import { updateDocumentTemplate } from "@src/app/settings/templateOperations",
+  entities: [User, DocumentTemplate]
+}
+action deleteDocumentTemplate {
+  fn: import { deleteDocumentTemplate } from "@src/app/settings/templateOperations",
+  entities: [User, DocumentTemplate]
+}
+
 query getDashboardStats {
   fn: import { getDashboardStats } from "@src/app/dashboard/operations",
   entities: [User, Client, Project, Document, Payment, Meeting]
