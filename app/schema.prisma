@@ -124,6 +124,10 @@ model ClientFile {
   mimeType String?
   size     Int     @default(0)
 
+  sourceTemplateId   String?
+  sourceTemplateType String?
+  sourceTemplate     DocumentTemplate? @relation(fields: [sourceTemplateId], references: [id], onDelete: SetNull)
+
   @@index([clientId])
 }
 
@@ -402,6 +406,8 @@ model DocumentTemplate {
   description String?
   content     String  @default("") // Markdown body
   isActive    Boolean @default(true)
+
+  clientFiles ClientFile[]
 
   @@index([companyId])
 }

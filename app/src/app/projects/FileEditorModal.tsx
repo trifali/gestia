@@ -26,6 +26,8 @@ export interface EditorFileInfo {
   name: string;
   mimeType: string | null;
   url: string | null;
+  /** Set when the file was created from a DocumentTemplate */
+  sourceTemplateType?: string | null;
 }
 
 interface Props {

@@ -466,6 +466,8 @@ export const createClientFileFromTemplate = async (
       key,
       mimeType: 'text/markdown',
       size: buffer.length,
+      sourceTemplateId: template.id,
+      sourceTemplateType: template.type,
     },
   });
 };

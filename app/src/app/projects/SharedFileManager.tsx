@@ -11,6 +11,7 @@ import toast from 'react-hot-toast';
 import { LuUpload, LuFilePlus, LuX, LuFileText, LuChevronDown } from 'react-icons/lu';
 import { FilePreviewModal } from './FilePreviewModal';
 import { FileEditorModal, type EditorFileInfo } from './FileEditorModal';
+import { ClientDocEditorModal } from '../clients/ClientDocEditorModal';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -124,6 +125,7 @@ export function toFileData(files: any[]): FileData[] {
       _mimeType: f.mimeType,
       _url: f.url,
       _key: f.key,
+      _sourceTemplateType: f.sourceTemplateType ?? null,
     } as any;
   });
 
@@ -390,7 +392,7 @@ export function SharedFileManager({ ops }: { ops: FileManagerOperations }) {
     })();
     sortedFilesRef.current = sorted;
     if (getEditorContent && EDITABLE_EXTS.has(ext)) {
-      setEditorFile({ id: d.id, name: d.name, mimeType: d._mimeType ?? null, url: d._url ?? null });
+      setEditorFile({ id: d.id, name: d.name, mimeType: d._mimeType ?? null, url: d._url ?? null, sourceTemplateType: d._sourceTemplateType ?? null });
     } else {
       setPreviewFileId(d.id);
       setPreviewFile({ name: d.name, mimeType: d._mimeType ?? null, url: d._url ?? null });
@@ -410,7 +412,7 @@ export function SharedFileManager({ ops }: { ops: FileManagerOperations }) {
 
 
 
-  // ─── Item-count badges (details view + nav pane) ──────────────────────────
+  // ─── Item-count badges + template-type badges ─────────────────────────────
 
   useEffect(() => {
     if (!dataReady) return;
@@ -421,6 +423,22 @@ export function SharedFileManager({ ops }: { ops: FileManagerOperations }) {
     const folderCounts = new Map<string, number>();
     fileSystemData.forEach((f: any) => {
       if (!f.isFile && f._itemCount > 0) folderCounts.set(f.name, f._itemCount);
+    });
+
+    // Build name→templateType map for template-based files
+    const TMPL_TYPE_LABELS: Record<string, { label: string; color: string }> = {
+      contract:           { label: 'Contrat',     color: '#3b82f6' },
+      cahier_des_charges: { label: 'Cahier',      color: '#8b5cf6' },
+      hebergement:        { label: 'Héberg.',     color: '#10b981' },
+      maintenance:        { label: 'Mainten.',    color: '#f59e0b' },
+      autre:              { label: 'Autre',        color: '#6b7280' },
+    };
+    const templateTypes = new Map<string, { label: string; color: string }>();
+    fileSystemData.forEach((f: any) => {
+      if (f.isFile && f._sourceTemplateType) {
+        const meta = TMPL_TYPE_LABELS[f._sourceTemplateType] ?? { label: f._sourceTemplateType, color: '#6b7280' };
+        templateTypes.set(f.name, meta);
+      }
     });
 
     const applyBadge = (nameEl: HTMLElement, rawName: string) => {
@@ -436,18 +454,33 @@ export function SharedFileManager({ ops }: { ops: FileManagerOperations }) {
       nameEl.appendChild(badge);
     };
 
+    const applyTemplateBadge = (nameEl: HTMLElement, rawName: string) => {
+      const existing = nameEl.querySelector('.fm-template-badge') as HTMLElement | null;
+      const meta = templateTypes.get(rawName);
+      if (!meta) { existing?.remove(); return; }
+      if (existing) return; // already there
+      const badge = document.createElement('span');
+      badge.className = 'fm-template-badge';
+      badge.style.cssText = `margin-left:6px;font-size:9px;padding:1px 6px;border-radius:9px;background:${meta.color}1a;color:${meta.color};font-weight:600;vertical-align:middle;white-space:nowrap;letter-spacing:0.02em`;
+      badge.textContent = meta.label;
+      nameEl.appendChild(badge);
+    };
+
     const injectBadges = () => {
-      // Details view rows
+      // Details view rows — folders get count badge, template files get type badge
       container.querySelectorAll('.e-row').forEach((row) => {
-        if (!row.querySelector('.e-fe-folder')) return;
         const nameCell = row.querySelector('.e-fe-text') as HTMLElement | null;
         if (!nameCell) return;
         const rawName = Array.from(nameCell.childNodes)
           .filter((n) => n.nodeType === Node.TEXT_NODE)
           .map((n) => n.textContent?.trim()).join('') || nameCell.textContent?.trim() || '';
-        applyBadge(nameCell, rawName);
+        if (row.querySelector('.e-fe-folder')) {
+          applyBadge(nameCell, rawName);
+        } else {
+          applyTemplateBadge(nameCell, rawName);
+        }
       });
-      // Navigation pane tree nodes
+      // Navigation pane tree nodes (folders only)
       container.querySelectorAll('.e-list-item .e-list-text').forEach((el) => {
         const textEl = el as HTMLElement;
         const rawName = Array.from(textEl.childNodes)
@@ -537,7 +570,7 @@ export function SharedFileManager({ ops }: { ops: FileManagerOperations }) {
     if (getEditorContent && isEditable(f)) {
       setPreviewFile(null);
       setPreviewFileId(null);
-      setEditorFile({ id: f.id, name: f.name, mimeType: f._mimeType ?? null, url: f._url ?? null });
+      setEditorFile({ id: f.id, name: f.name, mimeType: f._mimeType ?? null, url: f._url ?? null, sourceTemplateType: f._sourceTemplateType ?? null });
     } else {
       setEditorFile(null);
       setPreviewFileId(f.id);
@@ -647,7 +680,17 @@ export function SharedFileManager({ ops }: { ops: FileManagerOperations }) {
         hasNext={openFileIdx >= 0 && openFileIdx < sortedList.length - 1}
       />
 
-      {getEditorContent && (
+      {getEditorContent && editorFile?.sourceTemplateType ? (
+        <ClientDocEditorModal
+          file={editorFile}
+          onClose={() => setEditorFile(null)}
+          fetchContent={getEditorContent}
+          saveContent={(id, content, contentType) => saveFileContent?.(id, content, contentType) ?? Promise.resolve()}
+          onNavigate={handleNavigate}
+          hasPrev={editorFileIdx > 0}
+          hasNext={editorFileIdx >= 0 && editorFileIdx < sortedList.length - 1}
+        />
+      ) : getEditorContent && (
         <FileEditorModal
           file={editorFile}
           onClose={() => setEditorFile(null)}
