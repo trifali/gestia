@@ -22,7 +22,7 @@ import {
 } from 'wasp/client/operations';
 import { useAuth } from 'wasp/client/auth';
 import { PAYMENT_METHOD_OPTIONS } from '../payments/PaymentForm';
-import { LuPlus } from 'react-icons/lu';
+import { LuPlus, LuSearch } from 'react-icons/lu';
 import { PageHeader, IconBtn, EditIcon, TrashIcon, useConfirm, Modal, EmptyState } from '../../client/ui';
 import { MagicInput, MagicTextarea } from '../../client/magic';
 import { formatCurrency } from '../../shared/format';
@@ -496,6 +496,9 @@ function PriceList({ canEdit }: { canEdit: boolean }) {
   const { data: items, isLoading, refetch } = useQuery(getPriceItems);
   const [editing, setEditing] = useState<PriceItem | null>(null);
   const [creating, setCreating] = useState(false);
+  const [search, setSearch] = useState('');
+  const [filterCategory, setFilterCategory] = useState('');
+  const [filterStatus, setFilterStatus] = useState('');
   const { ask, Dialog } = useConfirm();
 
   const onDelete = async (item: PriceItem) => {
@@ -514,11 +517,27 @@ function PriceList({ canEdit }: { canEdit: boolean }) {
 
   const list = (items || []) as PriceItem[];
 
+  const categories = Array.from(new Set(list.map((it) => it.category).filter(Boolean))) as string[];
+
+  const filtered = list.filter((it) => {
+    const q = search.toLowerCase();
+    const matchesSearch =
+      !q ||
+      it.name.toLowerCase().includes(q) ||
+      (it.description?.toLowerCase().includes(q) ?? false) ||
+      (it.code?.toLowerCase().includes(q) ?? false);
+    const matchesCategory = !filterCategory || it.category === filterCategory;
+    const matchesStatus =
+      !filterStatus ||
+      (filterStatus === 'actif' ? it.isActive : !it.isActive);
+    return matchesSearch && matchesCategory && matchesStatus;
+  });
+
   return (
-    <div className='space-y-4'>
+    <div className='space-y-3'>
       {Dialog}
       <div className='flex justify-between items-center'>
-        <p className='text-sm text-muted'>
+        <p className='text-xs text-muted'>
           Définissez votre grille tarifaire — réutilisable dans les soumissions et factures.
         </p>
         {canEdit && (
@@ -528,42 +547,88 @@ function PriceList({ canEdit }: { canEdit: boolean }) {
         )}
       </div>
 
+      {list.length > 0 && (
+        <div className='flex gap-2 items-center'>
+          <div className='relative flex-1'>
+            <LuSearch size={14} className='absolute left-2.5 top-1/2 -translate-y-1/2 text-muted pointer-events-none' />
+            <input
+              type='text'
+              placeholder='Rechercher par nom, description…'
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className='input pl-8 w-full text-sm'
+            />
+          </div>
+          {categories.length > 0 && (
+            <select
+              value={filterCategory}
+              onChange={(e) => setFilterCategory(e.target.value)}
+              className='input text-sm w-44 shrink-0'
+            >
+              <option value=''>Toutes catégories</option>
+              {categories.map((c) => (
+                <option key={c} value={c}>{c}</option>
+              ))}
+            </select>
+          )}
+          <select
+            value={filterStatus}
+            onChange={(e) => setFilterStatus(e.target.value)}
+            className='input text-sm w-36 shrink-0'
+          >
+            <option value=''>Tous statuts</option>
+            <option value='actif'>Actif</option>
+            <option value='inactif'>Inactif</option>
+          </select>
+          {(search || filterCategory || filterStatus) && (
+            <button
+              className='btn-ghost text-sm shrink-0'
+              onClick={() => { setSearch(''); setFilterCategory(''); setFilterStatus(''); }}
+            >
+              Réinitialiser
+            </button>
+          )}
+        </div>
+      )}
+
       {list.length === 0 ? (
         <EmptyState
           title='Aucun article tarifaire'
           description='Ajoutez vos services et produits avec leurs prix unitaires pour les réutiliser facilement.'
           action={canEdit ? <button className='btn-primary' onClick={() => setCreating(true)}>Ajouter un article</button> : undefined}
         />
+      ) : filtered.length === 0 ? (
+        <div className='text-sm text-muted text-center py-8'>Aucun article ne correspond à votre recherche.</div>
       ) : (
         <div className='card overflow-hidden'>
           <table className='w-full text-sm'>
             <thead className='bg-canvas-100 text-muted'>
               <tr>
-                <th className='text-left px-4 py-3 font-medium'>Code</th>
-                <th className='text-left px-4 py-3 font-medium'>Nom</th>
-                <th className='text-left px-4 py-3 font-medium'>Catégorie</th>
-                <th className='text-right px-4 py-3 font-medium'>Prix unitaire</th>
-                <th className='text-center px-4 py-3 font-medium'>Statut</th>
-                {canEdit && <th className='px-4 py-3 w-24'></th>}
+                <th className='text-left px-3 py-2 font-medium text-xs'>Code</th>
+                <th className='text-left px-3 py-2 font-medium text-xs'>Nom</th>
+                <th className='text-left px-3 py-2 font-medium text-xs'>Catégorie</th>
+                <th className='text-right px-3 py-2 font-medium text-xs'>Prix unitaire</th>
+                <th className='text-center px-3 py-2 font-medium text-xs'>Statut</th>
+                {canEdit && <th className='px-3 py-2 w-20'></th>}
               </tr>
             </thead>
             <tbody>
-              {list.map((it) => (
+              {filtered.map((it) => (
                 <tr key={it.id} className='border-t border-line'>
-                  <td className='px-4 py-3 text-muted'>{it.code || '—'}</td>
-                  <td className='px-4 py-3'>
-                    <div className='font-medium text-ink'>{it.name}</div>
-                    {it.description && <div className='text-xs text-muted mt-0.5'>{it.description}</div>}
+                  <td className='px-3 py-2 text-muted text-xs'>{it.code || '—'}</td>
+                  <td className='px-3 py-2'>
+                    <div className='font-medium text-ink text-sm'>{it.name}</div>
+                    {it.description && <div className='text-xs text-muted'>{it.description}</div>}
                   </td>
-                  <td className='px-4 py-3 text-muted'>{it.category || '—'}</td>
-                  <td className='px-4 py-3 text-right tabular-nums'>{formatCurrency(it.unitPrice)}</td>
-                  <td className='px-4 py-3 text-center'>
+                  <td className='px-3 py-2 text-muted text-xs'>{it.category || '—'}</td>
+                  <td className='px-3 py-2 text-right tabular-nums text-sm'>{formatCurrency(it.unitPrice)}</td>
+                  <td className='px-3 py-2 text-center'>
                     <span className={it.isActive ? 'badge-success' : 'badge-neutral'}>
                       {it.isActive ? 'Actif' : 'Inactif'}
                     </span>
                   </td>
                   {canEdit && (
-                    <td className='px-4 py-3'>
+                    <td className='px-3 py-2'>
                       <div className='flex justify-end gap-1'>
                         <IconBtn title='Modifier' onClick={() => setEditing(it)}><EditIcon /></IconBtn>
                         <IconBtn variant='danger' title='Supprimer' onClick={() => onDelete(it)}><TrashIcon /></IconBtn>
