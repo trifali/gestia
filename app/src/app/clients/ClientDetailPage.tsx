@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useCallback } from 'react';
 import { useParams, useNavigate, useSearchParams, Link } from 'react-router';
 import { LuArrowLeft, LuPencil, LuArchive, LuFolderOpen, LuExternalLink } from 'react-icons/lu';
 import toast from 'react-hot-toast';
@@ -53,6 +53,17 @@ export default function ClientDetailPage() {
   const rawTab = searchParams.get('tab') as Tab | null;
   const tab: Tab = TABS.some((t) => t.id === rawTab) ? rawTab! : 'resume';
   const setTab = (id: Tab) => setSearchParams({ tab: id }, { replace: true });
+  const initialDocType = searchParams.get('type') ?? '';
+  const initialDocStatus = searchParams.get('status') ?? '';
+
+  const handleDocFiltersChange = useCallback((type: string, status: string) => {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      if (type) next.set('type', type); else next.delete('type');
+      if (status) next.set('status', status); else next.delete('status');
+      return next;
+    }, { replace: true });
+  }, [setSearchParams]);
   const { data: client, isLoading } = useQuery(getClientDetail, { clientId: clientId! });
   const { data: projects } = useQuery(getProjects);
   const [editingClient, setEditingClient] = useState(false);
@@ -109,7 +120,7 @@ export default function ClientDetailPage() {
 
       {/* Tab content */}
       {tab === 'resume' && <ResumeTab client={client} />}
-      {tab === 'documents' && <DocumentsTab client={client} projects={clientProjects} />}
+      {tab === 'documents' && <DocumentsTab client={client} projects={clientProjects} initialType={initialDocType} initialStatus={initialDocStatus} onFiltersChange={handleDocFiltersChange} />}
       {tab === 'paiements' && <PaiementsTab client={client} />}
       {tab === 'rencontres' && <RencontresTab client={client} />}
       {tab === 'projets' && <ProjetsTab clientId={client.id} projects={clientProjects} />}
@@ -180,7 +191,7 @@ function InfoRow({ label, value }: { label: string; value: string }) {
 }
 
 // ─── Documents (soumissions + factures) ──────────────────────────────────────
-function DocumentsTab({ client, projects }: { client: ClientDetail; projects: any[] }) {
+function DocumentsTab({ client, projects, initialType = '', initialStatus = '', onFiltersChange }: { client: ClientDetail; projects: any[]; initialType?: string; initialStatus?: string; onFiltersChange?: (type: string, status: string) => void }) {
   const [creating, setCreating] = useState(false);
 
   return (
@@ -200,6 +211,9 @@ function DocumentsTab({ client, projects }: { client: ClientDetail; projects: an
         clientId={client.id}
         clientForPdf={client}
         projects={projects}
+        initialType={initialType as any}
+        initialStatus={initialStatus}
+        onFiltersChange={onFiltersChange}
       />
 
       {creating && (

@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { useLocation } from 'react-router';
+import { useState, useCallback } from 'react';
+import { useSearchParams } from 'react-router';
 import {
   useQuery,
   getClients,
@@ -10,9 +10,19 @@ import { DocumentForm } from '../shared/DocumentForm';
 import { DocumentTable } from '../shared/DocumentTable';
 
 export default function DocumentsPage() {
-  const { search } = useLocation();
-  const rawType = new URLSearchParams(search).get('type');
+  const [searchParams, setSearchParams] = useSearchParams();
+  const rawType = searchParams.get('type');
   const initialType = rawType === 'quote' || rawType === 'invoice' ? rawType : '';
+  const initialStatus = searchParams.get('status') ?? '';
+
+  const handleFiltersChange = useCallback((type: string, status: string) => {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      if (type) next.set('type', type); else next.delete('type');
+      if (status) next.set('status', status); else next.delete('status');
+      return next;
+    }, { replace: true });
+  }, [setSearchParams]);
 
   const { data: clients } = useQuery(getClients);
   const { data: projects } = useQuery(getProjects);
@@ -38,6 +48,8 @@ export default function DocumentsPage() {
       <DocumentTable
         showClient
         initialType={initialType as any}
+        initialStatus={initialStatus}
+        onFiltersChange={handleFiltersChange}
         clients={clients || []}
         projects={projects || []}
       />

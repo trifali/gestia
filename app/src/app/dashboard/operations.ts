@@ -7,6 +7,16 @@ function ensureCompany(user: any): string {
   return user.companyId;
 }
 
+export type AlertDocument = {
+  id: string;
+  number: string;
+  total: number;
+  amountPaid: number;
+  dueDate: Date | null;
+  clientName: string;
+  clientId: string;
+};
+
 export type DashboardStats = {
   clientsCount: number;
   activeProjectsCount: number;
@@ -14,6 +24,8 @@ export type DashboardStats = {
   unpaidInvoicesCount: number;
   unpaidTotal: number;
   paidThisMonth: number;
+  overdueInvoices: AlertDocument[];
+  expiredQuotes: AlertDocument[];
   upcomingMeetings: { id: string; title: string; startsAt: Date; clientName: string | null }[];
   recentInvoices: { id: string; number: string; total: number; status: string; clientName: string; createdAt: Date }[];
   monthlyRevenue: { month: string; total: number }[];
@@ -25,7 +37,7 @@ export const getDashboardStats: GetDashboardStats<void, DashboardStats> = async 
   const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
   const sixMonthsAgo = new Date(now.getFullYear(), now.getMonth() - 5, 1);
 
-  const [clientsCount, activeProjectsCount, pendingQuotesCount, unpaidInvoices, paidPayments, meetings, recentInvoicesRaw] =
+  const [clientsCount, activeProjectsCount, pendingQuotesCount, unpaidInvoices, paidPayments, meetings, recentInvoicesRaw, overdueInvoicesRaw, expiredQuotesRaw] =
     await Promise.all([
       context.entities.Client.count({ where: { companyId } }),
       context.entities.Project.count({ where: { companyId, status: { in: ['en_cours', 'brouillon'] } } }),
@@ -49,6 +61,18 @@ export const getDashboardStats: GetDashboardStats<void, DashboardStats> = async 
         include: { client: true },
         orderBy: { createdAt: 'desc' },
         take: 5,
+      }),
+      context.entities.Document.findMany({
+        where: { companyId, type: 'invoice', status: 'en_retard' },
+        include: { client: true },
+        orderBy: { dueDate: 'asc' },
+        take: 20,
+      }),
+      context.entities.Document.findMany({
+        where: { companyId, type: 'quote', status: 'expiree' },
+        include: { client: true },
+        orderBy: { dueDate: 'desc' },
+        take: 20,
       }),
     ]);
 
@@ -80,6 +104,24 @@ export const getDashboardStats: GetDashboardStats<void, DashboardStats> = async 
     unpaidInvoicesCount: unpaidInvoices.length,
     unpaidTotal: +unpaidTotal.toFixed(2),
     paidThisMonth: +paidThisMonth.toFixed(2),
+    overdueInvoices: overdueInvoicesRaw.map((d) => ({
+      id: d.id,
+      number: d.number,
+      total: d.total,
+      amountPaid: d.amountPaid,
+      dueDate: d.dueDate,
+      clientName: d.client.name,
+      clientId: d.clientId,
+    })),
+    expiredQuotes: expiredQuotesRaw.map((d) => ({
+      id: d.id,
+      number: d.number,
+      total: d.total,
+      amountPaid: d.amountPaid,
+      dueDate: d.dueDate,
+      clientName: d.client.name,
+      clientId: d.clientId,
+    })),
     upcomingMeetings: meetings.map((m) => ({
       id: m.id,
       title: m.title,

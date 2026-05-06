@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { LuFileCheck, LuUndo2, LuPencil, LuCopy, LuLoader, LuMail, LuEye, LuWallet, LuArrowUpDown, LuArrowUp, LuArrowDown, LuChevronLeft, LuChevronRight } from 'react-icons/lu';
 import toast from 'react-hot-toast';
 import {
@@ -80,6 +80,10 @@ type Props = {
   clientId?: string;
   /** Initial type filter (from URL param). */
   initialType?: 'quote' | 'invoice' | '';
+  /** Initial status filter (from URL param). */
+  initialStatus?: string;
+  /** Called when type or status filter changes, so parents can sync the URL. */
+  onFiltersChange?: (type: string, status: string) => void;
   /** When the doc objects don't embed a `client` field, supply it here for PDF generation. */
   clientForPdf?: any;
   /** Available clients for the edit form. */
@@ -92,6 +96,8 @@ export function DocumentTable({
   showClient = false,
   clientId,
   initialType = '',
+  initialStatus = '',
+  onFiltersChange,
   clientForPdf,
   clients,
   projects,
@@ -107,7 +113,7 @@ export function DocumentTable({
   const [search, setSearch] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [filterType, setFilterType] = useState(initialType);
-  const [filterStatus, setFilterStatus] = useState('');
+  const [filterStatus, setFilterStatus] = useState(initialStatus);
   const [sortKey, setSortKey] = useState<DocSortKey>('date');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
   const [page, setPage] = useState(1);
@@ -117,8 +123,23 @@ export function DocumentTable({
     return () => clearTimeout(t);
   }, [search]);
   useEffect(() => { setPage(1); }, [filterType, filterStatus, sortKey, sortDir]);
-  // Reset status filter when type changes (avoid invalid combo)
-  useEffect(() => { setFilterStatus(''); }, [filterType]);
+
+  // Sync filters back to parent (for URL updates) whenever they change
+  const isFirstFilterSync = useRef(true);
+  const externalSyncRef = useRef(false);
+  useEffect(() => {
+    if (isFirstFilterSync.current) { isFirstFilterSync.current = false; return; }
+    if (externalSyncRef.current) { externalSyncRef.current = false; return; }
+    onFiltersChange?.(filterType, filterStatus);
+  }, [filterType, filterStatus]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Sync state when initialType/initialStatus props change externally (URL pasted or navigated to)
+  useEffect(() => {
+    if (initialType === filterType && initialStatus === filterStatus) return;
+    externalSyncRef.current = true;
+    setFilterType(initialType);
+    setFilterStatus(initialStatus);
+  }, [initialType, initialStatus]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const docQueryArgs = useMemo(() => ({
     search: debouncedSearch || undefined,
@@ -171,7 +192,7 @@ export function DocumentTable({
           {(['', 'quote', 'invoice'] as const).map((t) => (
             <button
               key={t}
-              onClick={() => setFilterType(t)}
+              onClick={() => { setFilterType(t); if (t !== filterType) setFilterStatus(''); }}
               className={`px-3 py-1 text-xs rounded-md transition-colors ${
                 filterType === t ? 'bg-white text-ink shadow-sm font-medium' : 'text-muted hover:text-ink'
               }`}

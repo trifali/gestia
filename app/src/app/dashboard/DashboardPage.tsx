@@ -2,9 +2,11 @@ import { useQuery, getDashboardStats, getCurrentCompany, createCompany } from 'w
 import { Link } from 'react-router';
 import { useState } from 'react';
 import toast from 'react-hot-toast';
+import { LuTriangleAlert, LuClock } from 'react-icons/lu';
 import { PageHeader, EmptyState } from '../../client/ui';
 import { MagicInput } from '../../client/magic';
 import { formatCurrency, formatDate, formatTime } from '../../shared/format';
+import type { AlertDocument } from './operations';
 
 const INVOICE_STATUS: Record<string, { label: string; className: string }> = {
   brouillon: { label: 'Brouillon', className: 'badge-neutral' },
@@ -63,7 +65,7 @@ export default function DashboardPage() {
   return (
     <>
       <PageHeader
-        title={`Bonjour 👋`}
+        title='Bonjour'
         subtitle={`Voici l'état de ${company.name} aujourd'hui — ${formatDate(new Date())}.`}
       />
 
@@ -71,6 +73,43 @@ export default function DashboardPage() {
         <div className='text-muted'>Chargement des données…</div>
       ) : (
         <>
+          {(stats.overdueInvoices.length > 0 || stats.expiredQuotes.length > 0) && (
+            <div className='space-y-3 mb-6'>
+              {stats.overdueInvoices.length > 0 && (
+                <div className='rounded-xl border border-red-200 bg-red-50 overflow-hidden'>
+                  <div className='flex items-center gap-2 px-5 py-3 bg-red-100 border-b border-red-200'>
+                    <LuTriangleAlert className='text-red-600 shrink-0' size={18} />
+                    <h2 className='font-semibold text-red-800'>
+                      {stats.overdueInvoices.length} facture{stats.overdueInvoices.length > 1 ? 's' : ''} en retard
+                    </h2>
+                    <span className='text-xs text-red-600 ml-auto'>La date d'échéance est dépassée — contactez le client</span>
+                  </div>
+                  <ul className='divide-y divide-red-100'>
+                    {stats.overdueInvoices.map((doc) => (
+                      <AlertRow key={doc.id} doc={doc} clientLinkTo={`/clients/${doc.clientId}?tab=documents&type=invoice&status=en_retard`} amountValue={doc.total - doc.amountPaid} />
+                    ))}
+                  </ul>
+                </div>
+              )}
+              {stats.expiredQuotes.length > 0 && (
+                <div className='rounded-xl border border-amber-200 bg-amber-50 overflow-hidden'>
+                  <div className='flex items-center gap-2 px-5 py-3 bg-amber-100 border-b border-amber-200'>
+                    <LuClock className='text-amber-600 shrink-0' size={18} />
+                    <h2 className='font-semibold text-amber-800'>
+                      {stats.expiredQuotes.length} soumission{stats.expiredQuotes.length > 1 ? 's' : ''} expirée{stats.expiredQuotes.length > 1 ? 's' : ''}
+                    </h2>
+                    <span className='text-xs text-amber-700 ml-auto'>Date d'échéance dépassée — relancez ou fermez</span>
+                  </div>
+                  <ul className='divide-y divide-amber-100'>
+                    {stats.expiredQuotes.map((doc) => (
+                      <AlertRow key={doc.id} doc={doc} clientLinkTo={`/clients/${doc.clientId}?tab=documents&type=quote&status=expiree`} amountValue={doc.total} />
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+          )}
+
           <div className='grid grid-cols-2 lg:grid-cols-4 gap-4'>
             <Link to='/clients' className='stat-card hover:border-accent/40 transition-colors cursor-pointer'>
               <div className='stat-label'>Clients</div>
@@ -164,6 +203,26 @@ export default function DashboardPage() {
         </>
       )}
     </>
+  );
+}
+
+function AlertRow({ doc, clientLinkTo, amountValue }: { doc: AlertDocument; clientLinkTo: string; amountValue: number }) {
+  return (
+    <li className='flex items-center gap-4 px-5 py-3 text-sm'>
+      <div className='min-w-0 flex-1'>
+        <Link to={clientLinkTo} className='font-medium hover:underline'>
+          {doc.number}
+        </Link>
+        <span className='text-muted mx-2'>·</span>
+        <Link to={clientLinkTo} className='text-muted hover:text-ink hover:underline'>
+          {doc.clientName}
+        </Link>
+      </div>
+      {doc.dueDate && (
+        <span className='text-xs text-muted shrink-0'>Échéance : {formatDate(doc.dueDate)}</span>
+      )}
+      <span className='font-semibold shrink-0'>{formatCurrency(amountValue)}</span>
+    </li>
   );
 }
 
