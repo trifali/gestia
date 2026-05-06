@@ -841,6 +841,10 @@ const ACTIVITY_TYPE_META: Record<string, { label: string; className: string }> =
   'document.status_changed': { label: 'Statut modifié', className: 'badge-neutral' },
   'document.converted_to_invoice': { label: 'Soumission → Facture', className: 'badge-success' },
   'document.reverted_to_quote': { label: 'Facture → Soumission', className: 'badge-warning' },
+  'project.created': { label: 'Projet créé', className: 'badge-info' },
+  'project.updated': { label: 'Projet modifié', className: 'badge-neutral' },
+  'project.status_changed': { label: 'Statut projet', className: 'badge-accent' },
+  'project.deleted': { label: 'Projet supprimé', className: 'badge-danger' },
 };
 
 function ActivityHistory({ clientId }: { clientId: string }) {

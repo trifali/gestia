@@ -1,6 +1,7 @@
 import { HttpError } from 'wasp/server';
 import { randomBytes } from 'crypto';
 import { getPresignedUrl } from '../../server/storage';
+import { logActivity } from '../activity/operations';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -134,12 +135,24 @@ export const updateProjectDetail = async (
   context: any,
 ) => {
   const companyId = ensureCompany(context.user);
-  await ensureProjectOwned(id, companyId, context.entities);
-  return context.entities.Project.update({
+  const existing = await ensureProjectOwned(id, companyId, context.entities);
+  const updated = await context.entities.Project.update({
     where: { id },
     data: rest,
     include: { client: true },
   });
+  if (rest.status && rest.status !== existing.status) {
+    await logActivity(context.entities, {
+      companyId,
+      userId: context.user?.id ?? null,
+      clientId: existing.clientId,
+      projectId: id,
+      type: 'project.status_changed',
+      message: `Statut du projet « ${existing.name} » : ${existing.status} → ${rest.status}`,
+      metadata: { from: existing.status, to: rest.status },
+    });
+  }
+  return updated;
 };
 
 // ─── ProjectTask operations ───────────────────────────────────────────────────

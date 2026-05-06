@@ -38,6 +38,7 @@ export async function logActivity(
     userId?: string | null;
     clientId?: string | null;
     documentId?: string | null;
+    projectId?: string | null;
     type: string;
     message: string;
     metadata?: any;
@@ -50,6 +51,7 @@ export async function logActivity(
         userId: params.userId ?? null,
         clientId: params.clientId ?? null,
         documentId: params.documentId ?? null,
+        projectId: params.projectId ?? null,
         type: params.type,
         message: params.message,
         metadata: params.metadata ?? undefined,

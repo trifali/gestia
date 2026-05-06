@@ -127,6 +127,7 @@ model Project {
   notes        ProjectNote[]
   clientAccess ProjectClientAccess[]
   files        ProjectFile[]
+  activities   ActivityLog[]
 }
 
 model ProjectTask {
@@ -353,6 +354,9 @@ model ActivityLog {
   document   Document? @relation(fields: [documentId], references: [id], onDelete: SetNull)
   documentId String?
 
+  project   Project? @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  projectId String?
+
   user   User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
   userId String?
 
@@ -362,4 +366,5 @@ model ActivityLog {
 
   @@index([companyId, createdAt])
   @@index([clientId, createdAt])
+  @@index([projectId, createdAt])
 }
