@@ -23,7 +23,7 @@ function DriveInfo() {
     <div className='mb-4 rounded-lg border border-base-200 bg-base-50 px-3 py-2 flex flex-col gap-1 text-xs text-base-content/60'>
       <div className='flex items-center gap-1.5'>
         <LuFolderOpen className='shrink-0 text-primary' size={13} />
-        <span><span className='font-medium text-base-content/80'>Drive client</span> — contrats, briefs, visuels de référence, notes internes. Accessible depuis la fiche client, indépendamment des projets.</span>
+        <span><span className='font-medium text-base-content/80'>Drive client</span> — contrats, briefs, visuels de référence, notes internes. Indépendamment des projets.</span>
       </div>
     </div>
   );
