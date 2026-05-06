@@ -242,19 +242,19 @@ query getProjectFilesByToken {
 }
 action createProject {
   fn: import { createProject } from "@src/app/projects/operations",
-  entities: [User, Project]
+  entities: [User, Project, ActivityLog]
 }
 action updateProject {
   fn: import { updateProject } from "@src/app/projects/operations",
-  entities: [User, Project]
+  entities: [User, Project, ActivityLog]
 }
 action deleteProject {
   fn: import { deleteProject } from "@src/app/projects/operations",
-  entities: [User, Project]
+  entities: [User, Project, ActivityLog]
 }
 action updateProjectDetail {
   fn: import { updateProjectDetail } from "@src/app/projects/projectDetailOperations",
-  entities: [User, Project]
+  entities: [User, Project, ActivityLog]
 }
 action createProjectTask {
   fn: import { createProjectTask } from "@src/app/projects/projectDetailOperations",
