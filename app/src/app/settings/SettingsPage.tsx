@@ -1779,6 +1779,17 @@ function TemplateEditorModal({
               <p className='text-xs font-semibold text-muted uppercase tracking-wide'>Variables</p>
               <p className='text-xs text-muted mt-0.5'>Cliquez pour insérer</p>
             </div>
+            {/* Legend */}
+            <div className='flex items-center gap-3 px-3 py-2 border-b border-line'>
+              <span className='flex items-center gap-1 text-[10px] text-muted'>
+                <span className='inline-block w-1.5 h-1.5 rounded-full bg-emerald-400' />
+                Pré-rempli
+              </span>
+              <span className='flex items-center gap-1 text-[10px] text-muted'>
+                <span className='inline-block w-1.5 h-1.5 rounded-full bg-amber-400' />
+                Saisie requise
+              </span>
+            </div>
             <div className='flex-1 overflow-y-auto py-1'>
               {TEMPLATE_VARIABLE_GROUPS.map((group) => (
                 <div key={group.group} className='mb-1'>
@@ -1788,10 +1799,11 @@ function TemplateEditorModal({
                       key={v.key}
                       onClick={() => insertVariable(v.key)}
                       disabled={!canEdit}
-                      title={`Exemple : ${v.sample}`}
-                      className='w-full flex items-center justify-between px-3 py-1 text-left hover:bg-canvas-100 disabled:opacity-50 disabled:cursor-not-allowed group'
+                      title={`Exemple : ${v.sample}\n${v.autofill ? 'Pré-rempli automatiquement' : 'À saisir lors de la création du document'}`}
+                      className='w-full flex items-center gap-2 px-3 py-1 text-left hover:bg-canvas-100 disabled:opacity-50 disabled:cursor-not-allowed group'
                     >
-                      <span className='text-xs text-ink truncate'>{v.label}</span>
+                      <span className={`inline-block w-1.5 h-1.5 rounded-full shrink-0 ${v.autofill ? 'bg-emerald-400' : 'bg-amber-400'}`} />
+                      <span className='text-xs text-ink truncate flex-1'>{v.label}</span>
                       <LuCopy size={10} className='text-muted opacity-0 group-hover:opacity-100 shrink-0 ml-1' />
                     </button>
                   ))}

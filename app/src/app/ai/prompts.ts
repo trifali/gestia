@@ -18,7 +18,6 @@ Variables dynamiques disponibles (syntaxe : {{variable}}) :
 Dates
 - {{date}}          → Date du jour
 - {{date_expiry}}   → Date d'expiration du document
-- {{date_signed}}   → Date de signature
 
 Client
 - {{client.name}}    → Nom complet du client
@@ -35,17 +34,8 @@ Entreprise prestataire
 - {{company.neq}}     → NEQ / numéro d'enregistrement
 - {{company.tps}}     → Numéro de TPS (fédéral)
 - {{company.tvq}}     → Numéro de TVQ (provincial)
-
-Document & montants
-- {{document.number}}  → Numéro du document (ex : CONT-2026-001)
-- {{amount.total}}     → Montant total (hors taxes, HT)
-- {{amount.deposit}}   → Montant de l'acompte
-- {{amount.tps}}       → TPS (5%)
-- {{amount.tvq}}       → TVQ (9,975%)
-- {{amount.total_ttc}} → Montant total toutes taxes comprises (TTC)
-
-Projet
-- {{project.name}} → Nom du projet
+Paiement
+- {{payment.link}} → Lien de paiement en ligne
 `.trim();
 
 export const TEMPLATE_TYPE_LABELS: Record<string, string> = {

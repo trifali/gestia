@@ -30,57 +30,46 @@ export function templateTypeLabel(type: string): string {
 
 // ─── Available variables ──────────────────────────────────────────────────────
 
+export type TemplateVar = { key: string; label: string; sample: string; autofill: boolean };
 export type TemplateVarGroup = {
   group: string;
-  vars: { key: string; label: string; sample: string }[];
+  vars: TemplateVar[];
 };
 
 export const TEMPLATE_VARIABLE_GROUPS: TemplateVarGroup[] = [
   {
     group: 'Date',
     vars: [
-      { key: '{{date}}', label: 'Date du jour', sample: '6 mai 2026' },
-      { key: '{{date_expiry}}', label: "Date d'expiration", sample: '6 juin 2026' },
-      { key: '{{date_signed}}', label: 'Date de signature', sample: '8 mai 2026' },
+      { key: '{{date}}', label: 'Date du jour', sample: '6 mai 2026', autofill: true },
+      { key: '{{date_expiry}}', label: "Date d'expiration", sample: '6 juin 2026', autofill: false },
     ],
   },
   {
     group: 'Client',
     vars: [
-      { key: '{{client.name}}', label: 'Nom du client', sample: 'Jean Dupont' },
-      { key: '{{client.company}}', label: 'Entreprise client', sample: 'Acme Inc.' },
-      { key: '{{client.email}}', label: 'Email', sample: 'jean@acme.com' },
-      { key: '{{client.phone}}', label: 'Téléphone', sample: '+1 514 555-0100' },
-      { key: '{{client.address}}', label: 'Adresse', sample: '123 rue Example, Montréal, QC' },
+      { key: '{{client.name}}', label: 'Nom du client', sample: 'Jean Dupont', autofill: false },
+      { key: '{{client.company}}', label: 'Entreprise client', sample: 'Acme Inc.', autofill: false },
+      { key: '{{client.email}}', label: 'Email', sample: 'jean@acme.com', autofill: false },
+      { key: '{{client.phone}}', label: 'Téléphone', sample: '+1 514 555-0100', autofill: false },
+      { key: '{{client.address}}', label: 'Adresse', sample: '123 rue Example, Montréal, QC', autofill: false },
     ],
   },
   {
     group: 'Entreprise',
     vars: [
-      { key: '{{company.name}}', label: 'Nom', sample: 'Mon Entreprise Inc.' },
-      { key: '{{company.email}}', label: 'Email', sample: 'contact@monentreprise.com' },
-      { key: '{{company.phone}}', label: 'Téléphone', sample: '+1 514 555-0200' },
-      { key: '{{company.address}}', label: 'Adresse', sample: '456 rue Bureau, Montréal, QC' },
-      { key: '{{company.neq}}', label: 'NEQ / N° entreprise', sample: '1234567890' },
-      { key: '{{company.tps}}', label: 'N° TPS (fédéral)', sample: '123456789 RT0001' },
-      { key: '{{company.tvq}}', label: 'N° TVQ (provincial)', sample: '1234567890 TQ0001' },
+      { key: '{{company.name}}', label: 'Nom', sample: 'Mon Entreprise Inc.', autofill: true },
+      { key: '{{company.email}}', label: 'Email', sample: 'contact@monentreprise.com', autofill: true },
+      { key: '{{company.phone}}', label: 'Téléphone', sample: '+1 514 555-0200', autofill: true },
+      { key: '{{company.address}}', label: 'Adresse', sample: '456 rue Bureau, Montréal, QC', autofill: true },
+      { key: '{{company.neq}}', label: 'NEQ / N° entreprise', sample: '1234567890', autofill: true },
+      { key: '{{company.tps}}', label: 'N° TPS (fédéral)', sample: '123456789 RT0001', autofill: true },
+      { key: '{{company.tvq}}', label: 'N° TVQ (provincial)', sample: '1234567890 TQ0001', autofill: true },
     ],
   },
   {
-    group: 'Document',
+    group: 'Paiement',
     vars: [
-      { key: '{{document.number}}', label: 'Numéro de document', sample: 'CONT-2026-001' },
-      { key: '{{amount.total}}', label: 'Montant total (HT)', sample: '2 500,00 $' },
-      { key: '{{amount.deposit}}', label: 'Acompte', sample: '625,00 $' },
-      { key: '{{amount.tps}}', label: 'TPS (5%)', sample: '125,00 $' },
-      { key: '{{amount.tvq}}', label: 'TVQ (9,975%)', sample: '249,38 $' },
-      { key: '{{amount.total_ttc}}', label: 'Montant total (TTC)', sample: '2 874,38 $' },
-    ],
-  },
-  {
-    group: 'Projet',
-    vars: [
-      { key: '{{project.name}}', label: 'Nom du projet', sample: 'Refonte Site Web' },
+      { key: '{{payment.link}}', label: 'Lien de paiement', sample: 'https://pay.exemple.com/xxx', autofill: false },
     ],
   },
 ];
