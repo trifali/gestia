@@ -34,6 +34,7 @@ import { PageHeader, IconBtn, EditIcon, TrashIcon, useConfirm, Modal, EmptyState
 import { MagicInput, MagicTextarea } from '../../client/magic';
 import { formatCurrency } from '../../shared/format';
 import { TEMPLATE_TYPES, TEMPLATE_VARIABLE_GROUPS, getTemplatePdfBase64 } from './templatePdf';
+import { getBoilerplate } from './templateBoilerplates';
 import MDEditor from '@uiw/react-md-editor';
 import type { BrandAssets } from '../documents/pdf';
 
@@ -1486,32 +1487,6 @@ function TemplatePdfPreviewModal({
 
 // ─── TemplateEditorModal ──────────────────────────────────────────────────────
 
-const DEFAULT_CONTENT = `# Titre du document
-
-Bonjour **{{client.name}}**,
-
-Ce document a été préparé le {{date}} par {{company.name}}.
-
----
-
-## 1. Objet
-
-Décrivez ici l'objet du document.
-
-## 2. Conditions
-
-- Condition 1
-- Condition 2
-- Condition 3
-
-## 3. Signatures
-
-| Partie | Nom | Date | Signature |
-|--------|-----|------|-----------|
-| Prestataire | {{company.name}} | {{date}} | |
-| Client | {{client.name}} | {{date_signed}} | |
-`;
-
 function TemplateEditorModal({
   initial,
   canEdit,
@@ -1535,7 +1510,7 @@ function TemplateEditorModal({
   const [name, setName] = useState(initial?.name ?? '');
   const [type, setType] = useState(initial?.type ?? 'contract');
   const [description, setDescription] = useState(initial?.description ?? '');
-  const [content, setContent] = useState(initial?.content ?? DEFAULT_CONTENT);
+  const [content, setContent] = useState(initial?.content ?? getBoilerplate(initial?.type ?? 'contract'));
   const [isActive, setIsActive] = useState(initial?.isActive ?? true);
   const [saving, setSaving] = useState(false);
   const [previewing, setPreviewing] = useState(false);
@@ -1667,7 +1642,14 @@ function TemplateEditorModal({
           <div className='flex items-center gap-2 shrink-0'>
             <select
               value={type}
-              onChange={(e) => setType(e.target.value)}
+              onChange={(e) => {
+                const newType = e.target.value;
+                setType(newType);
+                // Only reseed content on new templates when the editor is still at the boilerplate
+                if (isNew && content.trim() === getBoilerplate(type).trim()) {
+                  setContent(getBoilerplate(newType));
+                }
+              }}
               className='input text-sm py-1 h-8'
               disabled={!canEdit}
             >
