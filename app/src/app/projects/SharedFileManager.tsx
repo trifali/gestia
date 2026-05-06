@@ -8,7 +8,7 @@ import {
   type FileData,
 } from '@syncfusion/ej2-react-filemanager';
 import toast from 'react-hot-toast';
-import { LuUpload, LuFilePlus, LuX } from 'react-icons/lu';
+import { LuUpload, LuFilePlus, LuX, LuFileText, LuChevronDown } from 'react-icons/lu';
 import { FilePreviewModal } from './FilePreviewModal';
 import { FileEditorModal, type EditorFileInfo } from './FileEditorModal';
 
@@ -40,6 +40,8 @@ export interface FileManagerOperations {
   instanceId: string;
   /** Called whenever the user navigates into/out of a folder */
   onFolderChange?: (folderId: string | null) => void;
+  /** When provided, "Nouveau fichier" shows a picker: template vs blank */
+  onFromTemplate?: () => void;
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -175,10 +177,55 @@ function NewFileDialog({
   );
 }
 
+// ─── New File Menu (blank vs template) ───────────────────────────────────────
+
+function NewFileMenu({ onBlank, onFromTemplate }: { onBlank: () => void; onFromTemplate: () => void }) {
+  const [open, setOpen] = useState(false);
+
+  return (
+    <div className='relative'>
+      <button
+        className='btn-secondary flex items-center gap-2 text-sm'
+        onClick={() => setOpen((v) => !v)}
+      >
+        <LuFilePlus size={15} /> Nouveau fichier <LuChevronDown size={13} />
+      </button>
+      {open && (
+        <>
+          {/* backdrop */}
+          <div className='fixed inset-0 z-40' onClick={() => setOpen(false)} />
+          <div className='absolute left-0 top-full mt-1 z-50 bg-white rounded-xl border border-line shadow-lg py-1 min-w-[200px]'>
+            <button
+              className='flex items-center gap-2.5 w-full px-4 py-2.5 text-sm hover:bg-canvas-100 text-left'
+              onClick={() => { setOpen(false); onFromTemplate(); }}
+            >
+              <LuFileText size={14} className='text-primary shrink-0' />
+              <div>
+                <div className='font-medium text-ink'>Depuis un modèle</div>
+                <div className='text-xs text-muted'>Contrat, maintenance, hébergement…</div>
+              </div>
+            </button>
+            <button
+              className='flex items-center gap-2.5 w-full px-4 py-2.5 text-sm hover:bg-canvas-100 text-left'
+              onClick={() => { setOpen(false); onBlank(); }}
+            >
+              <LuFilePlus size={14} className='text-muted shrink-0' />
+              <div>
+                <div className='font-medium text-ink'>Document vide</div>
+                <div className='text-xs text-muted'>Fichier Markdown sans contenu</div>
+              </div>
+            </button>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 // ─── Shared File Manager ──────────────────────────────────────────────────────
 
 export function SharedFileManager({ ops }: { ops: FileManagerOperations }) {
-  const { files: rawFiles, isFetching, refetch, upload, createFolder, deleteFiles, renameFile, moveFiles, createNewFile, getEditorContent, saveFileContent, instanceId, onFolderChange } = ops;
+  const { files: rawFiles, isFetching, refetch, upload, createFolder, deleteFiles, renameFile, moveFiles, createNewFile, getEditorContent, saveFileContent, instanceId, onFolderChange, onFromTemplate } = ops;
 
   const [fileSystemData, setFileSystemData] = useState<FileData[]>(() => toFileData([]));
   const [dataReady, setDataReady] = useState(false);
@@ -536,13 +583,19 @@ export function SharedFileManager({ ops }: { ops: FileManagerOperations }) {
         >
           <LuUpload size={15} /> Téléverser
         </button>
-        {createNewFile && (
+        {createNewFile && !onFromTemplate && (
           <button
             className='btn-secondary flex items-center gap-2 text-sm'
             onClick={() => setShowNewFileDialog(true)}
           >
             <LuFilePlus size={15} /> Nouveau fichier
           </button>
+        )}
+        {createNewFile && onFromTemplate && (
+          <NewFileMenu
+            onBlank={() => setShowNewFileDialog(true)}
+            onFromTemplate={onFromTemplate}
+          />
         )}
       </div>
 

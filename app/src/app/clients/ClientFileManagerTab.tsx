@@ -290,16 +290,6 @@ export function ClientFileManagerTab({ clientId, clientName }: Props) {
     <>
       <DriveInfo />
 
-      {/* Extra action row — "Depuis un modèle" */}
-      <div className='mb-3'>
-        <button
-          className='btn-secondary flex items-center gap-2 text-sm'
-          onClick={() => setShowFromTemplate(true)}
-        >
-          <LuFileText size={15} /> Depuis un modèle
-        </button>
-      </div>
-
       <SharedFileManager
         ops={{
           files: rawFiles as any[] | undefined,
@@ -322,6 +312,7 @@ export function ClientFileManagerTab({ clientId, clientName }: Props) {
             updateFileContent({ id, content, contentType }),
           instanceId: `client-${clientId}`,
           onFolderChange: setCurrentFolderId,
+          onFromTemplate: () => setShowFromTemplate(true),
         }}
       />
 
