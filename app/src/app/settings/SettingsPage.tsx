@@ -1398,6 +1398,7 @@ function TemplateList({ canEdit, company }: { canEdit: boolean; company: any }) 
           company={company}
           onClose={() => { setCreating(false); setEditing(null); }}
           onSaved={() => { setCreating(false); setEditing(null); refetch(); }}
+          onRefresh={() => refetch()}
         />
       )}
       {previewing && (
@@ -1517,12 +1518,14 @@ function TemplateEditorModal({
   company,
   onClose,
   onSaved,
+  onRefresh,
 }: {
   initial: DocTemplate | null;
   canEdit: boolean;
   company: any;
   onClose: () => void;
   onSaved: () => void;
+  onRefresh: () => void;
 }) {
   const isNew = !initial;
   const createTmpl = useAction(createDocumentTemplate);
@@ -1566,20 +1569,41 @@ function TemplateEditorModal({
     return () => { if (previewUrl) URL.revokeObjectURL(previewUrl); };
   }, [previewUrl]);
 
+  // Auto-close PDF preview when markdown content changes
+  useEffect(() => {
+    if (previewUrl) {
+      URL.revokeObjectURL(previewUrl);
+      setPreviewUrl(null);
+    }
+  }, [content]);
+
   const insertVariable = useCallback((key: string) => {
     const el = mdEditorRef.current?.textarea;
     if (!el) {
       setContent((c) => c + key);
       return;
     }
-    const start = el.selectionStart;
-    const end = el.selectionEnd;
-    const newContent = content.slice(0, start) + key + content.slice(end);
-    setContent(newContent);
-    setTimeout(() => {
-      el.focus();
-      el.setSelectionRange(start + key.length, start + key.length);
-    }, 0);
+    el.focus();
+    const scrollTop = el.scrollTop;
+    // Use execCommand so the browser handles caret + undo stack natively,
+    // without triggering a full React re-render that resets scroll.
+    const inserted = document.execCommand('insertText', false, key);
+    if (!inserted) {
+      // Fallback for browsers that don't support execCommand
+      const start = el.selectionStart;
+      const end = el.selectionEnd;
+      const newContent = content.slice(0, start) + key + content.slice(end);
+      setContent(newContent);
+      setTimeout(() => {
+        el.focus();
+        el.setSelectionRange(start + key.length, start + key.length);
+        el.scrollTop = scrollTop;
+      }, 0);
+    } else {
+      // execCommand updates the DOM but React state is stale — sync it
+      setContent(el.value);
+      requestAnimationFrame(() => { el.scrollTop = scrollTop; });
+    }
   }, [content]);
 
   const handlePreview = async () => {
@@ -1611,11 +1635,12 @@ function TemplateEditorModal({
       if (isNew) {
         await createTmpl({ name, type, description, content, isActive });
         toast.success('Modèle créé');
+        onSaved(); // close on create
       } else {
         await updateTmpl({ id: initial!.id, name, type, description, content, isActive });
         toast.success('Modèle sauvegardé');
+        onRefresh(); // stay open on update
       }
-      onSaved();
     } catch (e: any) {
       toast.error(e?.message || 'Erreur lors de la sauvegarde');
     } finally {

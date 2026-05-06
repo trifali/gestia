@@ -33,6 +33,8 @@ Entreprise prestataire
 - {{company.phone}}   → Téléphone
 - {{company.address}} → Adresse
 - {{company.neq}}     → NEQ / numéro d'enregistrement
+- {{company.tps}}     → Numéro de TPS (fédéral)
+- {{company.tvq}}     → Numéro de TVQ (provincial)
 
 Document & montants
 - {{document.number}}  → Numéro du document (ex : CONT-2026-001)

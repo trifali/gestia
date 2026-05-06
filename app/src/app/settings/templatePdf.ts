@@ -62,6 +62,8 @@ export const TEMPLATE_VARIABLE_GROUPS: TemplateVarGroup[] = [
       { key: '{{company.phone}}', label: 'Téléphone', sample: '+1 514 555-0200' },
       { key: '{{company.address}}', label: 'Adresse', sample: '456 rue Bureau, Montréal, QC' },
       { key: '{{company.neq}}', label: 'NEQ / N° entreprise', sample: '1234567890' },
+      { key: '{{company.tps}}', label: 'N° TPS (fédéral)', sample: '123456789 RT0001' },
+      { key: '{{company.tvq}}', label: 'N° TVQ (provincial)', sample: '1234567890 TQ0001' },
     ],
   },
   {
