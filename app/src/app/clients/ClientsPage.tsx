@@ -1,6 +1,6 @@
 import { Fragment, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router';
-import { LuChevronDown, LuChevronUp, LuArrowRight } from 'react-icons/lu';
+import { LuChevronDown, LuChevronUp, LuArrowRight, LuX } from 'react-icons/lu';
 import toast from 'react-hot-toast';
 import { useQuery, getClients, createClient, updateClient, deleteClient } from 'wasp/client/operations';
 import type { Client } from 'wasp/entities';
@@ -82,6 +82,15 @@ export default function ClientsPage() {
             <option key={val} value={val}>{label}</option>
           ))}
         </select>
+        {(search || filterStatus) && (
+          <button
+            className='p-1.5 rounded-md text-muted hover:text-ink hover:bg-canvas transition-colors shrink-0'
+            title='Réinitialiser les filtres'
+            onClick={() => { setSearch(''); setSearchParams({}, { replace: true }); }}
+          >
+            <LuX size={15} />
+          </button>
+        )}
         <span className='text-sm text-muted'>{filtered.length} client(s)</span>
       </div>
 

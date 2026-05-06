@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { LuFileCheck, LuUndo2, LuPencil, LuCopy, LuLoader, LuMail, LuEye, LuWallet, LuArrowUpDown, LuArrowUp, LuArrowDown, LuChevronLeft, LuChevronRight } from 'react-icons/lu';
+import { LuFileCheck, LuUndo2, LuPencil, LuCopy, LuLoader, LuMail, LuEye, LuWallet, LuArrowUpDown, LuArrowUp, LuArrowDown, LuChevronLeft, LuChevronRight, LuX } from 'react-icons/lu';
 import toast from 'react-hot-toast';
 import {
   useQuery,
@@ -212,6 +212,15 @@ export function DocumentTable({
             <option key={k} value={k}>{v.label}</option>
           ))}
         </select>
+        {(search || filterType || filterStatus) && (
+          <button
+            className='p-1.5 rounded-md text-muted hover:text-ink hover:bg-canvas transition-colors shrink-0'
+            title='Réinitialiser les filtres'
+            onClick={() => { setSearch(''); setFilterType(''); setFilterStatus(''); }}
+          >
+            <LuX size={15} />
+          </button>
+        )}
       </div>
 
       {docsLoading ? (

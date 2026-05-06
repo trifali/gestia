@@ -1,6 +1,6 @@
 import { useState, useCallback } from 'react';
 import { useParams, useNavigate, useSearchParams, Link } from 'react-router';
-import { LuArrowLeft, LuPencil, LuArchive, LuFolderOpen, LuExternalLink } from 'react-icons/lu';
+import { LuArrowLeft, LuPencil, LuArchive, LuFolderOpen, LuExternalLink, LuX } from 'react-icons/lu';
 import toast from 'react-hot-toast';
 import {
   useQuery,
@@ -605,6 +605,15 @@ function ProjetsTab({ clientId, projects }: { clientId: string; projects: any[] 
               <option key={val} value={val}>{label}</option>
             ))}
           </select>
+          {(search || filterStatus) && (
+            <button
+              className='p-1.5 rounded-md text-muted hover:text-ink hover:bg-canvas transition-colors shrink-0'
+              title='Réinitialiser les filtres'
+              onClick={() => { setSearch(''); setFilterStatus(''); }}
+            >
+              <LuX size={15} />
+            </button>
+          )}
           <span className='text-sm text-muted'>{filtered.length} projet(s)</span>
         </div>
         <button className='btn-primary shrink-0' onClick={() => setCreating(true)}>Nouveau projet</button>
