@@ -22,7 +22,7 @@ export default function DocumentsPage() {
     <>
       <PageHeader
         title='Facturation'
-        subtitle="Soumissions et factures regroupées. Cliquez le statut pour le changer (Brouillon → Envoyée → Acceptée/Refusée pour les soumissions; Brouillon → Envoyée → Acompte reçu → Payée pour les factures). Une fois la date d'échéance dépassée, les soumissions envoyées passent « Expirée » et les factures impayées passent « En retard » automatiquement."
+        subtitle="Soumissions et factures regroupées. Cliquez le statut pour le changer manuellement (Brouillon → Envoyée → Acceptée/Refusée pour les soumissions; Brouillon → Envoyée → Acompte reçu → Payée pour les factures). Une tâche automatique s'exécute toutes les heures : les soumissions envoyées dont la date d'échéance est dépassée passent automatiquement à « Expirée », et les factures impayées passent à « En retard »."
         actions={
           <div className='flex gap-2'>
             <button className='btn-secondary' onClick={() => setCreating({ mode: 'quote' })}>
