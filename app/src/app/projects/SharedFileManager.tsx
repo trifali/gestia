@@ -8,7 +8,7 @@ import {
   type FileData,
 } from '@syncfusion/ej2-react-filemanager';
 import toast from 'react-hot-toast';
-import { LuUpload, LuFilePlus, LuX, LuFileText, LuChevronDown } from 'react-icons/lu';
+import { LuUpload, LuFilePlus, LuX, LuFileText, LuChevronDown, LuSlidersHorizontal } from 'react-icons/lu';
 import { FilePreviewModal } from './FilePreviewModal';
 import { FileEditorModal, type EditorFileInfo } from './FileEditorModal';
 import { ClientDocEditorModal, StandaloneEditDynamicVarsModal } from '../clients/ClientDocEditorModal';
@@ -242,6 +242,10 @@ export function SharedFileManager({ ops }: { ops: FileManagerOperations }) {
   const [dynVarsCache, setDynVarsCache] = useState<Record<string, string>>({});
   // File targeted by the right-click "Modifier les variables" action (no editor, just vars modal)
   const [ctxVarsFile, setCtxVarsFile] = useState<{ id: string; clientId: string | null; dynamicVars: string | null } | null>(null);
+  // Template file currently selected in the file list (drives toolbar button)
+  const [selectionVarFile, setSelectionVarFile] = useState<{ id: string; clientId: string | null; dynamicVars: string | null } | null>(null);
+  // Track this in a ref too so toolbarClick closure always sees the latest value
+  const selectionVarFileRef = useRef<typeof selectionVarFile>(null);
 
   const updateFolder = useCallback((id: string | null) => {
     setCurrentFolderId(id);
@@ -333,16 +337,30 @@ export function SharedFileManager({ ops }: { ops: FileManagerOperations }) {
       try {
         const itemData = args?.itemData;
         const detailArr: any[] = Array.isArray(itemData) ? itemData : itemData ? [itemData] : [];
-        const id: string | undefined = detailArr[0]?.id;
+        const item = detailArr[0];
+        const id: string | undefined = item?.id;
         const newName: string = args?.newName ?? '';
         if (!id || id === VIRTUAL_ROOT_ID || !newName) return;
+
+        // Check for duplicate name among siblings (same parent folder)
+        const parentId = item?.parentId ?? VIRTUAL_ROOT_ID;
+        const duplicate = fileSystemData.some(
+          (f: any) => f.id !== id && f.parentId === parentId && f.name.toLowerCase() === newName.toLowerCase()
+        );
+        if (duplicate) {
+          args.cancel = true;
+          toast.error(`Un fichier nommé "${newName}" existe déjà dans ce dossier`);
+          refetch();
+          return;
+        }
+
         await renameFile({ id, name: newName });
       } catch (err: any) {
         toast.error(err?.message || 'Erreur lors du renommage');
         refetch();
       }
     })();
-  }, [renameFile, refetch]);
+  }, [renameFile, refetch, fileSystemData]);
 
   // ─── Move ─────────────────────────────────────────────────────────────────
 
@@ -416,6 +434,24 @@ export function SharedFileManager({ ops }: { ops: FileManagerOperations }) {
     }
   }, []);
 
+  const handleToolbarCreate = useCallback((_args: any) => {
+    // Fires on every toolbar (re)creation — restore correct enable/disable state and fix label
+    setTimeout(() => {
+      if (selectionVarFileRef.current) {
+        fmRef.current?.enableToolbarItems(['EditVars']);
+      } else {
+        fmRef.current?.disableToolbarItems(['EditVars']);
+      }
+      const container = (fmRef.current as any)?.element as HTMLElement | undefined;
+      if (!container) return;
+      container.querySelectorAll('.e-toolbar-item .e-tbar-btn-text').forEach((el: Element) => {
+        if ((el as HTMLElement).textContent?.trim() === 'EditVars') {
+          (el as HTMLElement).textContent = 'Modifier les variables';
+        }
+      });
+    }, 50);
+  }, []);
+
   // ─── Context menu: inject "Modifier les variables" for template .md files ──
 
   // ─── Context menu: show "Modifier les variables" only for template files ───
@@ -436,6 +472,33 @@ export function SharedFileManager({ ops }: { ops: FileManagerOperations }) {
           item.iconCss = 'e-icons e-settings';
         }
       }
+    }
+  }, []);
+
+  const handleFileSelect = useCallback((args: any) => {
+    if (args?.action === 'unselect') {
+      setSelectionVarFile(null);
+      selectionVarFileRef.current = null;
+      fmRef.current?.disableToolbarItems(['EditVars']);
+      return;
+    }
+    const details = args?.fileDetails;
+    if (details?.isFile && details?._sourceTemplateType) {
+      const val = { id: details.id, clientId: details._clientId ?? null, dynamicVars: details._dynamicVars ?? null };
+      setSelectionVarFile(val);
+      selectionVarFileRef.current = val;
+      fmRef.current?.enableToolbarItems(['EditVars']);
+    } else {
+      setSelectionVarFile(null);
+      selectionVarFileRef.current = null;
+      fmRef.current?.disableToolbarItems(['EditVars']);
+    }
+  }, []);
+
+  const handleToolbarClick = useCallback((args: any) => {
+    if (args?.item?.id?.endsWith('_tb_EditVars') || args?.item?.text === 'Modifier les variables') {
+      const target = selectionVarFileRef.current;
+      if (target) setCtxVarsFile(target);
     }
   }, []);
 
@@ -685,13 +748,13 @@ export function SharedFileManager({ ops }: { ops: FileManagerOperations }) {
             fileSystemData={fileSystemData as any}
             view='Details'
             height='100%'
-            toolbarSettings={{
-              items: ['NewFolder', '|', 'Cut', 'Copy', 'Paste', 'Delete', 'Rename', 'Refresh', '|', 'SortBy', 'Details'],
-            }}
             contextMenuSettings={{
               file: ['Open', '|', 'Modifier les variables', '|', 'Cut', 'Copy', 'Delete', 'Rename', '|', 'Details'],
               folder: ['Open', '|', 'Cut', 'Copy', 'Paste', 'Delete', 'Rename'],
               layout: ['Refresh', '|', 'NewFolder', 'Paste', '|', 'Details'],
+            }}
+            toolbarSettings={{
+              items: ['NewFolder', '|', 'Cut', 'Copy', 'Paste', 'Delete', 'Rename', 'Refresh', '|', 'SortBy', 'Details', 'EditVars'] as any,
             }}
             allowDragAndDrop={true}
             created={handleCreated}
@@ -702,6 +765,9 @@ export function SharedFileManager({ ops }: { ops: FileManagerOperations }) {
             fileOpen={handleFileOpen}
             menuOpen={handleMenuOpen}
             menuClick={handleMenuClick}
+            fileSelect={handleFileSelect}
+            toolbarClick={handleToolbarClick}
+            toolbarCreate={handleToolbarCreate}
           >
             <Inject services={[DetailsView, NavigationPane, Toolbar]} />
           </FileManagerComponent>
