@@ -99,8 +99,8 @@ export default function ClientsPage() {
                 const expanded = expandedIds.has(c.id);
                 return (
                   <Fragment key={c.id}>
-                    <tr>
-                      <td className='w-8'>
+                    <tr className='cursor-pointer' onClick={() => navigate(`/clients/${c.id}`)}>
+                      <td className='w-8' onClick={(e) => e.stopPropagation()}>
                         {c.notes ? (
                           <IconBtn title={expanded ? 'Masquer la note' : 'Voir la note'} onClick={() => toggleNote(c.id)}>
                             {expanded ? <LuChevronUp size={16} /> : <LuChevronDown size={16} />}
@@ -117,7 +117,7 @@ export default function ClientsPage() {
                         </span>
                       </td>
                       <td className='text-muted'>{formatDate(c.createdAt)}</td>
-                      <td className='text-right'>
+                      <td className='text-right' onClick={(e) => e.stopPropagation()}>
                         <div className='flex items-center justify-end gap-1'>
                           <IconBtn title='Modifier' onClick={() => setEditing(c)}><EditIcon /></IconBtn>
                           <IconBtn variant='danger' title='Supprimer' onClick={async () => {
@@ -132,7 +132,7 @@ export default function ClientsPage() {
                           }}><TrashIcon /></IconBtn>
                         </div>
                       </td>
-                      <td className='w-8'>
+                      <td className='w-8' onClick={(e) => e.stopPropagation()}>
                         <IconBtn title='Ouvrir le dossier client' onClick={() => navigate(`/clients/${c.id}`)}>
                           <LuArrowRight size={16} />
                         </IconBtn>

@@ -72,23 +72,23 @@ export default function DashboardPage() {
       ) : (
         <>
           <div className='grid grid-cols-2 lg:grid-cols-4 gap-4'>
-            <div className='stat-card'>
+            <Link to='/clients' className='stat-card hover:border-accent/40 transition-colors cursor-pointer'>
               <div className='stat-label'>Clients</div>
               <div className='stat-value'>{stats.clientsCount}</div>
-            </div>
-            <div className='stat-card'>
+            </Link>
+            <Link to='/projets' className='stat-card hover:border-accent/40 transition-colors cursor-pointer'>
               <div className='stat-label'>Projets actifs</div>
               <div className='stat-value'>{stats.activeProjectsCount}</div>
-            </div>
-            <div className='stat-card'>
+            </Link>
+            <Link to='/facturation?type=quote' className='stat-card hover:border-accent/40 transition-colors cursor-pointer'>
               <div className='stat-label'>Soumissions en attente</div>
               <div className='stat-value'>{stats.pendingQuotesCount}</div>
-            </div>
-            <div className='stat-card'>
+            </Link>
+            <Link to='/facturation?type=invoice' className='stat-card hover:border-accent/40 transition-colors cursor-pointer'>
               <div className='stat-label'>Factures impayées</div>
               <div className='stat-value'>{stats.unpaidInvoicesCount}</div>
               <div className='text-xs text-muted mt-1'>{formatCurrency(stats.unpaidTotal)}</div>
-            </div>
+            </Link>
           </div>
 
           <div className='grid lg:grid-cols-3 gap-4 mt-6'>

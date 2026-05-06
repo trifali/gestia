@@ -57,7 +57,7 @@ export default function ClientPortalPage() {
   const rawTab = searchParams.get('tab') as PortalTab | null;
   const activeTab: PortalTab = PORTAL_TABS.some((t) => t.id === rawTab) ? rawTab! : 'files';
   const setActiveTab = (id: PortalTab) => setSearchParams({ tab: id }, { replace: true });
-  const { data, isLoading, error } = useQuery(getProjectByToken, { token: token! });
+  const { data, isLoading, error } = useQuery(getProjectByToken, { token: token! }, { retry: false });
 
   if (isLoading) {
     return (
