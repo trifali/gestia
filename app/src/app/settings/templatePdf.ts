@@ -110,12 +110,14 @@ function buildTheme(brand: BrandAssets): Theme {
 
 // ─── Inline markdown parser ───────────────────────────────────────────────────
 
-type Span = string | { text: any; bold?: boolean; italics?: boolean; color?: string };
+type Span = string | { text: any; bold?: boolean; italics?: boolean; color?: string; link?: string; decoration?: string };
 
 function parseInline(raw: string, t: Theme): Span[] {
   const parts: Span[] = [];
   let rem = raw;
+  // link regex captures both groups: [1]=label, [2]=url
   const patterns: { re: RegExp; type: string }[] = [
+    { re: /\[([^\]]+)\]\((https?:\/\/[^)]+)\)/, type: 'link' },
     { re: /\{\{([^}]+)\}\}/, type: 'var' },
     { re: /\*\*([^*]+)\*\*/, type: 'bold' },
     { re: /\*([^*]+)\*/, type: 'italic' },
@@ -135,6 +137,9 @@ function parseInline(raw: string, t: Theme): Span[] {
     if (earliest.idx > 0) parts.push(rem.slice(0, earliest.idx));
     const inner = earliest.match[1];
     switch (earliest.type) {
+      case 'link':
+        parts.push({ text: inner, link: earliest.match[2], color: t.accent, decoration: 'underline' });
+        break;
       case 'var':   parts.push({ text: `{{${inner}}}`, color: t.accent, bold: true }); break;
       case 'bold':  parts.push({ text: inner, bold: true }); break;
       case 'italic': parts.push({ text: inner, italics: true }); break;
