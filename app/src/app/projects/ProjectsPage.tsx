@@ -56,14 +56,16 @@ export default function ProjectsPage() {
               {projects.map((p: any) => (
                 <tr key={p.id} className='group'>
                   <td className='font-medium'>
-                    <Link
-                      to={`/projets/${p.id}`}
+                    <a
+                      href={`/projets/${p.id}`}
+                      target='_blank'
+                      rel='noreferrer'
                       className='flex items-center gap-2 hover:text-accent transition-colors'
                     >
                       <LuFolderOpen size={16} className='text-muted shrink-0' />
                       {p.name}
                       <LuExternalLink size={12} className='text-muted opacity-0 group-hover:opacity-100 transition-opacity' />
-                    </Link>
+                    </a>
                   </td>
                   <td className='text-muted'>{p.client?.name || '—'}</td>
                   <td>

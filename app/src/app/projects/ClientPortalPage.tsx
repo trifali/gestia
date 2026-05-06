@@ -103,18 +103,18 @@ export default function ClientPortalPage() {
 
       {/* Quick stats */}
       <div className='grid grid-cols-3 gap-3 mb-6'>
-        <div className='card p-3 text-center'>
+        <button className='card p-3 text-center hover:border-accent transition-colors cursor-pointer' onClick={() => setActiveTab('tasks')}>
           <div className='text-xl font-bold text-ink'>{doneTasks} / {tasks.length}</div>
           <div className='text-xs text-muted'>tâches terminées</div>
-        </div>
-        <div className='card p-3 text-center'>
+        </button>
+        <button className='card p-3 text-center hover:border-accent transition-colors cursor-pointer' onClick={() => setActiveTab('files')}>
           <div className='text-xl font-bold text-ink'>{files.length}</div>
           <div className='text-xs text-muted'>fichiers</div>
-        </div>
-        <div className='card p-3 text-center'>
+        </button>
+        <button className='card p-3 text-center hover:border-accent transition-colors cursor-pointer' onClick={() => setActiveTab('notes')}>
           <div className='text-xl font-bold text-ink'>{notes.length}</div>
           <div className='text-xs text-muted'>notes</div>
-        </div>
+        </button>
       </div>
 
       {/* Tabs */}

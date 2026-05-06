@@ -70,12 +70,12 @@ const TASK_PRIORITY: Record<string, { label: string; className: string; color: s
 // ─── Tabs ─────────────────────────────────────────────────────────────────────
 
 const TABS = [
-  { id: 'apercu', label: 'Aperçu', icon: <LuLayoutDashboard size={16} /> },
-  { id: 'taches', label: 'Tâches', icon: <LuSquareCheck size={16} /> },
-  { id: 'notes', label: 'Notes', icon: <LuFileText size={16} /> },
-  { id: 'privees', label: 'Notes privées', icon: <LuLock size={16} /> },
-  { id: 'portail', label: 'Portail client', icon: <LuUsers size={16} /> },
-  { id: 'fichiers', label: 'Fichiers', icon: <LuFolderOpen size={16} /> },
+  { id: 'apercu', label: 'Aperçu', icon: <LuLayoutDashboard size={16} />, shared: false },
+  { id: 'privees', label: 'Notes privées', icon: <LuLock size={16} />, shared: false },
+  { id: 'portail', label: 'Portail client', icon: <LuUsers size={16} />, shared: false },
+  { id: 'taches', label: 'Tâches', icon: <LuSquareCheck size={16} />, shared: true },
+  { id: 'notes', label: 'Notes', icon: <LuFileText size={16} />, shared: true },
+  { id: 'fichiers', label: 'Fichiers', icon: <LuFolderOpen size={16} />, shared: true },
 ] as const;
 
 type TabId = (typeof TABS)[number]['id'];
@@ -102,9 +102,9 @@ export default function ProjectDetailPage() {
       <div className='card p-8 text-center'>
         <LuCircleAlert size={32} className='mx-auto mb-3 text-danger' />
         <p className='text-ink font-medium'>Projet introuvable</p>
-        <Link to='/projets' className='btn-secondary mt-4 inline-flex items-center gap-2'>
-          <LuArrowLeft size={16} /> Retour aux projets
-        </Link>
+        <button onClick={() => window.close()} className='btn-secondary mt-4 inline-flex items-center gap-2'>
+          Fermer l'onglet
+        </button>
       </div>
     );
   }
@@ -113,27 +113,23 @@ export default function ProjectDetailPage() {
   const doneTasks = tasks.filter((t: any) => t.status === 'done').length;
 
   return (
-    <div className='flex flex-col gap-0'>
-      {/* Breadcrumb + header */}
+    <div className='flex flex-col gap-0 p-6 max-w-6xl mx-auto'>
+      {/* Close-tab banner */}
       <div className='flex items-center gap-3 mb-5'>
-        <Link
-          to='/projets'
-          className='flex items-center gap-1.5 text-sm text-muted hover:text-ink transition-colors'
-        >
-          <LuArrowLeft size={15} /> Projets
-        </Link>
-        <span className='text-muted'>/</span>
-        <span className='text-sm font-medium text-ink truncate max-w-xs'>{project.name}</span>
-        <span className={`${PROJECT_STATUS[project.status]?.className || 'badge-neutral'} ml-1`}>
-          {PROJECT_STATUS[project.status]?.label || project.status}
-        </span>
+        <div className='flex items-center gap-2 flex-1 min-w-0'>
+          <span className='text-xl font-bold text-ink truncate'>{project.name}</span>
+          <span className={`${PROJECT_STATUS[project.status]?.className || 'badge-neutral'} shrink-0`}>
+            {PROJECT_STATUS[project.status]?.label || project.status}
+          </span>
+        </div>
+        <span className='text-xs text-muted hidden sm:block'>Fermez cet onglet pour revenir à la page précédente</span>
       </div>
 
       {/* Quick stats bar */}
       <div className='grid grid-cols-2 sm:grid-cols-4 gap-3 mb-5'>
-        <StatCard label='Tâches' value={`${doneTasks} / ${tasks.length}`} sub='terminées' />
-        <StatCard label='Notes' value={String(notes.length + privateNotes.length)} sub='au total' />
-        <StatCard label='Accès client' value={String(clientAccess.filter((a: any) => !a.isRevoked).length)} sub='liens actifs' />
+        <StatCard label='Tâches' value={`${doneTasks} / ${tasks.length}`} sub='terminées' onClick={() => setActiveTab('taches')} />
+        <StatCard label='Notes' value={String(notes.length + privateNotes.length)} sub='au total' onClick={() => setActiveTab('notes')} />
+        <StatCard label='Accès client' value={String(clientAccess.filter((a: any) => !a.isRevoked).length)} sub='liens actifs' onClick={() => setActiveTab('portail')} />
       </div>
 
       {/* Tabs */}
@@ -150,6 +146,11 @@ export default function ProjectDetailPage() {
           >
             {tab.icon}
             {tab.label}
+            {tab.shared && (
+              <span title='Visible dans le portail client' className='text-blue-400 opacity-70'>
+                <LuEye size={11} />
+              </span>
+            )}
             {tab.id === 'privees' && privateNotes.length > 0 && (
               <span className='badge-neutral text-xs px-1.5 py-0.5 rounded-full'>{privateNotes.length}</span>
             )}
@@ -170,13 +171,13 @@ export default function ProjectDetailPage() {
   );
 }
 
-function StatCard({ label, value, sub }: { label: string; value: string; sub: string }) {
+function StatCard({ label, value, sub, onClick }: { label: string; value: string; sub: string; onClick?: () => void }) {
   return (
-    <div className='card p-4'>
+    <button className='card p-4 text-left hover:border-accent transition-colors w-full' onClick={onClick}>
       <div className='text-xs text-muted mb-1'>{label}</div>
       <div className='text-2xl font-bold text-ink'>{value}</div>
       <div className='text-xs text-muted mt-0.5'>{sub}</div>
-    </div>
+    </button>
   );
 }
 

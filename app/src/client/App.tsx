@@ -71,6 +71,12 @@ export default function App() {
     return <>{toaster}<Outlet /></>;
   }
 
+  // Project detail and client portal pages render without the sidebar
+  const isFullPage = /^\/projets\/[^/]+/.test(location.pathname) || /^\/portail\//.test(location.pathname);
+  if (isFullPage) {
+    return <>{toaster}<div className='min-h-screen bg-canvas'><Outlet /></div></>;
+  }
+
   return (
     <>
       {toaster}
