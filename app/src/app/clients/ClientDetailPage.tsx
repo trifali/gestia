@@ -80,11 +80,11 @@ type Tab = 'resume' | 'documents' | 'paiements' | 'rencontres' | 'projets' | 'fi
 
 const TABS: { id: Tab; label: string }[] = [
   { id: 'resume', label: 'Résumé' },
+  { id: 'fichiers', label: 'Fichiers' },
   { id: 'documents', label: 'Facturation' },
   { id: 'paiements', label: 'Paiements' },
   { id: 'rencontres', label: 'Rencontres' },
   { id: 'projets', label: 'Projets' },
-  { id: 'fichiers', label: 'Fichiers' },
 ];
 
 // ─── Main page ────────────────────────────────────────────────────────────────
