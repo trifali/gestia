@@ -7,6 +7,7 @@ import {
   getClientDetail,
   getProjects,
   createProject,
+  updateProject,
   deleteProject,
   deleteMeeting,
   archiveMeeting,
@@ -14,7 +15,7 @@ import {
   getClientActivities,
   getGoogleCalendarStatus,
 } from 'wasp/client/operations';
-import { Modal, useConfirm, IconBtn, TrashIcon } from '../../client/ui';
+import { Modal, useConfirm, IconBtn, TrashIcon, EditIcon } from '../../client/ui';
 import { MagicInput, MagicTextarea } from '../../client/magic';
 import { formatCurrency, formatDate, formatDateTime } from '../../shared/format';
 import type { Client } from 'wasp/entities';
@@ -531,12 +532,35 @@ const PROJECT_STATUS: Record<string, { label: string; className: string }> = {
 function ProjetsTab({ clientId, projects }: { clientId: string; projects: any[] }) {
   const { ask, Dialog: ConfirmDialog } = useConfirm();
   const [creating, setCreating] = useState(false);
+  const [editing, setEditing] = useState<any>(null);
+  const [search, setSearch] = useState('');
+  const [filterStatus, setFilterStatus] = useState('');
+
+  const filtered = projects.filter((p: any) => {
+    if (search && !p.name.toLowerCase().includes(search.toLowerCase())) return false;
+    if (filterStatus && p.status !== filterStatus) return false;
+    return true;
+  });
 
   return (
     <>
-      <div className='flex items-center justify-between mb-4'>
-        <p className='text-sm text-muted'>{projects.length} projet(s)</p>
-        <button className='btn-primary' onClick={() => setCreating(true)}>Nouveau projet</button>
+      <div className='flex flex-wrap items-center justify-between gap-3 mb-4'>
+        <div className='flex flex-wrap items-center gap-2'>
+          <input
+            className='input max-w-xs'
+            placeholder='Rechercher…'
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+          <select className='input w-auto' value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)}>
+            <option value=''>Tous les statuts</option>
+            {Object.entries(PROJECT_STATUS).map(([val, { label }]) => (
+              <option key={val} value={val}>{label}</option>
+            ))}
+          </select>
+          <span className='text-sm text-muted'>{filtered.length} projet(s)</span>
+        </div>
+        <button className='btn-primary shrink-0' onClick={() => setCreating(true)}>Nouveau projet</button>
       </div>
 
       {projects.length === 0 ? (
@@ -544,6 +568,8 @@ function ProjetsTab({ clientId, projects }: { clientId: string; projects: any[] 
           <LuFolderOpen size={32} className='mx-auto mb-3 opacity-40' />
           <p className='text-sm'>Aucun projet pour ce client.</p>
         </div>
+      ) : filtered.length === 0 ? (
+        <p className='text-muted text-sm'>Aucun projet ne correspond aux filtres.</p>
       ) : (
         <div className='table-wrap'>
           <table>
@@ -556,7 +582,7 @@ function ProjetsTab({ clientId, projects }: { clientId: string; projects: any[] 
               </tr>
             </thead>
             <tbody>
-              {projects.map((p: any) => (
+              {filtered.map((p: any) => (
                 <tr key={p.id} className='group'>
                   <td className='font-medium'>
                     <a
@@ -577,22 +603,25 @@ function ProjetsTab({ clientId, projects }: { clientId: string; projects: any[] 
                   </td>
                   <td className='text-muted'>{formatDate(p.createdAt)}</td>
                   <td className='text-right'>
-                    <IconBtn
-                      variant='danger'
-                      title='Supprimer'
-                      onClick={async () => {
-                        if (await ask(`Supprimer le projet « ${p.name} » ?`, { description: 'Toutes les tâches, notes, médias et accès clients seront supprimés.' })) {
-                          try {
-                            await deleteProject({ id: p.id });
-                            toast.success('Projet supprimé');
-                          } catch (err: any) {
-                            toast.error(err?.message || 'Erreur lors de la suppression');
+                    <div className='flex items-center justify-end gap-1'>
+                      <IconBtn title='Modifier' onClick={() => setEditing(p)}><EditIcon /></IconBtn>
+                      <IconBtn
+                        variant='danger'
+                        title='Supprimer'
+                        onClick={async () => {
+                          if (await ask(`Supprimer le projet « ${p.name} » ?`, { description: 'Toutes les tâches, notes, médias et accès clients seront supprimés.' })) {
+                            try {
+                              await deleteProject({ id: p.id });
+                              toast.success('Projet supprimé');
+                            } catch (err: any) {
+                              toast.error(err?.message || 'Erreur lors de la suppression');
+                            }
                           }
-                        }
-                      }}
-                    >
-                      <TrashIcon />
-                    </IconBtn>
+                        }}
+                      >
+                        <TrashIcon />
+                      </IconBtn>
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -603,6 +632,9 @@ function ProjetsTab({ clientId, projects }: { clientId: string; projects: any[] 
 
       {creating && (
         <CreateClientProjectModal clientId={clientId} onClose={() => setCreating(false)} />
+      )}
+      {editing && (
+        <EditClientProjectModal project={editing} onClose={() => setEditing(null)} />
       )}
       {ConfirmDialog}
     </>
@@ -658,6 +690,77 @@ function CreateClientProjectModal({ clientId, onClose }: { clientId: string; onC
             className='input'
             rows={3}
             placeholder='Description optionnelle…'
+            value={form.description}
+            onChange={(e) => setForm({ ...form, description: e.target.value })}
+          />
+        </div>
+        <div>
+          <label className='label'>Statut</label>
+          <select className='input' value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })}>
+            <option value='brouillon'>Brouillon</option>
+            <option value='en_cours'>En cours</option>
+            <option value='en_pause'>En pause</option>
+            <option value='termine'>Terminé</option>
+            <option value='annule'>Annulé</option>
+          </select>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
+function EditClientProjectModal({ project, onClose }: { project: any; onClose: () => void }) {
+  const [form, setForm] = useState({
+    name: project.name || '',
+    description: project.description || '',
+    status: project.status || 'en_cours',
+  });
+  const [saving, setSaving] = useState(false);
+
+  const onSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSaving(true);
+    try {
+      await updateProject({ id: project.id, name: form.name, description: form.description || undefined, status: form.status });
+      toast.success('Projet modifié');
+      onClose();
+    } catch (err: any) {
+      toast.error(err?.message || 'Une erreur est survenue');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title='Modifier le projet'
+      footer={
+        <>
+          <button className='btn-secondary' onClick={onClose}>Annuler</button>
+          <button form='edit-client-project-form' type='submit' className='btn-primary' disabled={saving}>
+            {saving ? 'Enregistrement…' : 'Enregistrer'}
+          </button>
+        </>
+      }
+    >
+      <form id='edit-client-project-form' onSubmit={onSubmit} className='flex flex-col gap-4'>
+        <div>
+          <label className='label'>Titre du projet *</label>
+          <input
+            className='input'
+            required
+            autoFocus
+            value={form.name}
+            onChange={(e) => setForm({ ...form, name: e.target.value })}
+          />
+        </div>
+        <div>
+          <label className='label'>Description</label>
+          <textarea
+            className='input'
+            rows={3}
             value={form.description}
             onChange={(e) => setForm({ ...form, description: e.target.value })}
           />

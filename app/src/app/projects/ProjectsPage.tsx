@@ -6,9 +6,10 @@ import {
   getProjects,
   getClients,
   createProject,
+  updateProject,
   deleteProject,
 } from 'wasp/client/operations';
-import { PageHeader, EmptyState, Modal, useConfirm, IconBtn, TrashIcon } from '../../client/ui';
+import { PageHeader, EmptyState, Modal, useConfirm, IconBtn, TrashIcon, EditIcon } from '../../client/ui';
 import { LuFolderOpen, LuExternalLink } from 'react-icons/lu';
 
 const STATUS: Record<string, { label: string; className: string }> = {
@@ -24,6 +25,17 @@ export default function ProjectsPage() {
   const { data: clients } = useQuery(getClients);
   const { ask, Dialog: ConfirmDialog } = useConfirm();
   const [creating, setCreating] = useState(false);
+  const [editing, setEditing] = useState<any>(null);
+  const [search, setSearch] = useState('');
+  const [filterStatus, setFilterStatus] = useState('');
+  const [filterClient, setFilterClient] = useState('');
+
+  const filtered = (projects || []).filter((p: any) => {
+    if (search && !p.name.toLowerCase().includes(search.toLowerCase())) return false;
+    if (filterStatus && p.status !== filterStatus) return false;
+    if (filterClient && p.clientId !== filterClient) return false;
+    return true;
+  });
 
   return (
     <>
@@ -33,6 +45,28 @@ export default function ProjectsPage() {
         actions={<button className='btn-primary' onClick={() => setCreating(true)}>Nouveau projet</button>}
       />
 
+      <div className='mb-4 flex flex-wrap items-center gap-3'>
+        <input
+          className='input max-w-xs'
+          placeholder='Rechercher un projet…'
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+        />
+        <select className='input w-auto' value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)}>
+          <option value=''>Tous les statuts</option>
+          {Object.entries(STATUS).map(([val, { label }]) => (
+            <option key={val} value={val}>{label}</option>
+          ))}
+        </select>
+        <select className='input w-auto' value={filterClient} onChange={(e) => setFilterClient(e.target.value)}>
+          <option value=''>Tous les clients</option>
+          {(clients || []).map((c: any) => (
+            <option key={c.id} value={c.id}>{c.name}</option>
+          ))}
+        </select>
+        <span className='text-sm text-muted'>{filtered.length} projet(s)</span>
+      </div>
+
       {isLoading ? (
         <div className='text-muted'>Chargement…</div>
       ) : !projects || projects.length === 0 ? (
@@ -41,6 +75,8 @@ export default function ProjectsPage() {
           description='Créez votre premier projet et associez-le à un client.'
           action={<button className='btn-primary' onClick={() => setCreating(true)}>Créer un projet</button>}
         />
+      ) : filtered.length === 0 ? (
+        <p className='text-muted text-sm'>Aucun projet ne correspond aux filtres.</p>
       ) : (
         <div className='table-wrap'>
           <table>
@@ -53,7 +89,7 @@ export default function ProjectsPage() {
               </tr>
             </thead>
             <tbody>
-              {projects.map((p: any) => (
+              {filtered.map((p: any) => (
                 <tr key={p.id} className='group'>
                   <td className='font-medium'>
                     <a
@@ -74,9 +110,11 @@ export default function ProjectsPage() {
                     </span>
                   </td>
                   <td className='text-right'>
-                    <IconBtn
-                      variant='danger'
-                      title='Supprimer'
+                    <div className='flex items-center justify-end gap-1'>
+                      <IconBtn title='Modifier' onClick={() => setEditing(p)}><EditIcon /></IconBtn>
+                      <IconBtn
+                        variant='danger'
+                        title='Supprimer'
                       onClick={async () => {
                         if (
                           await ask(`Supprimer le projet « ${p.name} » ?`, {
@@ -91,9 +129,10 @@ export default function ProjectsPage() {
                           }
                         }
                       }}
-                    >
-                      <TrashIcon />
-                    </IconBtn>
+                      >
+                        <TrashIcon />
+                      </IconBtn>
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -106,6 +145,13 @@ export default function ProjectsPage() {
         <CreateProjectModal
           clients={clients || []}
           onClose={() => setCreating(false)}
+        />
+      )}
+      {editing && (
+        <EditProjectModal
+          project={editing}
+          clients={clients || []}
+          onClose={() => setEditing(null)}
         />
       )}
       {ConfirmDialog}
@@ -175,6 +221,101 @@ function CreateProjectModal({ clients, onClose }: { clients: any[]; onClose: () 
             value={form.description}
             onChange={(e) => setForm({ ...form, description: e.target.value })}
             placeholder='Résumé du projet…'
+          />
+        </div>
+        <div className='grid grid-cols-1 sm:grid-cols-2 gap-4'>
+          <div>
+            <label className='label'>Client</label>
+            <select
+              className='input'
+              value={form.clientId}
+              onChange={(e) => setForm({ ...form, clientId: e.target.value })}
+            >
+              <option value=''>— Aucun —</option>
+              {clients.map((c) => (
+                <option key={c.id} value={c.id}>{c.name}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className='label'>Statut</label>
+            <select
+              className='input'
+              value={form.status}
+              onChange={(e) => setForm({ ...form, status: e.target.value })}
+            >
+              {Object.entries(STATUS).map(([val, { label }]) => (
+                <option key={val} value={val}>{label}</option>
+              ))}
+            </select>
+          </div>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
+function EditProjectModal({ project, clients, onClose }: { project: any; clients: any[]; onClose: () => void }) {
+  const [form, setForm] = useState({
+    name: project.name || '',
+    description: project.description || '',
+    clientId: project.clientId || '',
+    status: project.status || 'en_cours',
+  });
+  const [saving, setSaving] = useState(false);
+
+  const onSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSaving(true);
+    try {
+      await updateProject({
+        id: project.id,
+        name: form.name,
+        description: form.description || undefined,
+        clientId: form.clientId || null,
+        status: form.status,
+      });
+      toast.success('Projet modifié');
+      onClose();
+    } catch (err: any) {
+      toast.error(err?.message || 'Une erreur est survenue');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title='Modifier le projet'
+      footer={
+        <>
+          <button className='btn-secondary' onClick={onClose}>Annuler</button>
+          <button form='edit-project-form' type='submit' className='btn-primary' disabled={saving}>
+            {saving ? 'Enregistrement…' : 'Enregistrer'}
+          </button>
+        </>
+      }
+    >
+      <form id='edit-project-form' onSubmit={onSubmit} className='flex flex-col gap-4'>
+        <div>
+          <label className='label'>Titre du projet *</label>
+          <input
+            className='input'
+            required
+            autoFocus
+            value={form.name}
+            onChange={(e) => setForm({ ...form, name: e.target.value })}
+          />
+        </div>
+        <div>
+          <label className='label'>Description</label>
+          <textarea
+            className='input'
+            rows={3}
+            value={form.description}
+            onChange={(e) => setForm({ ...form, description: e.target.value })}
           />
         </div>
         <div className='grid grid-cols-1 sm:grid-cols-2 gap-4'>
