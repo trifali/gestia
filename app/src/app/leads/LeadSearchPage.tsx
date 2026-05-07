@@ -820,9 +820,11 @@ function LeadsTable({ searchId, onBack, onShowDetails }: { searchId: string; onB
 function SearchList({
   onSelect,
   onNew,
+  onDuplicate,
 }: {
   onSelect: (id: string) => void;
   onNew: () => void;
+  onDuplicate: (values: Partial<ReturnType<typeof defaultForm>>) => void;
 }) {
   const { data: searches, isLoading } = useQuery(getLeadSearches);
   const { ask, Dialog: ConfirmDialog } = useConfirm();
@@ -872,7 +874,22 @@ function SearchList({
                 <h3 className='font-semibold text-sm leading-tight group-hover:text-accent-700 transition-colors'>
                   {s.title}
                 </h3>
-                <div onClick={e => e.stopPropagation()}>
+                <div onClick={e => e.stopPropagation()} className='flex items-center gap-1'>
+                  <IconBtn
+                    title='Dupliquer les filtres'
+                    onClick={() => onDuplicate({
+                      businessType: f.businessType ?? '',
+                      city: f.city ?? '',
+                      province: f.province ?? 'QC',
+                      radius: f.radius ?? 10000,
+                      minRating: f.minRating ?? 0,
+                      requireWebsite: f.requireWebsite ?? false,
+                      maxResults: f.maxResults ?? 20,
+                      language: f.language ?? 'fr',
+                    })}
+                  >
+                    <LuRefreshCw size={14} />
+                  </IconBtn>
                   <IconBtn
                     variant='danger'
                     title='Supprimer'
@@ -938,18 +955,23 @@ export default function LeadSearchPage() {
     setShowForm(true);
   }
 
+  function handleDuplicate(values: Partial<ReturnType<typeof defaultForm>>) {
+    setFormPrefill({ ...values, title: '' });
+    setShowForm(true);
+  }
+
   return (
     <>
       <Modal
         open={showForm}
-        title={formPrefill ? 'Détails de la recherche' : 'Nouvelle prospection'}
+        title={formPrefill && selectedId ? 'Détails de la recherche' : formPrefill ? 'Dupliquer la recherche' : 'Nouvelle prospection'}
         onClose={() => { setShowForm(false); setFormPrefill(undefined); }}
       >
         <SearchForm
           onClose={() => { setShowForm(false); setFormPrefill(undefined); }}
           onDone={handleDone}
           initialValues={formPrefill}
-          readOnly={!!formPrefill}
+          readOnly={!!(formPrefill && selectedId)}
         />
       </Modal>
 
@@ -969,7 +991,7 @@ export default function LeadSearchPage() {
       {selectedId ? (
         <LeadsTable searchId={selectedId} onBack={handleBack} onShowDetails={handleShowDetails} />
       ) : (
-        <SearchList onSelect={handleSelect} onNew={() => setShowForm(true)} />
+        <SearchList onSelect={handleSelect} onNew={() => setShowForm(true)} onDuplicate={handleDuplicate} />
       )}
     </>
   );
