@@ -533,7 +533,7 @@ query getLeadSearches {
 }
 query getLeadSearchDetail {
   fn: import { getLeadSearchDetail } from "@src/app/leads/operations",
-  entities: [User, LeadSearch, Lead, LeadNote]
+  entities: [User, LeadSearch, Lead, LeadNote, LeadEmailLog, LeadEmailDraft]
 }
 action searchLeads {
   fn: import { searchLeads } from "@src/app/leads/operations",
@@ -582,6 +582,22 @@ action addLeadNote {
 action deleteLeadNote {
   fn: import { deleteLeadNote } from "@src/app/leads/operations",
   entities: [User, LeadNote]
+}
+action sendProspectEmail {
+  fn: import { sendProspectEmail } from "@src/app/leads/operations",
+  entities: [User, Company, LeadEmailLog, LeadEmailDraft]
+}
+query getLeadEmailDraft {
+  fn: import { getLeadEmailDraft } from "@src/app/leads/operations",
+  entities: [User, LeadEmailDraft]
+}
+action saveLeadEmailDraft {
+  fn: import { saveLeadEmailDraft } from "@src/app/leads/operations",
+  entities: [User, LeadEmailDraft]
+}
+action clearLeadEmailSent {
+  fn: import { clearLeadEmailSent } from "@src/app/leads/operations",
+  entities: [User, LeadEmailLog]
 }
 
 query getPriceItems {

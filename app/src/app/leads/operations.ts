@@ -1,4 +1,5 @@
 import { HttpError } from 'wasp/server';
+import { sendEmailWithAttachment } from '../../server/mail';
 import type {
   GetLeadSearches,
   GetLeadSearchDetail,
@@ -171,18 +172,33 @@ export const getLeadSearchDetail: GetLeadSearchDetail<
 
   // Attach hasNotes flag (per placeId or lead.id)
   const identifiers = search.leads.map(l => l.placeId ?? l.id);
-  const notedIdentifiers = identifiers.length
-    ? await (context.entities as any).LeadNote.findMany({
-        where: { companyId, identifier: { in: identifiers } },
-        select: { identifier: true },
-        distinct: ['identifier'],
-      })
-    : [];
+  const [notedIdentifiers, emailedIdentifiers, draftIdentifiers] = identifiers.length
+    ? await Promise.all([
+        (context.entities as any).LeadNote.findMany({
+          where: { companyId, identifier: { in: identifiers } },
+          select: { identifier: true },
+          distinct: ['identifier'],
+        }),
+        (context.entities as any).LeadEmailLog.findMany({
+          where: { companyId, identifier: { in: identifiers } },
+          select: { identifier: true },
+          distinct: ['identifier'],
+        }),
+        (context.entities as any).LeadEmailDraft.findMany({
+          where: { companyId, identifier: { in: identifiers } },
+          select: { identifier: true },
+        }),
+      ])
+    : [[], [], []];
   const noteSet = new Set<string>(notedIdentifiers.map((n: any) => n.identifier));
+  const emailSet = new Set<string>(emailedIdentifiers.map((e: any) => e.identifier));
+  const draftSet = new Set<string>(draftIdentifiers.map((d: any) => d.identifier));
 
   const leadsWithFlags = leadsWithDups.map(l => ({
     ...l,
     hasNotes: noteSet.has(l.placeId ?? l.id),
+    hasEmailSent: emailSet.has(l.placeId ?? l.id),
+    hasEmailDraft: draftSet.has(l.placeId ?? l.id),
   }));
 
   return { ...search, leads: leadsWithFlags } as any;
@@ -606,4 +622,98 @@ export const deleteLeadNote = async (
   if (!note || note.companyId !== companyId) throw new HttpError(404);
   await (context.entities as any).LeadNote.delete({ where: { id } });
   return { id };
+};
+
+export const sendProspectEmail = async (
+  args: { identifier: string; to: string; cc?: string | null; subject: string; body: string },
+  context: any,
+): Promise<{ ok: true }> => {
+  const companyId = ensureCompany(context.user);
+  const to = args.to.trim();
+  if (!to) throw new HttpError(400, 'Destinataire requis');
+  if (!args.subject?.trim()) throw new HttpError(400, 'Objet requis');
+
+  const company = await (context.entities as any).Company.findUnique({
+    where: { id: companyId },
+    select: { name: true, email: true },
+  });
+
+  const html = `<div style="font-family: Arial, sans-serif; font-size: 14px; color:#1a1a1a; white-space: pre-wrap;">${args.body
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/\n/g, '<br/>')}</div>`;
+
+  await sendEmailWithAttachment({
+    to,
+    cc: args.cc?.trim() || undefined,
+    subject: args.subject.trim(),
+    text: args.body,
+    html,
+    fromName: company?.name || 'Gestia',
+  });
+
+  // Log the sent email
+  await (context.entities as any).LeadEmailLog.create({
+    data: {
+      companyId,
+      identifier: args.identifier,
+      to,
+      cc: args.cc?.trim() || null,
+      subject: args.subject.trim(),
+    },
+  });
+
+  // Clear the draft after successful send
+  await (context.entities as any).LeadEmailDraft.deleteMany({
+    where: { companyId, identifier: args.identifier },
+  });
+
+  return { ok: true };
+};
+
+export const getLeadEmailDraft = async (
+  { identifier }: { identifier: string },
+  context: any,
+): Promise<any | null> => {
+  const companyId = ensureCompany(context.user);
+  return (context.entities as any).LeadEmailDraft.findUnique({
+    where: { companyId_identifier: { companyId, identifier } },
+  });
+};
+
+export const saveLeadEmailDraft = async (
+  args: { identifier: string; to: string; cc: string; subject: string; body: string },
+  context: any,
+): Promise<{ ok: true }> => {
+  const companyId = ensureCompany(context.user);
+  await (context.entities as any).LeadEmailDraft.upsert({
+    where: { companyId_identifier: { companyId, identifier: args.identifier } },
+    create: {
+      companyId,
+      identifier: args.identifier,
+      to: args.to,
+      cc: args.cc,
+      subject: args.subject,
+      body: args.body,
+    },
+    update: {
+      to: args.to,
+      cc: args.cc,
+      subject: args.subject,
+      body: args.body,
+    },
+  });
+  return { ok: true };
+};
+
+export const clearLeadEmailSent = async (
+  { identifier }: { identifier: string },
+  context: any,
+): Promise<{ ok: true }> => {
+  const companyId = ensureCompany(context.user);
+  await (context.entities as any).LeadEmailLog.deleteMany({
+    where: { companyId, identifier },
+  });
+  return { ok: true };
 };

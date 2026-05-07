@@ -85,6 +85,8 @@ model Company {
   prospectStatuses  ProspectStatus[]
   leadStatusConfigs LeadStatusConfig[]
   leadNotes         LeadNote[]
+  leadEmailLogs     LeadEmailLog[]
+  leadEmailDrafts   LeadEmailDraft[]
 }
 
 model Client {
@@ -509,5 +511,38 @@ model LeadNote {
   identifier String // placeId when available, else lead.id
   text       String
 
+  @@index([companyId, identifier])
+}
+
+// Sent email log for a prospect (append-only, keyed by identifier)
+model LeadEmailLog {
+  id        String   @id @default(uuid())
+  createdAt DateTime @default(now())
+
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  companyId String
+
+  identifier String // placeId when available, else lead.id
+  to         String
+  cc         String?
+  subject    String
+
+  @@index([companyId, identifier])
+}
+
+// Draft email content for a prospect (one per identifier, upserted)
+model LeadEmailDraft {
+  id String @id @default(uuid())
+
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  companyId String
+
+  identifier String
+  to         String @default("")
+  cc         String @default("")
+  subject    String @default("")
+  body       String @default("")
+
+  @@unique([companyId, identifier])
   @@index([companyId, identifier])
 }
