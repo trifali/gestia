@@ -2147,7 +2147,28 @@ function LeadsTable({ searchId, onBack, onShowDetails }: { searchId: string; onB
             <LuChevronLeft size={16} /> Retour
           </button>
           <div>
-            <h2 className='text-lg font-semibold'>{search.title}</h2>
+            <div className='flex items-center gap-1.5'>
+              <h2 className='text-lg font-semibold'>{search.title}</h2>
+              <button
+                className='w-6 h-6 rounded flex items-center justify-center hover:bg-canvas text-muted hover:text-ink transition-colors'
+                title='Détails de la recherche'
+                onClick={() => onShowDetails({
+                  title: search.title,
+                  description: (search as any).description ?? '',
+                  purpose: (search as any).purpose ?? '',
+                  businessType: filters.businessType ?? '',
+                  city: filters.city ?? '',
+                  province: filters.province ?? 'QC',
+                  radius: filters.radius ?? 10000,
+                  minRating: filters.minRating ?? 0,
+                  requireWebsite: filters.requireWebsite ?? false,
+                  maxResults: filters.maxResults ?? 20,
+                  language: filters.language ?? 'fr',
+                })}
+              >
+                <LuEye size={14} />
+              </button>
+            </div>
             {search.description && (
               <p className='text-sm text-muted italic mb-1'>{search.description}</p>
             )}
@@ -2201,25 +2222,6 @@ function LeadsTable({ searchId, onBack, onShowDetails }: { searchId: string; onB
               Liste
             </button>
           </div>
-          <button
-            className='btn-ghost gap-2 text-sm'
-            onClick={() => onShowDetails({
-              title: search.title,
-              description: (search as any).description ?? '',
-              purpose: (search as any).purpose ?? '',
-              businessType: filters.businessType ?? '',
-              city: filters.city ?? '',
-              province: filters.province ?? 'QC',
-              radius: filters.radius ?? 10000,
-              minRating: filters.minRating ?? 0,
-              requireWebsite: filters.requireWebsite ?? false,
-              maxResults: filters.maxResults ?? 20,
-              language: filters.language ?? 'fr',
-            })}
-          >
-            <LuSlidersHorizontal size={15} />
-            Détails de la recherche
-          </button>
           <button className='btn-ghost gap-2' onClick={() => setShowEmailTemplate(true)}>
             <LuFilePen size={15} />
             Modèle courriel
