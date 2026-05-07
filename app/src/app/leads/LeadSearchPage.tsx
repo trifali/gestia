@@ -49,8 +49,7 @@ import {
   LuPlus,
   LuPencil,
   LuTrash2,
-  LuChevronUp,
-  LuChevronDown,
+  LuGripVertical,
   LuLock,
 } from 'react-icons/lu';
 
@@ -550,9 +549,13 @@ function ManageStatusesModal({
   onRefresh: () => void;
   onClose: () => void;
 }) {
-  // Separate editable configs from the virtual unknown
-  const editable = configs.filter(c => c.key !== 'unknown');
   const unknownEntry = configs.find(c => c.key === 'unknown');
+
+  // Local ordered list for instant visual feedback
+  const [ordered, setOrdered] = useState(() => configs.filter(c => c.key !== 'unknown'));
+  useEffect(() => {
+    setOrdered(configs.filter(c => c.key !== 'unknown'));
+  }, [configs]);
 
   const [editId, setEditId] = useState<string | null>(null);
   const [editLabel, setEditLabel] = useState('');
@@ -561,6 +564,8 @@ function ManageStatusesModal({
   const [newColor, setNewColor] = useState('#6366f1');
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const dragIndex = useRef<number | null>(null);
+  const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
 
   function startEdit(c: LeadStatusConfig) {
     setEditId(c.id);
@@ -605,7 +610,7 @@ function ManageStatusesModal({
         key: newLabel,
         label: newLabel.trim(),
         color: newColor,
-        order: editable.length,
+        order: ordered.length,
       });
       setNewLabel('');
       setNewColor('#6366f1');
@@ -617,27 +622,51 @@ function ManageStatusesModal({
     }
   }
 
-  async function move(index: number, direction: -1 | 1) {
-    const newList = [...editable];
-    const target = index + direction;
-    if (target < 0 || target >= newList.length) return;
-    [newList[index], newList[target]] = [newList[target], newList[index]];
-    const items = newList.map((c, i) => ({ id: c.id, order: i }));
-    setSaving(true);
+  function handleDragStart(index: number) {
+    dragIndex.current = index;
+  }
+
+  function handleDragEnter(index: number) {
+    if (dragIndex.current === null || dragIndex.current === index) return;
+    setDragOverIndex(index);
+    const newList = [...ordered];
+    const [moved] = newList.splice(dragIndex.current, 1);
+    newList.splice(index, 0, moved);
+    dragIndex.current = index;
+    setOrdered(newList);
+  }
+
+  async function handleDragEnd() {
+    setDragOverIndex(null);
+    dragIndex.current = null;
+    const items = ordered.map((c, i) => ({ id: c.id, order: i }));
     try {
       await reorderLeadStatusConfigs({ items });
       onRefresh();
     } catch {
       toast.error('Erreur lors du réordonnancement');
-    } finally {
-      setSaving(false);
     }
   }
 
   return (
-    <div className='space-y-2'>
-      {editable.map((c, index) => (
-        <div key={c.id} className='flex items-center gap-2 p-2.5 rounded-xl border border-line'>
+    <div className='space-y-4'>
+      <div className='flex items-start gap-2.5 rounded-xl border border-amber-200 bg-amber-50 px-3.5 py-3 text-sm text-amber-800'>
+        <LuTriangleAlert size={15} className='shrink-0 mt-0.5' />
+        <p>Toute modification (renommage, réordonnancement, suppression) s'applique immédiatement à tous les prospects existants.</p>
+      </div>
+      <div className='space-y-2'>
+      {ordered.map((c, index) => (
+        <div
+          key={c.id}
+          draggable
+          onDragStart={() => handleDragStart(index)}
+          onDragEnter={() => handleDragEnter(index)}
+          onDragEnd={handleDragEnd}
+          onDragOver={e => e.preventDefault()}
+          className={`flex items-center gap-2 p-2.5 rounded-xl border transition-colors ${
+            dragOverIndex === index ? 'border-accent-400 bg-accent-50' : 'border-line'
+          }`}
+        >
           {editId === c.id ? (
             <>
               <input
@@ -662,25 +691,10 @@ function ManageStatusesModal({
             </>
           ) : (
             <>
-              {/* Reorder arrows */}
-              <div className='flex flex-col gap-0'>
-                <button
-                  className='text-muted hover:text-ink disabled:opacity-25 transition-colors'
-                  onClick={() => move(index, -1)}
-                  disabled={saving || index === 0}
-                  title='Monter'
-                >
-                  <LuChevronUp size={14} />
-                </button>
-                <button
-                  className='text-muted hover:text-ink disabled:opacity-25 transition-colors'
-                  onClick={() => move(index, 1)}
-                  disabled={saving || index === editable.length - 1}
-                  title='Descendre'
-                >
-                  <LuChevronDown size={14} />
-                </button>
-              </div>
+              {/* Drag handle */}
+              <span className='text-muted cursor-grab active:cursor-grabbing shrink-0' title='Glisser pour réordonner'>
+                <LuGripVertical size={16} />
+              </span>
               <div className='w-4 h-4 rounded-full shrink-0' style={{ backgroundColor: c.color }} />
               <span className='flex-1 text-sm font-medium'>{c.label}</span>
               <span className='text-xs text-muted font-mono bg-canvas px-1.5 py-0.5 rounded'>{c.key}</span>
@@ -719,18 +733,16 @@ function ManageStatusesModal({
       {/* Locked unknown row */}
       {unknownEntry && (
         <div className='flex items-center gap-2 p-2.5 rounded-xl border border-line bg-canvas opacity-60'>
-          <div className='w-4 h-14 shrink-0' /> {/* spacer for arrows */}
+          <span className='shrink-0'><LuLock size={14} className='text-muted' /></span>
           <div className='w-4 h-4 rounded-full shrink-0' style={{ backgroundColor: unknownEntry.color }} />
           <span className='flex-1 text-sm font-medium'>{unknownEntry.label}</span>
           <span className='text-xs text-muted font-mono bg-canvas px-1.5 py-0.5 rounded'>{unknownEntry.key}</span>
-          <span className='flex items-center gap-1 text-xs text-muted ml-1'>
-            <LuLock size={12} />
-            Verrouillé
-          </span>
+          <span className='text-xs text-muted'>Verrouillé</span>
         </div>
       )}
+      </div>
 
-      <hr className='border-line my-3' />
+      <hr className='border-line' />
 
       <form onSubmit={handleCreate} className='flex items-center gap-2'>
         <input
