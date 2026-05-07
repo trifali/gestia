@@ -96,6 +96,7 @@ import {
   LuUserPlus,
   LuUserCheck,
   LuClock,
+  LuChevronDown,
 } from 'react-icons/lu';
 import { MagicInput, MagicTextarea } from '../../client/magic';
 
@@ -1466,6 +1467,22 @@ function LeadsKanban({
   const [fetchExhausted, setFetchExhausted] = useState<{ nextExpandedRadiusKm: number; currentRadiusKm: number } | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Lead | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [openSections, setOpenSections] = useState<Set<string>>(() => new Set<string>());
+  function toggleSection(key: string) {
+    setOpenSections(prev => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key); else next.add(key);
+      return next;
+    });
+  }
+  async function handleStatusChange(leadId: string, newStatus: string) {
+    try {
+      await updateLead({ id: leadId, status: newStatus });
+      refetch();
+    } catch {
+      toast.error('Erreur lors de la mise à jour du statut');
+    }
+  }
   function toggleFilter(key: string) {
     setActiveFilters(prev => {
       const next = new Set(prev);
@@ -1864,58 +1881,218 @@ function LeadsKanban({
         )}
       </Modal>
 
-      <div className='overflow-x-auto -mx-4 px-4'>
-        {/* Quick filters */}
-        {(() => {
-          const chips: { key: string; label: string; title: string }[] = [
-            { key: 'no_email', label: '✉ Sans courriel', title: 'Afficher uniquement les prospects sans courriel' },
-            { key: 'no_website', label: '🌐 Sans site web', title: 'Afficher uniquement les prospects sans site web' },
-            { key: 'email_mismatch', label: '⚠ Courriel hors domaine', title: 'Courriel dont le domaine ne correspond pas au site web (opportunité de vente)' },
-          ];
-          const isFiltered = activeFilters.size > 0 || searchQuery.trim() !== '';
+      {/* Quick filters */}
+      {(() => {
+        const chips: { key: string; label: string; title: string }[] = [
+          { key: 'no_email', label: '✉ Sans courriel', title: 'Afficher uniquement les prospects sans courriel' },
+          { key: 'no_website', label: '🌐 Sans site web', title: 'Afficher uniquement les prospects sans site web' },
+          { key: 'email_mismatch', label: '⚠ Courriel hors domaine', title: 'Courriel dont le domaine ne correspond pas au site web (opportunité de vente)' },
+        ];
+        const isFiltered = activeFilters.size > 0 || searchQuery.trim() !== '';
+        return (
+          <div className='flex items-center gap-2 flex-wrap pb-3'>
+            <div className='relative'>
+              <LuSearch size={13} className='absolute left-2.5 top-1/2 -translate-y-1/2 text-muted pointer-events-none' />
+              <input
+                type='text'
+                value={searchQuery}
+                onChange={e => setSearchQuery(e.target.value)}
+                placeholder='Rechercher…'
+                className='text-xs pl-7 pr-2.5 py-1 rounded-full border border-line bg-canvas text-ink placeholder-muted focus:outline-none focus:border-accent-400 w-40'
+              />
+            </div>
+            {chips.map(c => (
+              <button
+                key={c.key}
+                title={c.title}
+                onClick={() => toggleFilter(c.key)}
+                className={`text-xs px-2.5 py-1 rounded-full border transition-colors ${
+                  activeFilters.has(c.key)
+                    ? 'bg-accent-600 border-accent-600 text-white'
+                    : 'bg-canvas border-line text-muted hover:border-accent-400 hover:text-ink'
+                }`}
+              >
+                {c.label}
+              </button>
+            ))}
+            {isFiltered && (
+              <button
+                onClick={() => onResetFilters()}
+                className='text-xs px-2 py-1 text-muted hover:text-ink transition-colors'
+                title='Réinitialiser les filtres'
+              >
+                Réinitialiser
+              </button>
+            )}
+            {isFiltered && (
+              <span className='text-xs text-muted ml-auto'>
+                {filteredLeads.length} / {leads.length} prospect{leads.length !== 1 ? 's' : ''}
+              </span>
+            )}
+          </div>
+        );
+      })()}
+
+      {/* Mobile accordion view */}
+      <div className='sm:hidden space-y-2'>
+        {statusConfigs.map(col => {
+          const colLeads = filteredLeads.filter(l => l.status === col.key);
+          const isOpen = openSections.has(col.key);
           return (
-            <div className='flex items-center gap-2 flex-wrap pb-3'>
-              <div className='relative'>
-                <LuSearch size={13} className='absolute left-2.5 top-1/2 -translate-y-1/2 text-muted pointer-events-none' />
-                <input
-                  type='text'
-                  value={searchQuery}
-                  onChange={e => setSearchQuery(e.target.value)}
-                  placeholder='Rechercher…'
-                  className='text-xs pl-7 pr-2.5 py-1 rounded-full border border-line bg-canvas text-ink placeholder-muted focus:outline-none focus:border-accent-400 w-40'
-                />
+            <div key={col.key} className='rounded-xl border border-line overflow-hidden'>
+              <div
+                className='w-full flex items-center gap-2 px-3 py-2.5 cursor-pointer select-none'
+                onClick={() => toggleSection(col.key)}
+                role='button'
+                tabIndex={0}
+                onKeyDown={e => (e.key === 'Enter' || e.key === ' ') && toggleSection(col.key)}
+              >
+                <div className='w-3 h-3 rounded-full shrink-0' style={{ backgroundColor: col.color ?? '#6366f1' }} />
+                <span className='font-semibold text-sm flex-1 text-left'>{col.label}</span>
+                <span className='text-xs text-muted bg-canvas px-1.5 py-0.5 rounded-full'>{colLeads.length}</span>
+                {col.key === 'nouveau' && (
+                  <button
+                    className='w-6 h-6 rounded flex items-center justify-center text-muted hover:text-ink hover:bg-canvas'
+                    onClick={e => { e.stopPropagation(); setShowFetchConfirm(true); }}
+                    disabled={fetchingMore}
+                  >
+                    {fetchingMore ? <LuLoader size={12} className='animate-spin' /> : <LuPlus size={12} />}
+                  </button>
+                )}
+                <LuChevronDown size={14} className={`text-muted transition-transform shrink-0 ${isOpen ? 'rotate-180' : ''}`} />
               </div>
-              {chips.map(c => (
-                <button
-                  key={c.key}
-                  title={c.title}
-                  onClick={() => toggleFilter(c.key)}
-                  className={`text-xs px-2.5 py-1 rounded-full border transition-colors ${
-                    activeFilters.has(c.key)
-                      ? 'bg-accent-600 border-accent-600 text-white'
-                      : 'bg-canvas border-line text-muted hover:border-accent-400 hover:text-ink'
-                  }`}
-                >
-                  {c.label}
-                </button>
-              ))}
-              {isFiltered && (
-                <button
-                  onClick={() => onResetFilters()}
-                  className='text-xs px-2 py-1 text-muted hover:text-ink transition-colors'
-                  title='Réinitialiser les filtres'
-                >
-                  Réinitialiser
-                </button>
-              )}
-              {isFiltered && (
-                <span className='text-xs text-muted ml-auto'>
-                  {filteredLeads.length} / {leads.length} prospect{leads.length !== 1 ? 's' : ''}
-                </span>
+              {isOpen && (
+                <div className='divide-y divide-line border-t border-line'>
+                  {colLeads.length === 0 ? (
+                    <div className='text-xs text-muted text-center py-4 italic'>Aucun prospect</div>
+                  ) : colLeads.map(lead => {
+                    const movedAt = (lead as any).statusUpdatedAt ? new Date((lead as any).statusUpdatedAt) : null;
+                    const movedLabel = movedAt
+                      ? movedAt.toLocaleDateString('fr-CA', { day: 'numeric', month: 'short' }) + ' ' + movedAt.toLocaleTimeString('fr-CA', { hour: '2-digit', minute: '2-digit' })
+                      : null;
+                    return (
+                      <div key={lead.id} className='p-3 space-y-2'>
+                        <div className='flex items-start gap-2'>
+                          <div className='flex-1 min-w-0'>
+                            <div className='font-semibold text-sm leading-tight'>{lead.name}</div>
+                            {movedLabel && (
+                              <div className='flex items-center gap-1 text-[10px] text-muted mt-0.5'>
+                                <LuClock size={9} className='shrink-0' />
+                                <span>{movedLabel}</span>
+                              </div>
+                            )}
+                          </div>
+                          <select
+                            value={lead.status}
+                            onChange={e => handleStatusChange(lead.id, e.target.value)}
+                            className='text-xs px-1.5 py-0.5 rounded border border-line bg-canvas text-ink shrink-0'
+                            onClick={e => e.stopPropagation()}
+                          >
+                            {statusConfigs.map(s => (
+                              <option key={s.key} value={s.key}>{s.label}</option>
+                            ))}
+                          </select>
+                        </div>
+                        <div className='space-y-0.5'>
+                          {lead.website && (
+                            <div className='flex items-center gap-1.5 text-xs'>
+                              <LuGlobe size={10} className='text-muted shrink-0' />
+                              <a href={lead.website} target='_blank' rel='noopener noreferrer' className='text-accent-700 hover:underline truncate'>
+                                {lead.website.replace(/^https?:\/\//, '').replace(/\/$/, '')}
+                              </a>
+                            </div>
+                          )}
+                          {lead.phone && (
+                            <div className='flex items-center gap-1.5 text-xs'>
+                              <LuPhone size={10} className='text-muted shrink-0' />
+                              <a href={`tel:${lead.phone}`} className='text-accent-700 hover:underline'>{lead.phone}</a>
+                            </div>
+                          )}
+                          {lead.email && (
+                            <div className='flex items-center gap-1.5 text-xs'>
+                              <LuMail size={10} className='text-muted shrink-0' />
+                              <a href={`mailto:${lead.email}`} className='text-accent-700 hover:underline truncate'>{lead.email}</a>
+                            </div>
+                          )}
+                        </div>
+                        <div className='flex items-center gap-1'>
+                          {(lead.rating != null || lead.mapsUrl) && (
+                            <div className='flex items-center gap-1.5 flex-1'>
+                              {lead.rating != null && (
+                                <span className='flex items-center gap-0.5 text-xs'>
+                                  <LuStar size={10} className='text-amber-400 fill-amber-400' />
+                                  <span className='font-medium'>{Number(lead.rating).toFixed(1)}</span>
+                                </span>
+                              )}
+                              {lead.mapsUrl && (
+                                <a href={lead.mapsUrl} target='_blank' rel='noopener noreferrer' className='text-xs text-accent-700 hover:underline flex items-center gap-0.5'>
+                                  <LuExternalLink size={10} />Maps
+                                </a>
+                              )}
+                            </div>
+                          )}
+                          <div className='flex items-center gap-1 ml-auto'>
+                            {lead.email && (
+                              <button
+                                className='w-7 h-7 rounded flex items-center justify-center hover:bg-canvas text-muted hover:text-ink transition-colors relative'
+                                title='Envoyer un courriel'
+                                onClick={() => onEmailRef.current(lead)}
+                              >
+                                <LuSend size={12} />
+                                {(lead as any).hasEmailSent ? <span className='absolute -top-0.5 -right-0.5 w-1.5 h-1.5 rounded-full bg-success pointer-events-none' /> : (lead as any).hasEmailDraft ? <span className='absolute -top-0.5 -right-0.5 w-1.5 h-1.5 rounded-full bg-amber-400 pointer-events-none' /> : null}
+                              </button>
+                            )}
+                            <button
+                              className='w-7 h-7 rounded flex items-center justify-center hover:bg-canvas text-muted hover:text-ink transition-colors relative'
+                              title={lead.notes || (lead as any).hasNotes ? 'Voir les notes' : 'Ajouter une note'}
+                              onClick={() => onNoteRef.current(lead)}
+                            >
+                              <LuNotebook size={12} />
+                              {((lead as any).hasNotes || (lead as any).notes) && <span className='absolute -top-0.5 -right-0.5 w-1.5 h-1.5 rounded-full bg-accent-500 pointer-events-none' />}
+                            </button>
+                            <button
+                              className='w-7 h-7 rounded flex items-center justify-center hover:bg-canvas text-muted hover:text-ink transition-colors'
+                              title='Modifier'
+                              onClick={() => onEditRef.current(lead)}
+                            >
+                              <LuPencil size={12} />
+                            </button>
+                            <button
+                              className='w-7 h-7 rounded flex items-center justify-center hover:bg-red-50 text-muted hover:text-red-500 transition-colors'
+                              title='Supprimer'
+                              onClick={() => setDeleteTarget(lead)}
+                            >
+                              <LuTrash2 size={12} />
+                            </button>
+                            {lead.status === 'qualifie' && (
+                              existingClientNamesRef.current.has(lead.name.toLowerCase()) ? (
+                                <span className='w-7 h-7 rounded flex items-center justify-center text-muted' title='Déjà ajouté comme client'>
+                                  <LuUserCheck size={12} />
+                                </span>
+                              ) : (
+                                <button
+                                  className='w-7 h-7 rounded flex items-center justify-center hover:bg-canvas text-emerald-600 hover:text-emerald-700 transition-colors'
+                                  title='Créer un client depuis ce prospect'
+                                  onClick={() => onConvertRef.current(lead)}
+                                >
+                                  <LuUserPlus size={12} />
+                                </button>
+                              )
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
               )}
             </div>
           );
-        })()}
+        })}
+      </div>
+
+      {/* Desktop kanban */}
+      <div className='hidden sm:block overflow-x-auto -mx-4 px-4'>
         <KanbanComponent
           id='prospect-kanban'
           keyField='status'
@@ -2141,16 +2318,18 @@ function LeadsTable({ searchId, onBack, onShowDetails }: { searchId: string; onB
       </Modal>
 
       {/* Header */}
-      <div className='flex items-start justify-between gap-4 mb-5'>
-        <div className='flex items-center gap-3'>
-          <button className='btn-ghost gap-1.5 text-sm' onClick={onBack}>
+      <div className='flex flex-col gap-3 mb-5'>
+        {/* Top row: back + title + actions */}
+        <div className='flex items-start gap-2 sm:gap-4'>
+          <button className='btn-ghost gap-1.5 text-sm shrink-0' onClick={onBack}>
             <LuChevronLeft size={16} /> Retour
           </button>
-          <div>
+          {/* Title block */}
+          <div className='flex-1 min-w-0'>
             <div className='flex items-center gap-1.5'>
-              <h2 className='text-lg font-semibold'>{search.title}</h2>
+              <h2 className='text-base sm:text-lg font-semibold truncate'>{search.title}</h2>
               <button
-                className='w-6 h-6 rounded flex items-center justify-center hover:bg-canvas text-muted hover:text-ink transition-colors'
+                className='w-6 h-6 rounded flex items-center justify-center hover:bg-canvas text-muted hover:text-ink transition-colors shrink-0'
                 title='Détails de la recherche'
                 onClick={() => onShowDetails({
                   title: search.title,
@@ -2170,10 +2349,10 @@ function LeadsTable({ searchId, onBack, onShowDetails }: { searchId: string; onB
               </button>
             </div>
             {search.description && (
-              <p className='text-sm text-muted italic mb-1'>{search.description}</p>
+              <p className='text-sm text-muted italic'>{search.description}</p>
             )}
             {(search as any).purpose && (
-              <p className='text-xs text-muted mb-1'>Objectif : {(search as any).purpose}</p>
+              <p className='text-xs text-muted'>Objectif : {(search as any).purpose}</p>
             )}
             <div className='flex flex-wrap gap-1.5 mt-1'>
               {filters.businessType && (
@@ -2206,7 +2385,9 @@ function LeadsTable({ searchId, onBack, onShowDetails }: { searchId: string; onB
             </div>
           </div>
         </div>
-        <div className='flex items-center gap-2 shrink-0'>
+
+        {/* Action bar: view toggle + buttons (wraps on mobile) */}
+        <div className='flex items-center gap-2 flex-wrap'>
           {/* View toggle */}
           <div className='flex items-center border border-line rounded-lg overflow-hidden text-xs font-medium'>
             <button
@@ -2222,13 +2403,15 @@ function LeadsTable({ searchId, onBack, onShowDetails }: { searchId: string; onB
               Liste
             </button>
           </div>
-          <button className='btn-ghost gap-2' onClick={() => setShowEmailTemplate(true)}>
-            <LuFilePen size={15} />
-            Modèle courriel
+          <button className='btn-ghost gap-1.5 text-sm' onClick={() => setShowEmailTemplate(true)}>
+            <LuFilePen size={14} />
+            <span className='hidden xs:inline'>Modèle courriel</span>
+            <span className='xs:hidden'>Modèle</span>
           </button>
-          <button className='btn-secondary gap-2' onClick={handleExport} disabled={exporting}>
-            {exporting ? <LuLoader size={15} className='animate-spin' /> : <LuDownload size={15} />}
-            Exporter CSV
+          <button className='btn-secondary gap-1.5 text-sm' onClick={handleExport} disabled={exporting}>
+            {exporting ? <LuLoader size={14} className='animate-spin' /> : <LuDownload size={14} />}
+            <span className='hidden xs:inline'>Exporter CSV</span>
+            <span className='xs:hidden'>CSV</span>
           </button>
         </div>
       </div>
