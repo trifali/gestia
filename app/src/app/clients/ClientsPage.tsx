@@ -34,7 +34,7 @@ export default function ClientsPage() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const filterStatus = searchParams.get('status') ?? '';
-  const [search, setSearch] = useState('');
+  const [search, setSearch] = useState(() => searchParams.get('q') ?? '');
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
 
   function toggleNote(id: string) {
@@ -66,15 +66,26 @@ export default function ClientsPage() {
           className='input max-w-xs'
           placeholder='Rechercher un client…'
           value={search}
-          onChange={(e) => setSearch(e.target.value)}
+          onChange={(e) => {
+            const v = e.target.value;
+            setSearch(v);
+            setSearchParams(prev => {
+              const next = new URLSearchParams(prev);
+              if (v) next.set('q', v); else next.delete('q');
+              return next;
+            }, { replace: true });
+          }}
         />
         <select
           className='input w-auto'
           value={filterStatus}
           onChange={(e) => {
             const v = e.target.value;
-            if (v) setSearchParams({ status: v }, { replace: true });
-            else setSearchParams({}, { replace: true });
+            setSearchParams(prev => {
+              const next = new URLSearchParams(prev);
+              if (v) next.set('status', v); else next.delete('status');
+              return next;
+            }, { replace: true });
           }}
         >
           <option value=''>Tous les statuts</option>
