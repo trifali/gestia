@@ -567,6 +567,10 @@ action deleteLeadStatusConfig {
   fn: import { deleteLeadStatusConfig } from "@src/app/leads/operations",
   entities: [User, LeadStatusConfig, Lead]
 }
+action reorderLeadStatusConfigs {
+  fn: import { reorderLeadStatusConfigs } from "@src/app/leads/operations",
+  entities: [User, LeadStatusConfig]
+}
 
 query getPriceItems {
   fn: import { getPriceItems } from "@src/app/prices/operations",

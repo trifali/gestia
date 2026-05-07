@@ -446,12 +446,25 @@ export const exportLeads: ExportLeads<{ searchId: string }, { csv: string }> = a
 
 // ─── Default statuses ─────────────────────────────────────────────────────────
 
+export const UNKNOWN_STATUS_KEY = 'unknown';
+
 const DEFAULT_STATUSES = [
   { key: 'nouveau',  label: 'Nouveau',  color: '#3b82f6', order: 0 },
   { key: 'contacte', label: 'Contacté', color: '#f59e0b', order: 1 },
   { key: 'qualifie', label: 'Qualifié',  color: '#10b981', order: 2 },
   { key: 'rejete',   label: 'Rejeté',   color: '#ef4444', order: 3 },
 ];
+
+// Virtual entry always appended to the list (not stored in DB)
+const VIRTUAL_UNKNOWN: any = {
+  id: '__unknown__',
+  createdAt: new Date(0),
+  companyId: '',
+  key: UNKNOWN_STATUS_KEY,
+  label: 'Statut inconnu',
+  color: '#9ca3af',
+  order: 9999,
+};
 
 // ─── Lead status config operations ───────────────────────────────────────────
 
@@ -470,9 +483,10 @@ export const getLeadStatusConfigs: GetLeadStatusConfigs<void, LeadStatusConfig[]
         })
       )
     );
-    return created;
+    return [...created, VIRTUAL_UNKNOWN];
   }
-  return configs;
+  // Always append the virtual unknown column at the end
+  return [...configs, VIRTUAL_UNKNOWN];
 };
 
 export const createLeadStatusConfig: CreateLeadStatusConfig<
@@ -495,6 +509,7 @@ export const updateLeadStatusConfig: UpdateLeadStatusConfig<
   const companyId = ensureCompany(context.user);
   const config = await (context.entities as any).LeadStatusConfig.findUnique({ where: { id } });
   if (!config || config.companyId !== companyId) throw new HttpError(404);
+  if (config.key === UNKNOWN_STATUS_KEY) throw new HttpError(400, 'Ce statut ne peut pas être modifié');
   return (context.entities as any).LeadStatusConfig.update({
     where: { id },
     data: {
@@ -512,11 +527,27 @@ export const deleteLeadStatusConfig: DeleteLeadStatusConfig<{ id: string }, { id
   const companyId = ensureCompany(context.user);
   const config = await (context.entities as any).LeadStatusConfig.findUnique({ where: { id } });
   if (!config || config.companyId !== companyId) throw new HttpError(404);
-  // Reassign leads with this status to 'nouveau'
+  if (config.key === UNKNOWN_STATUS_KEY) throw new HttpError(400, 'Ce statut ne peut pas être supprimé');
+  // Reassign leads with this status to 'unknown'
   await context.entities.Lead.updateMany({
     where: { status: config.key, search: { companyId } },
-    data: { status: 'nouveau' },
+    data: { status: UNKNOWN_STATUS_KEY },
   });
   await (context.entities as any).LeadStatusConfig.delete({ where: { id } });
   return { id };
+};
+
+export const reorderLeadStatusConfigs = async (
+  { items }: { items: { id: string; order: number }[] },
+  context: any,
+): Promise<void> => {
+  const companyId = ensureCompany(context.user);
+  await Promise.all(
+    items.map(({ id, order }: { id: string; order: number }) =>
+      (context.entities as any).LeadStatusConfig.updateMany({
+        where: { id, companyId },
+        data: { order },
+      })
+    )
+  );
 };
