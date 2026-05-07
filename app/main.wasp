@@ -551,6 +551,22 @@ action exportLeads {
   fn: import { exportLeads } from "@src/app/leads/operations",
   entities: [User, LeadSearch, Lead]
 }
+query getLeadStatusConfigs {
+  fn: import { getLeadStatusConfigs } from "@src/app/leads/operations",
+  entities: [User, LeadStatusConfig]
+}
+action createLeadStatusConfig {
+  fn: import { createLeadStatusConfig } from "@src/app/leads/operations",
+  entities: [User, LeadStatusConfig]
+}
+action updateLeadStatusConfig {
+  fn: import { updateLeadStatusConfig } from "@src/app/leads/operations",
+  entities: [User, LeadStatusConfig]
+}
+action deleteLeadStatusConfig {
+  fn: import { deleteLeadStatusConfig } from "@src/app/leads/operations",
+  entities: [User, LeadStatusConfig, Lead]
+}
 
 query getPriceItems {
   fn: import { getPriceItems } from "@src/app/prices/operations",

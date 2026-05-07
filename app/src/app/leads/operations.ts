@@ -6,8 +6,12 @@ import type {
   UpdateLead,
   DeleteLeadSearch,
   ExportLeads,
+  GetLeadStatusConfigs,
+  CreateLeadStatusConfig,
+  UpdateLeadStatusConfig,
+  DeleteLeadStatusConfig,
 } from 'wasp/server/operations';
-import type { LeadSearch, Lead } from 'wasp/entities';
+import type { LeadSearch, Lead, LeadStatusConfig } from 'wasp/entities';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -438,4 +442,81 @@ export const exportLeads: ExportLeads<{ searchId: string }, { csv: string }> = a
   const escape = (v: string) => `"${v.replace(/"/g, '""')}"`;
   const csv = [headers, ...rows].map(row => row.map(escape).join(',')).join('\n');
   return { csv };
+};
+
+// ─── Default statuses ─────────────────────────────────────────────────────────
+
+const DEFAULT_STATUSES = [
+  { key: 'nouveau',  label: 'Nouveau',  color: '#3b82f6', order: 0 },
+  { key: 'contacte', label: 'Contacté', color: '#f59e0b', order: 1 },
+  { key: 'qualifie', label: 'Qualifié',  color: '#10b981', order: 2 },
+  { key: 'rejete',   label: 'Rejeté',   color: '#ef4444', order: 3 },
+];
+
+// ─── Lead status config operations ───────────────────────────────────────────
+
+export const getLeadStatusConfigs: GetLeadStatusConfigs<void, LeadStatusConfig[]> = async (_args, context) => {
+  const companyId = ensureCompany(context.user);
+  const configs = await (context.entities as any).LeadStatusConfig.findMany({
+    where: { companyId },
+    orderBy: { order: 'asc' },
+  });
+  if (configs.length === 0) {
+    // Seed defaults on first access
+    const created = await Promise.all(
+      DEFAULT_STATUSES.map(s =>
+        (context.entities as any).LeadStatusConfig.create({
+          data: { companyId, ...s },
+        })
+      )
+    );
+    return created;
+  }
+  return configs;
+};
+
+export const createLeadStatusConfig: CreateLeadStatusConfig<
+  { key: string; label: string; color: string; order: number },
+  LeadStatusConfig
+> = async ({ key, label, color, order }, context) => {
+  const companyId = ensureCompany(context.user);
+  // Normalise key: lowercase, spaces to underscores, only alphanumeric/_
+  const safeKey = key.toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '');
+  if (!safeKey) throw new HttpError(400, 'Clé invalide');
+  return (context.entities as any).LeadStatusConfig.create({
+    data: { companyId, key: safeKey, label, color, order },
+  });
+};
+
+export const updateLeadStatusConfig: UpdateLeadStatusConfig<
+  { id: string; label?: string; color?: string; order?: number },
+  LeadStatusConfig
+> = async ({ id, label, color, order }, context) => {
+  const companyId = ensureCompany(context.user);
+  const config = await (context.entities as any).LeadStatusConfig.findUnique({ where: { id } });
+  if (!config || config.companyId !== companyId) throw new HttpError(404);
+  return (context.entities as any).LeadStatusConfig.update({
+    where: { id },
+    data: {
+      ...(label !== undefined && { label }),
+      ...(color !== undefined && { color }),
+      ...(order !== undefined && { order }),
+    },
+  });
+};
+
+export const deleteLeadStatusConfig: DeleteLeadStatusConfig<{ id: string }, { id: string }> = async (
+  { id },
+  context,
+) => {
+  const companyId = ensureCompany(context.user);
+  const config = await (context.entities as any).LeadStatusConfig.findUnique({ where: { id } });
+  if (!config || config.companyId !== companyId) throw new HttpError(404);
+  // Reassign leads with this status to 'nouveau'
+  await context.entities.Lead.updateMany({
+    where: { status: config.key, search: { companyId } },
+    data: { status: 'nouveau' },
+  });
+  await (context.entities as any).LeadStatusConfig.delete({ where: { id } });
+  return { id };
 };

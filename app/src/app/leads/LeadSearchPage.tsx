@@ -1,6 +1,8 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import { useSearchParams } from 'react-router';
 import toast from 'react-hot-toast';
+import { KanbanComponent, ColumnsDirective, ColumnDirective } from '@syncfusion/ej2-react-kanban';
+import { extend } from '@syncfusion/ej2-base';
 import {
   useQuery,
   getLeadSearches,
@@ -9,8 +11,12 @@ import {
   updateLead,
   deleteLeadSearch,
   exportLeads,
+  getLeadStatusConfigs,
+  createLeadStatusConfig,
+  updateLeadStatusConfig,
+  deleteLeadStatusConfig,
 } from 'wasp/client/operations';
-import type { Lead, LeadSearch } from 'wasp/entities';
+import type { Lead, LeadSearch, LeadStatusConfig } from 'wasp/entities';
 import {
   PageHeader,
   EmptyState,
@@ -38,6 +44,9 @@ import {
   LuUsers,
   LuNotebook,
   LuTriangleAlert,
+  LuPlus,
+  LuPencil,
+  LuTrash2,
 } from 'react-icons/lu';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -508,6 +517,340 @@ function NoteModal({ lead, onClose }: { lead: Lead; onClose: () => void }) {
   );
 }
 
+// ─── Manage statuses modal ────────────────────────────────────────────────────
+
+function ManageStatusesModal({
+  configs,
+  onRefresh,
+  onClose,
+}: {
+  configs: LeadStatusConfig[];
+  onRefresh: () => void;
+  onClose: () => void;
+}) {
+  const [editId, setEditId] = useState<string | null>(null);
+  const [editLabel, setEditLabel] = useState('');
+  const [editColor, setEditColor] = useState('');
+  const [newLabel, setNewLabel] = useState('');
+  const [newColor, setNewColor] = useState('#6366f1');
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  function startEdit(c: LeadStatusConfig) {
+    setEditId(c.id);
+    setEditLabel(c.label);
+    setEditColor(c.color);
+    setConfirmDeleteId(null);
+  }
+
+  async function saveEdit() {
+    if (!editId) return;
+    setSaving(true);
+    try {
+      await updateLeadStatusConfig({ id: editId, label: editLabel, color: editColor });
+      onRefresh();
+      setEditId(null);
+    } catch {
+      toast.error('Erreur lors de la sauvegarde');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleDelete(id: string) {
+    setSaving(true);
+    try {
+      await deleteLeadStatusConfig({ id });
+      onRefresh();
+      setConfirmDeleteId(null);
+    } catch (e: any) {
+      toast.error(e?.message ?? 'Erreur lors de la suppression');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleCreate(e: React.FormEvent) {
+    e.preventDefault();
+    if (!newLabel.trim()) return;
+    setSaving(true);
+    try {
+      await createLeadStatusConfig({
+        key: newLabel,
+        label: newLabel.trim(),
+        color: newColor,
+        order: configs.length,
+      });
+      setNewLabel('');
+      setNewColor('#6366f1');
+      onRefresh();
+    } catch (e: any) {
+      toast.error(e?.message ?? 'Erreur lors de la création');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className='space-y-2'>
+      {configs.map(c => (
+        <div key={c.id} className='flex items-center gap-2 p-2.5 rounded-xl border border-line'>
+          {editId === c.id ? (
+            <>
+              <input
+                type='color'
+                value={editColor}
+                onChange={e => setEditColor(e.target.value)}
+                className='w-7 h-7 rounded cursor-pointer border border-line shrink-0'
+              />
+              <input
+                className='input flex-1 py-1.5 text-sm'
+                value={editLabel}
+                onChange={e => setEditLabel(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && saveEdit()}
+                autoFocus
+              />
+              <button className='btn-primary py-1 px-2.5 text-xs' onClick={saveEdit} disabled={saving}>
+                OK
+              </button>
+              <button className='btn-secondary py-1 px-2.5 text-xs' onClick={() => setEditId(null)}>
+                Annuler
+              </button>
+            </>
+          ) : (
+            <>
+              <div className='w-4 h-4 rounded-full shrink-0' style={{ backgroundColor: c.color }} />
+              <span className='flex-1 text-sm font-medium'>{c.label}</span>
+              <span className='text-xs text-muted font-mono bg-canvas px-1.5 py-0.5 rounded'>{c.key}</span>
+              {confirmDeleteId === c.id ? (
+                <div className='flex items-center gap-1.5'>
+                  <span className='text-xs text-red-600 font-medium'>Supprimer ?</span>
+                  <button
+                    className='text-xs text-red-600 font-semibold hover:underline'
+                    onClick={() => handleDelete(c.id)}
+                    disabled={saving}
+                  >
+                    Oui
+                  </button>
+                  <button
+                    className='text-xs text-muted hover:underline'
+                    onClick={() => setConfirmDeleteId(null)}
+                  >
+                    Non
+                  </button>
+                </div>
+              ) : (
+                <>
+                  <IconBtn title='Modifier' onClick={() => startEdit(c)}>
+                    <LuPencil size={14} />
+                  </IconBtn>
+                  <IconBtn title='Supprimer' variant='danger' onClick={() => setConfirmDeleteId(c.id)}>
+                    <LuTrash2 size={14} />
+                  </IconBtn>
+                </>
+              )}
+            </>
+          )}
+        </div>
+      ))}
+
+      <hr className='border-line my-3' />
+
+      <form onSubmit={handleCreate} className='flex items-center gap-2'>
+        <input
+          type='color'
+          value={newColor}
+          onChange={e => setNewColor(e.target.value)}
+          className='w-7 h-7 rounded cursor-pointer border border-line shrink-0'
+          title='Couleur du statut'
+        />
+        <input
+          className='input flex-1'
+          placeholder='Ex : En négociation'
+          value={newLabel}
+          onChange={e => setNewLabel(e.target.value)}
+          required
+        />
+        <button type='submit' className='btn-primary gap-1.5 shrink-0' disabled={saving || !newLabel.trim()}>
+          <LuPlus size={14} />
+          Ajouter
+        </button>
+      </form>
+      <p className='text-xs text-muted'>La clé (identifiant interne) est générée automatiquement depuis le nom.</p>
+    </div>
+  );
+}
+
+// ─── Leads kanban ─────────────────────────────────────────────────────────────
+
+function LeadsKanban({
+  leads,
+  statusConfigs,
+  refetch,
+  onEdit,
+  onNote,
+}: {
+  leads: Lead[];
+  statusConfigs: LeadStatusConfig[];
+  refetch: () => void;
+  onEdit: (lead: Lead) => void;
+  onNote: (lead: Lead) => void;
+}) {
+  const onEditRef = useRef(onEdit);
+  onEditRef.current = onEdit;
+  const onNoteRef = useRef(onNote);
+  onNoteRef.current = onNote;
+
+  const kanbanData = useMemo(
+    () => extend([], leads.map(l => ({ ...l })), undefined, true) as any[],
+    [leads],
+  );
+
+  async function handleDragStop(args: any) {
+    if (!args?.data?.length) return;
+    for (const card of args.data) {
+      try {
+        await updateLead({ id: card.id, status: card.status });
+      } catch {
+        toast.error('Erreur lors de la mise à jour du statut');
+        refetch();
+        return;
+      }
+    }
+    refetch();
+  }
+
+  const cardTemplate = useCallback((props: any): React.ReactElement => {
+    const lead = props as Lead & { notes?: string | null };
+    return (
+      <div className='p-3 space-y-2'>
+        <div className='font-semibold text-sm leading-tight'>{lead.name}</div>
+        <div className='space-y-0.5'>
+          {lead.website && (
+            <div className='flex items-center gap-1.5 text-xs'>
+              <LuGlobe size={10} className='text-muted shrink-0' />
+              <a
+                href={lead.website}
+                target='_blank'
+                rel='noopener noreferrer'
+                className='text-accent-700 hover:underline truncate'
+                onClick={e => e.stopPropagation()}
+              >
+                {lead.website.replace(/^https?:\/\//, '').replace(/\/$/, '')}
+              </a>
+            </div>
+          )}
+          {lead.phone && (
+            <div className='flex items-center gap-1.5 text-xs'>
+              <LuPhone size={10} className='text-muted shrink-0' />
+              <a
+                href={`tel:${lead.phone}`}
+                className='text-accent-700 hover:underline truncate'
+                onClick={e => e.stopPropagation()}
+              >
+                {lead.phone}
+              </a>
+            </div>
+          )}
+          {lead.email && (
+            <div className='flex items-center gap-1.5 text-xs'>
+              <LuMail size={10} className='text-muted shrink-0' />
+              <a
+                href={`mailto:${lead.email}`}
+                className='text-accent-700 hover:underline truncate'
+                onClick={e => e.stopPropagation()}
+              >
+                {lead.email}
+              </a>
+            </div>
+          )}
+        </div>
+        <div className='flex items-center gap-1.5 pt-1.5 border-t border-line'>
+          {lead.rating != null && (
+            <span className='flex items-center gap-0.5 text-xs'>
+              <LuStar size={10} className='text-amber-400 fill-amber-400' />
+              <span className='font-medium'>{Number(lead.rating).toFixed(1)}</span>
+            </span>
+          )}
+          {lead.mapsUrl && (
+            <a
+              href={lead.mapsUrl}
+              target='_blank'
+              rel='noopener noreferrer'
+              className='text-xs text-accent-700 hover:underline flex items-center gap-0.5'
+              onClick={e => e.stopPropagation()}
+            >
+              <LuExternalLink size={10} />
+              Maps
+            </a>
+          )}
+          <div className='ml-auto flex items-center gap-1'>
+            <button
+              className='w-6 h-6 rounded flex items-center justify-center hover:bg-canvas text-muted hover:text-ink transition-colors relative'
+              title={lead.notes ? 'Modifier la note' : 'Ajouter une note'}
+              onClick={e => { e.stopPropagation(); onNoteRef.current(lead as Lead); }}
+            >
+              <LuNotebook size={11} />
+              {lead.notes && (
+                <span className='absolute -top-0.5 -right-0.5 w-1.5 h-1.5 rounded-full bg-accent-500 pointer-events-none' />
+              )}
+            </button>
+            <button
+              className='w-6 h-6 rounded flex items-center justify-center hover:bg-canvas text-muted hover:text-ink transition-colors'
+              title='Modifier'
+              onClick={e => { e.stopPropagation(); onEditRef.current(lead as Lead); }}
+            >
+              <LuPencil size={11} />
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }, []);
+
+  const columnHeaderTemplate = useCallback((props: any): React.ReactElement => {
+    const config = statusConfigs.find(s => s.key === props.keyField);
+    const color = config?.color ?? '#6366f1';
+    return (
+      <div className='flex items-center gap-2 px-1 py-0.5'>
+        <div className='w-3 h-3 rounded-full shrink-0' style={{ backgroundColor: color }} />
+        <span className='font-semibold text-sm'>{props.headerText}</span>
+        <span className='text-xs text-muted ml-auto bg-canvas px-1.5 py-0.5 rounded-full'>
+          {props.count ?? 0}
+        </span>
+      </div>
+    );
+  }, [statusConfigs]);
+
+  if (statusConfigs.length === 0) {
+    return <div className='text-muted text-sm py-8 text-center'>Chargement des statuts…</div>;
+  }
+
+  return (
+    <div className='overflow-x-auto -mx-4 px-4'>
+      <KanbanComponent
+        id='prospect-kanban'
+        keyField='status'
+        dataSource={kanbanData}
+        cardSettings={{ headerField: 'id', template: cardTemplate, showHeader: false }}
+        dragStop={handleDragStop}
+        cssClass='gestia-kanban'
+      >
+        <ColumnsDirective>
+          {statusConfigs.map(s => (
+            <ColumnDirective
+              key={s.key}
+              headerText={s.label}
+              keyField={s.key}
+              template={columnHeaderTemplate}
+            />
+          ))}
+        </ColumnsDirective>
+      </KanbanComponent>
+    </div>
+  );
+}
+
 // ─── Leads table ─────────────────────────────────────────────────────────────
 
 function LeadsTable({ searchId, onBack, onShowDetails }: { searchId: string; onBack: () => void; onShowDetails: (values: ReturnType<typeof defaultForm>) => void }) {
@@ -532,7 +875,10 @@ function LeadsTable({ searchId, onBack, onShowDetails }: { searchId: string; onB
   }
 
   const { data: search, isLoading, refetch } = useQuery(getLeadSearchDetail, { searchId });
+  const { data: statusConfigs = [], refetch: refetchStatuses } = useQuery(getLeadStatusConfigs);
   const { ask, Dialog: ConfirmDialog } = useConfirm();
+  const [view, setView] = useState<'kanban' | 'table'>('kanban');
+  const [showManageStatuses, setShowManageStatuses] = useState(false);
   const [noteTarget, setNoteTarget] = useState<Lead | null>(null);
   const [editTarget, setEditTarget] = useState<Lead | null>(null);
   const [exporting, setExporting] = useState(false);
@@ -581,6 +927,17 @@ function LeadsTable({ searchId, onBack, onShowDetails }: { searchId: string; onB
   return (
     <>
       {ConfirmDialog}
+      <Modal
+        open={showManageStatuses}
+        title='Gérer les statuts'
+        onClose={() => setShowManageStatuses(false)}
+      >
+        <ManageStatusesModal
+          configs={statusConfigs as LeadStatusConfig[]}
+          onRefresh={() => { refetchStatuses(); refetch(); }}
+          onClose={() => setShowManageStatuses(false)}
+        />
+      </Modal>
       <Modal
         open={editTarget !== null}
         title={editTarget ? `Modifier — ${editTarget.name}` : 'Modifier'}
@@ -643,6 +1000,27 @@ function LeadsTable({ searchId, onBack, onShowDetails }: { searchId: string; onB
           </div>
         </div>
         <div className='flex items-center gap-2 shrink-0'>
+          {/* View toggle */}
+          <div className='flex items-center border border-line rounded-lg overflow-hidden text-xs font-medium'>
+            <button
+              className={`px-3 py-1.5 transition-colors ${view === 'kanban' ? 'bg-accent-600 text-white' : 'text-muted hover:bg-canvas'}`}
+              onClick={() => setView('kanban')}
+            >
+              Kanban
+            </button>
+            <button
+              className={`px-3 py-1.5 transition-colors ${view === 'table' ? 'bg-accent-600 text-white' : 'text-muted hover:bg-canvas'}`}
+              onClick={() => setView('table')}
+            >
+              Liste
+            </button>
+          </div>
+          {view === 'kanban' && (
+            <button className='btn-secondary gap-1.5 text-sm' onClick={() => setShowManageStatuses(true)}>
+              <LuSlidersHorizontal size={14} />
+              Statuts
+            </button>
+          )}
           <button
             className='btn-ghost gap-2 text-sm'
             onClick={() => onShowDetails({
@@ -668,29 +1046,39 @@ function LeadsTable({ searchId, onBack, onShowDetails }: { searchId: string; onB
         </div>
       </div>
 
-      {/* Filters bar */}
-      <div className='mb-4 flex items-center gap-3 flex-wrap'>
-        <div className='relative'>
-          <LuSearch size={15} className='absolute left-3 top-1/2 -translate-y-1/2 text-muted' />
-          <input
-            className='input pl-9 max-w-xs'
-            placeholder='Rechercher…'
-            value={search2}
-            onChange={e => setSearch2(e.target.value)}
-          />
-        </div>
-        <select className='input w-auto' value={statusFilter} onChange={e => setStatusFilter(e.target.value)}>
-          <option value=''>Tous les statuts</option>
-          {Object.entries(LEAD_STATUS).map(([val, { label }]) => (
-            <option key={val} value={val}>{label}</option>
-          ))}
-        </select>
-        <span className='text-sm text-muted'>{filtered.length} résultat(s)</span>
-      </div>
-
-      {filtered.length === 0 ? (
-        <div className='text-muted text-sm py-8 text-center'>Aucun prospect correspondant aux filtres.</div>
+      {view === 'kanban' ? (
+        <LeadsKanban
+          leads={leads}
+          statusConfigs={statusConfigs as LeadStatusConfig[]}
+          refetch={refetch}
+          onEdit={setEditTarget}
+          onNote={setNoteTarget}
+        />
       ) : (
+        <>
+          {/* Filters bar */}
+          <div className='mb-4 flex items-center gap-3 flex-wrap'>
+            <div className='relative'>
+              <LuSearch size={15} className='absolute left-3 top-1/2 -translate-y-1/2 text-muted' />
+              <input
+                className='input pl-9 max-w-xs'
+                placeholder='Rechercher…'
+                value={search2}
+                onChange={e => setSearch2(e.target.value)}
+              />
+            </div>
+            <select className='input w-auto' value={statusFilter} onChange={e => setStatusFilter(e.target.value)}>
+              <option value=''>Tous les statuts</option>
+              {(statusConfigs as LeadStatusConfig[]).map(s => (
+                <option key={s.key} value={s.key}>{s.label}</option>
+              ))}
+            </select>
+            <span className='text-sm text-muted'>{filtered.length} résultat(s)</span>
+          </div>
+
+          {filtered.length === 0 ? (
+            <div className='text-muted text-sm py-8 text-center'>Aucun prospect correspondant aux filtres.</div>
+          ) : (
         <div className='overflow-x-auto rounded-xl border border-line'>
           <table className='w-full text-sm'>
             <thead>
@@ -818,6 +1206,8 @@ function LeadsTable({ searchId, onBack, onShowDetails }: { searchId: string; onB
           </table>
         </div>
       )}
+      </>
+    )}
     </>
   );
 }

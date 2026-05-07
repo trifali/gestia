@@ -70,19 +70,20 @@ model Company {
   modalityCancellationPolicy String?
   modalityContractTerms      String?
 
-  users            User[]
-  clients          Client[]
-  projects         Project[]
-  documents        Document[]
-  payments         Payment[]
-  meetings         Meeting[]
-  automations      Automation[]
-  priceItems       PriceItem[]
-  priceCategories  PriceCategory[]
-  activities       ActivityLog[]
-  templates        DocumentTemplate[]
-  leadSearches     LeadSearch[]
-  prospectStatuses ProspectStatus[]
+  users             User[]
+  clients           Client[]
+  projects          Project[]
+  documents         Document[]
+  payments          Payment[]
+  meetings          Meeting[]
+  automations       Automation[]
+  priceItems        PriceItem[]
+  priceCategories   PriceCategory[]
+  activities        ActivityLog[]
+  templates         DocumentTemplate[]
+  leadSearches      LeadSearch[]
+  prospectStatuses  ProspectStatus[]
+  leadStatusConfigs LeadStatusConfig[]
 }
 
 model Client {
@@ -461,6 +462,22 @@ model Lead {
   status      String   @default("nouveau") // nouveau | contacte | qualifie | rejete
 
   @@index([searchId])
+}
+
+model LeadStatusConfig {
+  id        String   @id @default(uuid())
+  createdAt DateTime @default(now())
+
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  companyId String
+
+  key   String // e.g. "nouveau", "en_negociation"
+  label String // e.g. "Nouveau", "En négociation"
+  color String @default("#6366f1") // hex color for the column header
+  order Int    @default(0)
+
+  @@unique([companyId, key])
+  @@index([companyId])
 }
 
 // Persistent status/notes for a prospect across all searches
