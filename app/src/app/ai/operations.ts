@@ -7,6 +7,7 @@ import {
   buildTemplateSystemPrompt,
   buildTemplateUserPrompt,
   buildProspectEmailPrompts,
+  buildProspectEmailTemplatePrompts,
 } from './prompts';
 
 // ─── magicCorrect ─────────────────────────────────────────────────────────────
@@ -268,4 +269,94 @@ export const generateTemplateContent: GenerateTemplateContent<GenerateArgs, Gene
 
   if (!markdown) throw new HttpError(502, "La génération n'a pas retourné de contenu.");
   return { markdown };
+};
+
+// ─── generateProspectEmailTemplate ───────────────────────────────────────────
+
+const EMAIL_TMPL_MODEL = 'meta/meta-llama-3-70b-instruct';
+const EMAIL_TMPL_URL = `https://api.replicate.com/v1/models/${EMAIL_TMPL_MODEL}/predictions`;
+
+type EmailTmplArgs = {
+  searchId: string;
+  currentSubject?: string | null;
+  currentBody?: string | null;
+};
+type EmailTmplResult = { subject: string; body: string };
+
+export const generateProspectEmailTemplate = async (
+  args: EmailTmplArgs,
+  context: any,
+): Promise<EmailTmplResult> => {
+  if (!context.user) throw new HttpError(401);
+  const companyId: string = (context.user as any).companyId;
+  if (!companyId) throw new HttpError(403, 'Aucune entreprise associée');
+
+  const [company, search] = await Promise.all([
+    (context.entities as any).Company.findUnique({
+      where: { id: companyId },
+      select: { name: true, email: true, website: true, brandTagline: true, brandDescription: true },
+    }),
+    (context.entities as any).LeadSearch.findUnique({
+      where: { id: args.searchId },
+      select: { title: true, purpose: true, companyId: true },
+    }),
+  ]);
+
+  if (!company) throw new HttpError(404, 'Entreprise introuvable');
+  if (!search || search.companyId !== companyId) throw new HttpError(404, 'Recherche introuvable');
+
+  const token = process.env.REPLICATE_API_TOKEN;
+  if (!token) throw new HttpError(500, 'REPLICATE_API_TOKEN manquant.');
+
+  const { system, user: userPrompt } = buildProspectEmailTemplatePrompts({
+    companyName: company.name,
+    companyTagline: company.brandTagline,
+    companyDescription: (company as any).brandDescription,
+    companyWebsite: company.website,
+    companyEmail: company.email,
+    senderName: (context.user as any).fullName || null,
+    searchTitle: search.title,
+    purpose: search.purpose,
+    currentSubject: args.currentSubject,
+    currentBody: args.currentBody,
+  });
+
+  let res: Response;
+  try {
+    res = await fetch(EMAIL_TMPL_URL, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+        Prefer: 'wait=60',
+      },
+      body: JSON.stringify({
+        input: { prompt: userPrompt, system_prompt: system, max_tokens: 600, temperature: 0.5, top_p: 0.9 },
+      }),
+    });
+  } catch {
+    throw new HttpError(502, 'Service IA indisponible.');
+  }
+
+  if (!res.ok) {
+    const errBody = await res.text().catch(() => '');
+    throw new HttpError(502, `Replicate ${res.status}: ${errBody.slice(0, 200)}`);
+  }
+
+  const json = (await res.json()) as { output?: string | string[]; error?: string | null; status?: string };
+  if (json.error) throw new HttpError(502, json.error);
+  if (json.status && json.status !== 'succeeded') throw new HttpError(504, 'Génération expirée, réessayez.');
+
+  const raw = Array.isArray(json.output) ? json.output.join('') : (json.output ?? '');
+  const text = raw.trim();
+
+  // Parse OBJET: / CORPS:
+  const objMatch = text.match(/^OBJET\s*:\s*(.+)$/im);
+  const corpsMatch = text.match(/^CORPS\s*:\s*([\s\S]+)$/im);
+
+  const subject = (objMatch?.[1] ?? '').trim();
+  const body = (corpsMatch?.[1] ?? text).trim();
+
+  if (!subject && !body) throw new HttpError(502, "La génération n'a pas retourné de contenu.");
+  return { subject, body };
 };

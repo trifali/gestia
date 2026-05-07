@@ -603,6 +603,18 @@ action clearLeadEmailSent {
   fn: import { clearLeadEmailSent } from "@src/app/leads/operations",
   entities: [User, LeadEmailLog]
 }
+query getProspectEmailTemplate {
+  fn: import { getProspectEmailTemplate } from "@src/app/leads/operations",
+  entities: [User, LeadSearch, ProspectEmailTemplate]
+}
+action upsertProspectEmailTemplate {
+  fn: import { upsertProspectEmailTemplate } from "@src/app/leads/operations",
+  entities: [User, LeadSearch, ProspectEmailTemplate]
+}
+action deleteProspectEmailTemplate {
+  fn: import { deleteProspectEmailTemplate } from "@src/app/leads/operations",
+  entities: [User, LeadSearch, ProspectEmailTemplate]
+}
 
 query getPriceItems {
   fn: import { getPriceItems } from "@src/app/prices/operations",
@@ -669,6 +681,10 @@ action generateTemplateContent {
 }
 action generateProspectEmail {
   fn: import { generateProspectEmail } from "@src/app/ai/operations",
+  entities: [User, Company, LeadSearch]
+}
+action generateProspectEmailTemplate {
+  fn: import { generateProspectEmailTemplate } from "@src/app/ai/operations",
   entities: [User, Company, LeadSearch]
 }
 

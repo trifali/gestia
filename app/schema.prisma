@@ -71,23 +71,24 @@ model Company {
   modalityCancellationPolicy String?
   modalityContractTerms      String?
 
-  users             User[]
-  clients           Client[]
-  projects          Project[]
-  documents         Document[]
-  payments          Payment[]
-  meetings          Meeting[]
-  automations       Automation[]
-  priceItems        PriceItem[]
-  priceCategories   PriceCategory[]
-  activities        ActivityLog[]
-  templates         DocumentTemplate[]
-  leadSearches      LeadSearch[]
-  prospectStatuses  ProspectStatus[]
-  leadStatusConfigs LeadStatusConfig[]
-  leadNotes         LeadNote[]
-  leadEmailLogs     LeadEmailLog[]
-  leadEmailDrafts   LeadEmailDraft[]
+  users                  User[]
+  clients                Client[]
+  projects               Project[]
+  documents              Document[]
+  payments               Payment[]
+  meetings               Meeting[]
+  automations            Automation[]
+  priceItems             PriceItem[]
+  priceCategories        PriceCategory[]
+  activities             ActivityLog[]
+  templates              DocumentTemplate[]
+  leadSearches           LeadSearch[]
+  prospectStatuses       ProspectStatus[]
+  leadStatusConfigs      LeadStatusConfig[]
+  leadNotes              LeadNote[]
+  leadEmailLogs          LeadEmailLog[]
+  leadEmailDrafts        LeadEmailDraft[]
+  prospectEmailTemplates ProspectEmailTemplate[]
 }
 
 model Client {
@@ -438,7 +439,8 @@ model LeadSearch {
   errorMsg    String?
   totalFound  Int     @default(0)
 
-  leads Lead[]
+  leads         Lead[]
+  emailTemplate ProspectEmailTemplate?
 
   @@index([companyId])
 }
@@ -467,6 +469,23 @@ model Lead {
   status      String   @default("nouveau") // nouveau | contacte | qualifie | rejete
 
   @@index([searchId])
+}
+
+model ProspectEmailTemplate {
+  id        String   @id @default(uuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  companyId String
+
+  search   LeadSearch @relation(fields: [searchId], references: [id], onDelete: Cascade)
+  searchId String     @unique
+
+  subject String @default("")
+  body    String @default("")
+
+  @@index([companyId])
 }
 
 model LeadStatusConfig {

@@ -153,79 +153,171 @@ export type ProspectEmailContext = {
 export function buildProspectEmailPrompts(ctx: ProspectEmailContext): { system: string; user: string } {
   const isEnhancing = !!(ctx.currentSubject?.trim() || ctx.currentBody?.trim());
 
+  const ctaEmail = ctx.companyEmail || 'info@trifali.com';
+
   const system =
-    'Tu rédiges de vrais courriels de prospection en FRANÇAIS uniquement — courts, directs, humains. ' +
-    'Chaque mot du sujet et du corps doit être en français. Jamais d\'anglais, même partiel. ' +
-    'Ton honnête et professionnel : pas de blague, pas d\'humour, pas d\'autodérision. ' +
-    'Ne complimente PAS le prospect sur son entreprise ou ses services. ' +
-    'Ne dis PAS que tu es impressionné, frappé, convaincu ou quoi que ce soit de flatteur envers le prospect. ' +
-    'PAS de superlatif, pas d\'exclamation. Rien qui sonne faux ou commercial. ' +
-    'Longueur : 3 paragraphes courts (6-8 phrases au total). C\'est tout. ' +
-    'Règle ABSOLUE 1 : le corps NE DOIT PAS contenir la ligne de sujet ni le mot "SUJET:". ' +
-    'Règle ABSOLUE 2 : NE commence JAMAIS par "Voici le courriel" ou toute autre phrase d\'introduction. ' +
-    'Règle ABSOLUE 3 : PAS de signature — le corps se termine à la dernière phrase du message. ' +
-    `Règle ABSOLUE 4 : le corps commence TOUJOURS par une salutation personnalisée sur la première ligne. ` +
-    `Si un prénom est identifiable (via l'adresse courriel ou le nom de l'entreprise), utilise "Bonjour [Prénom],". ` +
-    `Sinon, utilise le nom de l'entreprise avec le bon accord : ` +
-    `"Bonjour à l'équipe de [Nom]," pour les entreprises génériques, ` +
-    `ou "Bonjour [Nom]," si le nom sonne comme une personne (ex: "Chez Mario" → "Bonjour Mario,"). ` +
-    `Ne commence JAMAIS par juste "Bonjour," sans rien après. ` +
-    `Règle ABSOLUE 5 : l'avant-dernière phrase du corps nomme clairement le service proposé et son bénéfice concret pour le prospect. ` +
-    `La dernière phrase est une question simple adaptée à l'objectif, facile à répondre oui ou non, qui mentionne info@trifali.com. ` +
-    `L'adresse courriel à utiliser est TOUJOURS info@trifali.com — ne la change pas. ` +
-    'CORPS:\n<corps du courriel sans signature>\n' +
-    'Ne mets aucun autre texte, explication, ligne SUJET ou balise.';
+    'Tu rédiges de vrais courriels de prospection courts en FRANÇAIS uniquement — sincères, directs, humains.\n' +
+    'Pas de blague, pas d\'humour, pas de superlatif, pas d\'exclamation.\n\n' +
+    'STRUCTURE OBLIGATOIRE — exactement 3 paragraphes (6-8 phrases au total) :\n\n' +
+    'SALUTATION (ligne séparée avant le 1er paragraphe) :\n' +
+    '  • Si un prénom est identifiable dans l\'adresse courriel du prospect\n' +
+    '    (ex: claude@..., raphael@..., j.tremblay@...) → extrait-le et utilise "Bonjour [Prénom],"\n' +
+    '  • Si le nom de l\'entreprise contient un prénom de personne\n' +
+    '    (ex: "Mario Gagnon Plomberie" → Mario, "Chez Claude" → Claude, "Clinique Marie-Josée" → Marie-Josée) → "Bonjour [Prénom],"\n' +
+    '  • Sinon → "Bonjour à l\'équipe de [Nom complet de l\'entreprise],"\n' +
+    '  • JAMAIS "Bonjour," seul sans rien après.\n\n' +
+    'PARAGRAPHE 1 (2 phrases) :\n' +
+    '  • Phrase 1 : Mention courte que tu as trouvé le prospect en ligne (Google) + observation positive et sincère sur leur domaine ou leur travail (basée sur leur catégorie ou secteur).\n' +
+    '    Exemple : "Je vous ai trouvé sur Google et j\'ai été intéressé par l\'importance que votre entreprise accorde à la qualité de ses réalisations."\n' +
+    '  • Phrase 2 : Question rhétorique qui crée un besoin — suggère que leur présence en ligne (site web, visibilité) ne reflète peut-être pas encore leur vrai niveau.\n' +
+    '    Exemple : "Je me demande si votre site web actuel reflète vraiment votre expertise et votre savoir-faire."\n\n' +
+    'PARAGRAPHE 2 (2 phrases) :\n' +
+    '  • Phrase 1 : "Nous sommes [nom de l\'entreprise], [ce que vous faites en une phrase courte]." — utilise UNIQUEMENT la description fournie, n\'invente rien.\n' +
+    '    Exemple : "Nous sommes Trifali Concept inc, une équipe qui conçoit des sites web pour aider les entreprises à se démarquer en ligne."\n' +
+    '  • Phrase 2 : Lien direct avec la situation du prospect — "Nous pouvons vous aider à [bénéfice spécifique et concret]."\n\n' +
+    'PARAGRAPHE 3 (2 phrases) :\n' +
+    '  • Phrase 1 : Question de vision — "Pouvez-vous vous imaginer [avoir X qui fait Y et Z] ?" Formule un résultat concret et attrayant.\n' +
+    '    Exemple : "Pouvez-vous vous imaginer avoir un site web qui vous aide à attirer de nouveaux clients et à renforcer votre réputation ?"\n' +
+    '  • Phrase 2 : CTA simple oui/non — "Répondez-moi simplement oui ou non à [CTA_EMAIL] et je vous envoie les détails."\n\n' +
+    'RÈGLES ABSOLUES :\n' +
+    '1. Réponds UNIQUEMENT avec le corps (salutation + 3 paragraphes). Rien d\'autre.\n' +
+    '2. PAS de signature — le corps s\'arrête après la phrase CTA.\n' +
+    '3. Aucun préfixe "CORPS:", "SUJET:", "Voici", ou commentaire méta.\n' +
+    `4. L'adresse courriel CTA est TOUJOURS : ${ctaEmail} — ne la change jamais.`;
 
   const companyLine = [
     ctx.companyName,
     ctx.companyTagline ? `« ${ctx.companyTagline} »` : null,
     ctx.companyWebsite ? `(${ctx.companyWebsite})` : null,
   ].filter(Boolean).join(' — ');
-  const companyDesc = ctx.companyDescription?.trim()
-    ? ctx.companyDescription.trim()
-    : null;
+
   const baseContext =
     `Mon entreprise : ${companyLine}\n` +
-    (ctx.companyEmail ? `Courriel de contact : ${ctx.companyEmail}\n` : '') +
+    (ctx.companyDescription ? `Ce que fait notre entreprise : ${ctx.companyDescription}\n` : '') +
+    `Courriel CTA : ${ctaEmail}\n` +
     `Expéditeur : ${ctx.senderName ?? ctx.companyName}\n` +
     `Prospect : ${ctx.leadName}` +
     (ctx.leadCategory ? ` (${ctx.leadCategory})` : '') +
     (ctx.leadAddress ? ` — ${ctx.leadAddress}` : '') +
     (ctx.leadEmail ? ` — courriel : ${ctx.leadEmail}` : '') + '\n' +
-    `Contexte de la recherche (pourquoi on contacte ce prospect) : ${ctx.searchTitle}` +
-    (ctx.purpose?.trim() ? `\nObjectif de cet email : ${ctx.purpose.trim()}` : '') + '\n\n' +
-    `Si l'adresse courriel du prospect contient un prénom (ex: raphael@..., j.martin@...), ` +
-    `utilise-le pour la salutation ("Bonjour Raphaël,"). ` +
-    `Sinon, essaie de deviner un prénom à partir du nom de l'entreprise si c'est un nom de personne ` +
-    `(ex: "Chez Mario" → "Bonjour Mario,"). ` +
-    `Si aucun prénom n'est identifiable, utilise le nom de l'entreprise avec le bon accord : ` +
-    `"Bonjour à l'équipe de [Nom entreprise]," ou simplement "Bonjour [Nom]," si le nom est court.`;
+    `Contexte de prospection : ${ctx.searchTitle}` +
+    (ctx.purpose?.trim() ? `\nObjectif : ${ctx.purpose.trim()}` : '');
 
   let user: string;
   if (isEnhancing) {
     user =
-      `Améliore ce courriel. Assure-toi qu'il mentionne brièvement ce que fait notre entreprise ` +
-      `et pourquoi ça pourrait intéresser le prospect. Reste humain, supprime tout ce qui sonne "marketing".\n\n` +
+      `Améliore ce courriel en respectant STRICTEMENT la structure en 3 paragraphes définie dans le système.\n\n` +
       baseContext + '\n\n' +
       `Courriel actuel :\n` +
-      (ctx.currentSubject ? `SUJET: ${ctx.currentSubject}\n` : '') +
-      `CORPS:\n${ctx.currentBody ?? ''}\n\n` +
-      (ctx.purpose?.trim() ? `Objectif prioritaire : ${ctx.purpose.trim()}\n\n` : '') +
-      `Retourne le courriel amélioré en respectant le format CORPS.`;
+      (ctx.currentSubject ? `Objet : ${ctx.currentSubject}\n` : '') +
+      `${ctx.currentBody ?? ''}\n\n` +
+      `Assure-toi que :\n` +
+      `- La salutation identifie correctement un prénom si possible\n` +
+      `- Para 1 : trouvé en ligne + observation sur leur domaine + question rhétorique sur leur présence web\n` +
+      `- Para 2 : "Nous sommes [entreprise]..." + bénéfice lié à leur situation\n` +
+      `- Para 3 : question de vision + CTA oui/non avec ${ctaEmail}`;
   } else {
     user =
-      `Écris un courriel de prospection en 3 paragraphes courts.\n\n` +
+      `Écris un courriel de prospection en suivant EXACTEMENT la structure en 3 paragraphes définie dans le système.\n\n` +
       baseContext + '\n\n' +
-      `Structure :\n` +
-      `1. Mentionne simplement que tu as trouvé le prospect en ligne (Google, recherche web) — une phrase courte, directe, sans humour ni autodérision.\n` +
-      `2. Présente notre entreprise en 1-2 phrases en utilisant UNIQUEMENT les informations fournies dans le contexte (nom, description, slogan). ` +
-      `Ne invente rien, ne généralise pas. Si aucune description n'est fournie, dis simplement ce que fait l'entreprise d'après son nom.\n` +
-      `3. Une phrase directe et concrète sur ce qu'on propose, formulée en lien avec l'objectif de la prospection. ` +
-      `Elle doit nommer clairement le service et son bénéfice pour le prospect (ex: si l'objectif est un site web, ` +
-      `quelque chose comme "J'aimerais vous proposer un site web moderne qui reflète vraiment la qualité de votre travail et attire plus de clients."). ` +
-      `Pas de vague, pas de mystère — sois direct sur ce que tu offres. ` +
-      `Termine avec une invitation adaptée à l'objectif : une question simple à laquelle il est facile de répondre oui ou non, ` +
-      `en mentionnant info@trifali.com (ex: "Ça vous intéresse ? Répondez-moi à info@trifali.com et je vous montre ce qu'on peut faire.").`;
+      `Instructions :\n` +
+      `- Salutation : analyse le courriel du prospect "${ctx.leadEmail ?? ''}" et le nom "${ctx.leadName}" pour décider si tu peux utiliser un prénom ou si tu dois utiliser "à l'équipe de [Nom]"\n` +
+      `- Para 1 : adapte l'observation au secteur du prospect (${ctx.leadCategory ?? 'secteur non précisé'})\n` +
+      `- Para 2 : utilise UNIQUEMENT la description fournie pour parler de l'entreprise\n` +
+      `- Para 3 : formule une vision concrète liée à "${ctx.purpose?.trim() || ctx.searchTitle}", termine avec CTA vers ${ctaEmail}`;
+  }
+
+  return { system, user };
+}
+
+// ─── generateProspectEmailTemplate ───────────────────────────────────────────
+
+/** Available variable tokens the model may use in the email template. */
+const EMAIL_TEMPLATE_VARS_DOC = `
+Variables disponibles (syntaxe {{variable}}) :
+- {{lead.name}}     → Nom de l'entreprise prospect
+- {{lead.email}}    → Courriel du prospect
+- {{lead.phone}}    → Téléphone du prospect
+- {{lead.website}}  → Site web du prospect
+- {{lead.address}}  → Adresse du prospect
+- {{lead.category}} → Catégorie / secteur du prospect
+- {{company.name}}  → Nom de mon entreprise
+- {{company.email}} → Courriel de mon entreprise
+- {{sender.name}}   → Nom de l'expéditeur
+`.trim();
+
+export type ProspectEmailTemplateContext = {
+  companyName: string;
+  companyTagline?: string | null;
+  companyDescription?: string | null;
+  companyWebsite?: string | null;
+  companyEmail?: string | null;
+  senderName?: string | null;
+  searchTitle: string;
+  purpose?: string | null;
+  currentSubject?: string | null;
+  currentBody?: string | null;
+};
+
+export function buildProspectEmailTemplatePrompts(ctx: ProspectEmailTemplateContext): { system: string; user: string } {
+  const isEditing = !!(ctx.currentSubject?.trim() || ctx.currentBody?.trim());
+
+  const ctaEmail = ctx.companyEmail || '{{company.email}}';
+
+  const companyLine = [
+    ctx.companyName,
+    ctx.companyTagline ? `« ${ctx.companyTagline} »` : null,
+    ctx.companyWebsite ? `(${ctx.companyWebsite})` : null,
+  ].filter(Boolean).join(' — ');
+
+  const system =
+    'Tu rédiges des MODÈLES de courriels de prospection en FRANÇAIS.\n' +
+    'Un modèle utilise des variables dynamiques — les tokens {{...}} restent LITTÉRALEMENT dans le texte retourné, ils ne sont PAS remplacés.\n\n' +
+    'STRUCTURE OBLIGATOIRE — exactement 3 paragraphes (6-8 phrases au total) :\n\n' +
+    'SALUTATION (ligne séparée) :\n' +
+    '  • Utilise "Bonjour à l\'équipe de {{lead.name}}," comme salutation par défaut dans le modèle.\n' +
+    '    Note dans la salutation : quand ce modèle sera utilisé, si un prénom est connu, il pourra être substitué manuellement.\n\n' +
+    'PARAGRAPHE 1 (2 phrases) :\n' +
+    '  • Phrase 1 : Trouvé en ligne + observation positive sur le secteur de {{lead.category}} (ou {{lead.name}} si pas de catégorie).\n' +
+    '  • Phrase 2 : Question rhétorique — leur site web / présence en ligne reflète-t-il vraiment leur expertise ?\n\n' +
+    'PARAGRAPHE 2 (2 phrases) :\n' +
+    '  • Phrase 1 : "Nous sommes {{company.name}}, [description de ce qu\'on fait]." — utilise la description fournie.\n' +
+    '  • Phrase 2 : "Nous pouvons vous aider à [bénéfice concret lié à leur situation]."\n\n' +
+    'PARAGRAPHE 3 (2 phrases) :\n' +
+    '  • Phrase 1 : Question de vision — "Pouvez-vous vous imaginer [avoir X qui fait Y] ?"\n' +
+    `  • Phrase 2 : CTA — "Répondez-moi simplement oui ou non à ${ctaEmail} et je vous envoie les détails."\n\n` +
+    'RÈGLES ABSOLUES :\n' +
+    '1. Réponds au format : OBJET: [sujet sur une ligne]\\n\\nCORPS:\\n[corps complet]\n' +
+    '2. Les variables {{...}} restent TELLES QUELLES dans le texte — ne les remplace jamais par de vraies valeurs.\n' +
+    '3. PAS de signature dans le corps.\n' +
+    '4. Aucun commentaire méta, aucun texte hors du format OBJET/CORPS.\n\n' +
+    EMAIL_TEMPLATE_VARS_DOC;
+
+  const contextBlock =
+    `Mon entreprise : ${companyLine}\n` +
+    (ctx.companyEmail ? `Courriel de contact : ${ctx.companyEmail}\n` : '') +
+    (ctx.companyDescription ? `Ce que fait notre entreprise : ${ctx.companyDescription}\n` : '') +
+    `Expéditeur : ${ctx.senderName ?? ctx.companyName}\n` +
+    `Contexte de la prospection : ${ctx.searchTitle}` +
+    (ctx.purpose?.trim() ? `\nObjectif : ${ctx.purpose.trim()}` : '');
+
+  let user: string;
+  if (isEditing) {
+    user =
+      `Améliore ce modèle de courriel en respectant STRICTEMENT la structure définie dans le système. Garde les variables {{...}} existantes et utilises-en d'autres si pertinent.\n\n` +
+      contextBlock + '\n\n' +
+      `Modèle actuel :\nOBJET: ${ctx.currentSubject ?? ''}\nCORPS:\n${ctx.currentBody ?? ''}\n\n` +
+      `Retourne le modèle amélioré au format OBJET: / CORPS:.`;
+  } else {
+    user =
+      `Génère un modèle de courriel de prospection en suivant EXACTEMENT la structure définie dans le système.\n\n` +
+      contextBlock + '\n\n' +
+      `Instructions :\n` +
+      `- Salutation : "Bonjour à l'équipe de {{lead.name}},"\n` +
+      `- Para 1 : observation sur {{lead.category}} + question rhétorique sur leur présence en ligne\n` +
+      `- Para 2 : intro "Nous sommes {{company.name}}..." + bénéfice lié à "${ctx.purpose?.trim() || ctx.searchTitle}"\n` +
+      `- Para 3 : vision concrète + CTA vers ${ctaEmail}\n` +
+      `Retourne le résultat au format OBJET: / CORPS:.`;
   }
 
   return { system, user };

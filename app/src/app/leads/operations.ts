@@ -734,3 +734,48 @@ export const clearLeadEmailSent = async (
   });
   return { ok: true };
 };
+
+// ─── getProspectEmailTemplate ─────────────────────────────────────────────────
+
+export const getProspectEmailTemplate = async (
+  { searchId }: { searchId: string },
+  context: any,
+) => {
+  const companyId = ensureCompany(context.user);
+  const search = await context.entities.LeadSearch.findUnique({ where: { id: searchId } });
+  if (!search || search.companyId !== companyId) throw new HttpError(404);
+  return (context.entities as any).ProspectEmailTemplate.findUnique({
+    where: { searchId },
+  });
+};
+
+// ─── upsertProspectEmailTemplate ─────────────────────────────────────────────
+
+export const upsertProspectEmailTemplate = async (
+  { searchId, subject, body }: { searchId: string; subject: string; body: string },
+  context: any,
+) => {
+  const companyId = ensureCompany(context.user);
+  const search = await context.entities.LeadSearch.findUnique({ where: { id: searchId } });
+  if (!search || search.companyId !== companyId) throw new HttpError(404);
+  return (context.entities as any).ProspectEmailTemplate.upsert({
+    where: { searchId },
+    create: { searchId, companyId, subject: subject.trim(), body },
+    update: { subject: subject.trim(), body },
+  });
+};
+
+// ─── deleteProspectEmailTemplate ─────────────────────────────────────────────
+
+export const deleteProspectEmailTemplate = async (
+  { searchId }: { searchId: string },
+  context: any,
+): Promise<{ deleted: boolean }> => {
+  const companyId = ensureCompany(context.user);
+  const search = await context.entities.LeadSearch.findUnique({ where: { id: searchId } });
+  if (!search || search.companyId !== companyId) throw new HttpError(404);
+  const tmpl = await (context.entities as any).ProspectEmailTemplate.findUnique({ where: { searchId } });
+  if (!tmpl) return { deleted: false };
+  await (context.entities as any).ProspectEmailTemplate.delete({ where: { searchId } });
+  return { deleted: true };
+};
