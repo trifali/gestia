@@ -796,7 +796,7 @@ function EmailTemplateModal({
           <div className='flex flex-col gap-4'>
             <div>
               <label className='label'>Objet</label>
-              <input
+              <MagicInput
                 ref={subjectRef}
                 className='input mt-1 w-full'
                 value={subject}
@@ -807,7 +807,7 @@ function EmailTemplateModal({
             </div>
             <div>
               <label className='label'>Corps du message</label>
-              <textarea
+              <MagicTextarea
                 ref={bodyRef}
                 className='input mt-1 w-full min-h-[200px] resize-y font-mono text-sm'
                 value={body}
