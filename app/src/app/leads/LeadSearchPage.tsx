@@ -1,0 +1,905 @@
+import { useState, useRef, useEffect } from 'react';
+import { useSearchParams } from 'react-router';
+import toast from 'react-hot-toast';
+import {
+  useQuery,
+  getLeadSearches,
+  getLeadSearchDetail,
+  searchLeads,
+  updateLead,
+  deleteLeadSearch,
+  exportLeads,
+} from 'wasp/client/operations';
+import type { Lead, LeadSearch } from 'wasp/entities';
+import {
+  PageHeader,
+  EmptyState,
+  Modal,
+  useConfirm,
+  IconBtn,
+  TrashIcon,
+  EditIcon,
+} from '../../client/ui';
+import {
+  LuSearch,
+  LuDownload,
+  LuExternalLink,
+  LuCopy,
+  LuCheck,
+  LuLoader,
+  LuMapPin,
+  LuPhone,
+  LuMail,
+  LuGlobe,
+  LuStar,
+  LuChevronLeft,
+  LuRefreshCw,
+  LuSlidersHorizontal,
+  LuUsers,
+  LuNotebook,
+} from 'react-icons/lu';
+
+// ─── Constants ────────────────────────────────────────────────────────────────
+
+const PROVINCES = ['QC', 'ON', 'BC', 'AB', 'MB', 'SK', 'NS', 'NB', 'NL', 'PE', 'YT', 'NT', 'NU'];
+
+const BUSINESS_TYPE_SUGGESTIONS = [
+  'Agence web', 'Agence marketing', 'Agence de communication',
+  'Plombier', 'Électricien', 'Menuisier', 'Peintre', 'Entrepreneur général',
+  'Architecte', 'Designer intérieur',
+  'Restaurant', 'Café', 'Boulangerie', 'Traiteur',
+  'Avocat', 'Notaire', 'Comptable', 'Fiscaliste',
+  'Médecin', 'Dentiste', 'Physiothérapeute', 'Chiropraticien',
+  'Salon de coiffure', 'Salon de beauté', 'Spa',
+  'Photographe', 'Vidéaste', 'Studio photo',
+  'Mécanicien auto', 'Carrossier',
+  'École privée', 'Centre de formation', 'Tuteur',
+  'Gym', 'Centre de conditionnement physique', 'Studio yoga',
+  'Nettoyage commercial', 'Service de ménage',
+  'Fleuriste', 'Boutique cadeaux', 'Librairie',
+  'Hôtel', 'Auberge', 'Chalet à louer',
+  'Clinique vétérinaire',
+  'Garderie', 'CPE',
+];
+
+const RADIUS_OPTIONS = [
+  { value: 5000, label: '5 km' },
+  { value: 10000, label: '10 km' },
+  { value: 25000, label: '25 km' },
+  { value: 50000, label: '50 km' },
+];
+
+const RATING_OPTIONS = [
+  { value: 0, label: 'Aucune restriction' },
+  { value: 3, label: '3+ étoiles' },
+  { value: 4, label: '4+ étoiles' },
+  { value: 4.5, label: '4.5+ étoiles' },
+];
+
+const MAX_RESULTS_OPTIONS = [
+  { value: 10, label: '10 résultats' },
+  { value: 20, label: '20 résultats' },
+  { value: 40, label: '40 résultats (plus lent)' },
+];
+
+const LEAD_STATUS = {
+  nouveau: { label: 'Nouveau', className: 'badge-info' },
+  contacte: { label: 'Contacté', className: 'badge-neutral' },
+  qualifie: { label: 'Qualifié', className: 'badge-success' },
+  rejete: { label: 'Rejeté', className: 'bg-red-50 text-red-600 text-xs font-medium px-2 py-0.5 rounded-full' },
+} as const;
+
+// ─── Default form state ───────────────────────────────────────────────────────
+
+function defaultForm() {
+  return {
+    title: '',
+    description: '',
+    businessType: '',
+    city: '',
+    province: 'QC',
+    radius: 10000,
+    minRating: 0,
+    requireWebsite: false,
+    maxResults: 20,
+    language: 'fr',
+  };
+}
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+function Stars({ value }: { value: number | null }) {
+  if (value === null) return <span className='text-muted text-xs'>—</span>;
+  return (
+    <span className='inline-flex items-center gap-1 text-sm'>
+      <LuStar size={13} className='text-amber-400 fill-amber-400' />
+      <span className='font-medium'>{value.toFixed(1)}</span>
+    </span>
+  );
+}
+
+// ─── Status dropdown ─────────────────────────────────────────────────────────
+
+function StatusDropdown({ lead }: { lead: Lead }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    function handleClick(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
+  }, [open]);
+
+  async function pick(status: string) {
+    setOpen(false);
+    try {
+      await updateLead({ id: lead.id, status });
+    } catch {
+      toast.error('Erreur lors de la mise à jour');
+    }
+  }
+
+  const current = LEAD_STATUS[lead.status as keyof typeof LEAD_STATUS] ?? LEAD_STATUS.nouveau;
+
+  return (
+    <div ref={ref} className='relative inline-block'>
+      <button
+        className={`${current.className} cursor-pointer select-none flex items-center gap-1`}
+        onClick={() => setOpen(v => !v)}
+      >
+        {current.label}
+        <svg className='w-3 h-3 opacity-60' viewBox='0 0 20 20' fill='currentColor'>
+          <path fillRule='evenodd' d='M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z' clipRule='evenodd' />
+        </svg>
+      </button>
+      {open && (
+        <div className='absolute z-20 mt-1 left-0 bg-white border border-line rounded-xl shadow-lg py-1 min-w-[130px]'>
+          {Object.entries(LEAD_STATUS).map(([val, { label, className }]) => (
+            <button
+              key={val}
+              className={`w-full text-left px-3 py-2 text-sm hover:bg-canvas transition-colors flex items-center gap-2 ${
+                lead.status === val ? 'font-semibold' : ''
+              }`}
+              onClick={() => pick(val)}
+            >
+              <span className={className}>{label}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Copy button ──────────────────────────────────────────────────────────────
+
+function CopyBtn({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+  if (!text) return null;
+  return (
+    <button
+      title='Copier'
+      className='inline-flex items-center justify-center w-6 h-6 rounded hover:bg-canvas transition-colors text-muted hover:text-ink'
+      onClick={() => {
+        navigator.clipboard.writeText(text);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 1500);
+      }}
+    >
+      {copied ? <LuCheck size={12} className='text-green-600' /> : <LuCopy size={12} />}
+    </button>
+  );
+}
+
+// ─── New search form ──────────────────────────────────────────────────────────
+
+function SearchForm({ onClose, onDone }: { onClose: () => void; onDone: (id: string) => void }) {
+  const [form, setForm] = useState(defaultForm());
+  const [loading, setLoading] = useState(false);
+
+  function set(field: string, value: any) {
+    setForm(prev => ({ ...prev, [field]: value }));
+  }
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!form.businessType.trim()) return toast.error('Type d\'entreprise requis');
+    if (!form.city.trim()) return toast.error('Ville requise');
+    setLoading(true);
+    try {
+      const result = await searchLeads({
+        title: form.title || `${form.businessType} — ${form.city}`,
+        description: form.description || undefined,
+        filters: {
+          businessType: form.businessType,
+          city: form.city,
+          province: form.province,
+          radius: form.radius,
+          minRating: form.minRating,
+          requireWebsite: form.requireWebsite,
+          maxResults: form.maxResults,
+          language: form.language,
+        },
+      });
+      toast.success(`${result.leads?.length ?? 0} prospect(s) trouvé(s)`);
+      onDone(result.id);
+    } catch (err: any) {
+      const msg = err?.message ?? 'Erreur lors de la recherche';
+      if (msg.includes('GOOGLE_PLACES_API_KEY')) {
+        toast.error('Clé API Google Places manquante. Ajoutez GOOGLE_PLACES_API_KEY dans .env.server.', { duration: 6000 });
+      } else {
+        toast.error(msg);
+      }
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <form onSubmit={handleSubmit} className='space-y-5'>
+      <p className='text-sm text-muted'>
+        Décrivez le type d'entreprise que vous cherchez, choisissez la zone géographique et
+        lancez la prospection. Gestia extraira les coordonnées depuis Google Maps.
+      </p>
+
+      {/* Title */}
+      <div>
+        <label className='label'>Nom de la recherche</label>
+        <input
+          className='input'
+          placeholder='Ex : Plombiers Montréal — Mai 2026'
+          value={form.title}
+          onChange={e => set('title', e.target.value)}
+        />
+        <p className='text-xs text-muted mt-1'>Laissez vide pour générer automatiquement.</p>
+      </div>
+
+      <hr className='border-line' />
+
+      {/* Business type */}
+      <div>
+        <label className='label required'>Type d'entreprise / secteur</label>
+        <input
+          className='input'
+          list='biz-types'
+          placeholder='Ex : Agence web, Plombier, Restaurant…'
+          value={form.businessType}
+          onChange={e => set('businessType', e.target.value)}
+          required
+        />
+        <datalist id='biz-types'>
+          {BUSINESS_TYPE_SUGGESTIONS.map(s => (
+            <option key={s} value={s} />
+          ))}
+        </datalist>
+        <p className='text-xs text-muted mt-1'>
+          Soyez précis : "Agence web React" donne de meilleurs résultats que "agence".
+        </p>
+      </div>
+
+      {/* Location */}
+      <div className='grid grid-cols-2 gap-3'>
+        <div>
+          <label className='label required'>Ville</label>
+          <input
+            className='input'
+            placeholder='Ex : Montréal, Québec, Laval'
+            value={form.city}
+            onChange={e => set('city', e.target.value)}
+            required
+          />
+        </div>
+        <div>
+          <label className='label'>Province</label>
+          <select className='input' value={form.province} onChange={e => set('province', e.target.value)}>
+            {PROVINCES.map(p => <option key={p} value={p}>{p}</option>)}
+          </select>
+        </div>
+      </div>
+
+      {/* Radius + Rating */}
+      <div className='grid grid-cols-2 gap-3'>
+        <div>
+          <label className='label'>Rayon de recherche</label>
+          <select className='input' value={form.radius} onChange={e => set('radius', Number(e.target.value))}>
+            {RADIUS_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+          </select>
+        </div>
+        <div>
+          <label className='label'>Note Google minimale</label>
+          <select className='input' value={form.minRating} onChange={e => set('minRating', Number(e.target.value))}>
+            {RATING_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+          </select>
+        </div>
+      </div>
+
+      {/* Max results + language */}
+      <div className='grid grid-cols-2 gap-3'>
+        <div>
+          <label className='label'>Nombre de résultats</label>
+          <select className='input' value={form.maxResults} onChange={e => set('maxResults', Number(e.target.value))}>
+            {MAX_RESULTS_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+          </select>
+        </div>
+        <div>
+          <label className='label'>Langue des résultats</label>
+          <select className='input' value={form.language} onChange={e => set('language', e.target.value)}>
+            <option value='fr'>Français</option>
+            <option value='en'>Anglais</option>
+          </select>
+        </div>
+      </div>
+
+      {/* Toggles */}
+      <label className='flex items-center gap-3 cursor-pointer select-none'>
+        <input
+          type='checkbox'
+          className='w-4 h-4 rounded accent-accent-600'
+          checked={form.requireWebsite}
+          onChange={e => set('requireWebsite', e.target.checked)}
+        />
+        <span className='text-sm'>Exiger un site web (filtre les entreprises sans site)</span>
+      </label>
+
+      {/* Info box */}
+      <div className='bg-blue-50 border border-blue-200 rounded-xl p-4 text-sm text-blue-800'>
+        <p className='font-medium mb-1'>Ce que Gestia va extraire :</p>
+        <ul className='space-y-0.5 text-blue-700 text-xs list-disc list-inside'>
+          <li>Nom, adresse, ville, code postal</li>
+          <li>Numéro de téléphone (si disponible sur Google)</li>
+          <li>Site web + tentative d'extraction du courriel</li>
+          <li>Note Google et nombre d'avis</li>
+          <li>Lien Google Maps</li>
+        </ul>
+        <p className='mt-2 text-xs text-blue-600'>
+          Nécessite <code className='bg-blue-100 px-1 rounded'>GOOGLE_PLACES_API_KEY</code> dans votre fichier <code className='bg-blue-100 px-1 rounded'>.env.server</code>.
+        </p>
+      </div>
+
+      {loading && (
+        <div className='flex items-center gap-3 text-sm text-accent-700 bg-accent-50 border border-accent-200 rounded-xl p-4'>
+          <LuLoader size={18} className='animate-spin shrink-0' />
+          <span>Recherche en cours… cela peut prendre jusqu'à 30 secondes selon le nombre de résultats.</span>
+        </div>
+      )}
+
+      <div className='flex justify-end gap-2 pt-2'>
+        <button type='button' className='btn-secondary' onClick={onClose} disabled={loading}>
+          Annuler
+        </button>
+        <button type='submit' className='btn-primary gap-2' disabled={loading}>
+          {loading ? <LuLoader size={16} className='animate-spin' /> : <LuSearch size={16} />}
+          Lancer la prospection
+        </button>
+      </div>
+    </form>
+  );
+}
+
+// ─── Edit lead modal ─────────────────────────────────────────────────────────
+
+function EditLeadModal({ lead, onClose }: { lead: Lead; onClose: () => void }) {
+  const [form, setForm] = useState({
+    name: lead.name,
+    phone: lead.phone ?? '',
+    email: lead.email ?? '',
+    website: lead.website ?? '',
+    address: lead.address ?? '',
+    category: lead.category ?? '',
+  });
+  const [saving, setSaving] = useState(false);
+
+  function set(field: string, value: string) {
+    setForm(f => ({ ...f, [field]: value }));
+  }
+
+  async function save() {
+    setSaving(true);
+    try {
+      await updateLead({
+        id: lead.id,
+        name: form.name.trim() || undefined,
+        phone: form.phone.trim() || undefined,
+        email: form.email.trim() || undefined,
+        website: form.website.trim() || undefined,
+        address: form.address.trim() || undefined,
+        category: form.category.trim() || undefined,
+      });
+      toast.success('Prospect mis à jour');
+      onClose();
+    } catch {
+      toast.error('Erreur lors de la sauvegarde');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className='space-y-4'>
+      <div className='grid grid-cols-1 sm:grid-cols-2 gap-3'>
+        <div className='sm:col-span-2'>
+          <label className='label'>Nom de l'entreprise</label>
+          <input className='input' value={form.name} onChange={e => set('name', e.target.value)} />
+        </div>
+        <div>
+          <label className='label'>Téléphone</label>
+          <input className='input' type='tel' value={form.phone} onChange={e => set('phone', e.target.value)} placeholder='—' />
+        </div>
+        <div>
+          <label className='label'>Courriel</label>
+          <input className='input' type='email' value={form.email} onChange={e => set('email', e.target.value)} placeholder='—' />
+        </div>
+        <div className='sm:col-span-2'>
+          <label className='label'>Site web</label>
+          <input className='input' type='url' value={form.website} onChange={e => set('website', e.target.value)} placeholder='https://…' />
+        </div>
+        <div className='sm:col-span-2'>
+          <label className='label'>Adresse</label>
+          <input className='input' value={form.address} onChange={e => set('address', e.target.value)} placeholder='—' />
+        </div>
+        <div>
+          <label className='label'>Catégorie</label>
+          <input className='input' value={form.category} onChange={e => set('category', e.target.value)} placeholder='—' />
+        </div>
+      </div>
+      <div className='flex justify-end gap-2 pt-1'>
+        <button className='btn-secondary' onClick={onClose}>Annuler</button>
+        <button className='btn-primary' onClick={save} disabled={saving}>
+          {saving ? 'Sauvegarde…' : 'Sauvegarder'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ─── Note modal ───────────────────────────────────────────────────────────────
+
+function NoteModal({ lead, onClose }: { lead: Lead; onClose: () => void }) {
+  const [notes, setNotes] = useState(lead.notes ?? '');
+  const [saving, setSaving] = useState(false);
+
+  async function save() {
+    setSaving(true);
+    try {
+      await updateLead({ id: lead.id, notes });
+      toast.success('Note sauvegardée');
+      onClose();
+    } catch {
+      toast.error('Erreur lors de la sauvegarde');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className='space-y-4'>
+      <p className='text-sm font-medium'>{lead.name}</p>
+      <textarea
+        className='input resize-none h-32'
+        placeholder='Ajoutez vos notes sur ce prospect…'
+        value={notes}
+        onChange={e => setNotes(e.target.value)}
+        autoFocus
+      />
+      <div className='flex justify-end gap-2'>
+        <button className='btn-secondary' onClick={onClose}>Annuler</button>
+        <button className='btn-primary' onClick={save} disabled={saving}>
+          {saving ? 'Sauvegarde…' : 'Sauvegarder'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ─── Leads table ─────────────────────────────────────────────────────────────
+
+function LeadsTable({ searchId, onBack }: { searchId: string; onBack: () => void }) {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const statusFilter = searchParams.get('status') ?? '';
+  const search2 = searchParams.get('q') ?? '';
+
+  function setStatusFilter(val: string) {
+    setSearchParams(prev => {
+      const next = new URLSearchParams(prev);
+      if (val) next.set('status', val); else next.delete('status');
+      return next;
+    });
+  }
+
+  function setSearch2(val: string) {
+    setSearchParams(prev => {
+      const next = new URLSearchParams(prev);
+      if (val) next.set('q', val); else next.delete('q');
+      return next;
+    });
+  }
+
+  const { data: search, isLoading, refetch } = useQuery(getLeadSearchDetail, { searchId });
+  const { ask, Dialog: ConfirmDialog } = useConfirm();
+  const [noteTarget, setNoteTarget] = useState<Lead | null>(null);
+  const [editTarget, setEditTarget] = useState<Lead | null>(null);
+  const [exporting, setExporting] = useState(false);
+
+  if (isLoading) {
+    return <div className='text-muted'>Chargement…</div>;
+  }
+  if (!search) return null;
+
+  const leads: Lead[] = (search as any).leads ?? [];
+  const filters: any = (search as any).filters ?? {};
+
+  const filtered = leads.filter(l => {
+    if (statusFilter && l.status !== statusFilter) return false;
+    if (search2) {
+      const q = search2.toLowerCase();
+      return (
+        l.name.toLowerCase().includes(q) ||
+        (l.address ?? '').toLowerCase().includes(q) ||
+        (l.email ?? '').toLowerCase().includes(q) ||
+        (l.phone ?? '').toLowerCase().includes(q) ||
+        (l.website ?? '').toLowerCase().includes(q)
+      );
+    }
+    return true;
+  });
+
+  async function handleExport() {
+    setExporting(true);
+    try {
+      const { csv } = await exportLeads({ searchId });
+      const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${(search?.title ?? 'export').replace(/[^a-z0-9]/gi, '_')}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch {
+      toast.error('Erreur lors de l\'export');
+    } finally {
+      setExporting(false);
+    }
+  }
+
+  return (
+    <>
+      {ConfirmDialog}
+      <Modal
+        open={editTarget !== null}
+        title={editTarget ? `Modifier — ${editTarget.name}` : 'Modifier'}
+        onClose={() => setEditTarget(null)}
+      >
+        {editTarget && (
+          <EditLeadModal lead={editTarget} onClose={() => { setEditTarget(null); refetch(); }} />
+        )}
+      </Modal>
+      <Modal
+        open={noteTarget !== null}
+        title={noteTarget ? `Note — ${noteTarget.name}` : 'Note'}
+        onClose={() => setNoteTarget(null)}
+      >
+        {noteTarget && (
+          <NoteModal lead={noteTarget} onClose={() => { setNoteTarget(null); refetch(); }} />
+        )}
+      </Modal>
+
+      {/* Header */}
+      <div className='flex items-start justify-between gap-4 mb-5'>
+        <div className='flex items-center gap-3'>
+          <button className='btn-ghost gap-1.5 text-sm' onClick={onBack}>
+            <LuChevronLeft size={16} /> Retour
+          </button>
+          <div>
+            <h2 className='text-lg font-semibold'>{search.title}</h2>
+            <p className='text-sm text-muted'>
+              {leads.length} prospect(s) •{' '}
+              {filters.businessType && <span>{filters.businessType}</span>}
+              {filters.city && <span> • {filters.city}, {filters.province ?? 'QC'}</span>}
+            </p>
+          </div>
+        </div>
+        <button className='btn-secondary gap-2 shrink-0' onClick={handleExport} disabled={exporting}>
+          {exporting ? <LuLoader size={15} className='animate-spin' /> : <LuDownload size={15} />}
+          Exporter CSV
+        </button>
+      </div>
+
+      {/* Filters bar */}
+      <div className='mb-4 flex items-center gap-3 flex-wrap'>
+        <div className='relative'>
+          <LuSearch size={15} className='absolute left-3 top-1/2 -translate-y-1/2 text-muted' />
+          <input
+            className='input pl-9 max-w-xs'
+            placeholder='Rechercher…'
+            value={search2}
+            onChange={e => setSearch2(e.target.value)}
+          />
+        </div>
+        <select className='input w-auto' value={statusFilter} onChange={e => setStatusFilter(e.target.value)}>
+          <option value=''>Tous les statuts</option>
+          {Object.entries(LEAD_STATUS).map(([val, { label }]) => (
+            <option key={val} value={val}>{label}</option>
+          ))}
+        </select>
+        <span className='text-sm text-muted'>{filtered.length} résultat(s)</span>
+      </div>
+
+      {filtered.length === 0 ? (
+        <div className='text-muted text-sm py-8 text-center'>Aucun prospect correspondant aux filtres.</div>
+      ) : (
+        <div className='overflow-x-auto rounded-xl border border-line'>
+          <table className='w-full text-sm'>
+            <thead>
+              <tr className='bg-canvas border-b border-line'>
+                <th className='text-left px-4 py-3 font-medium text-muted text-xs uppercase tracking-wide w-64'>Entreprise</th>
+                <th className='text-left px-4 py-3 font-medium text-muted text-xs uppercase tracking-wide w-52'>Contact</th>
+                <th className='text-left px-4 py-3 font-medium text-muted text-xs uppercase tracking-wide w-62 hidden xl:table-cell'>Site web</th>
+                <th className='text-left px-4 py-3 font-medium text-muted text-xs uppercase tracking-wide hidden md:table-cell'>Note / Maps</th>
+                <th className='text-left px-4 py-3 font-medium text-muted text-xs uppercase tracking-wide'>Statut</th>
+                <th className='text-right px-4 py-3 font-medium text-muted text-xs uppercase tracking-wide'>Actions</th>
+              </tr>
+            </thead>
+            <tbody className='divide-y divide-line'>
+              {filtered.map(lead => {
+                return (
+                  <tr key={lead.id} className='hover:bg-canvas transition-colors'>
+                    {/* Name + address + category */}
+                    <td className='px-4 py-3 w-56'>
+                      <div className='font-medium break-words'>{lead.name}</div>
+                      {lead.category && (
+                        <div className='text-xs text-muted capitalize break-words'>{lead.category}</div>
+                      )}
+                      {lead.address && (
+                        <div className='flex items-start gap-1 text-xs text-muted mt-0.5'>
+                          <LuMapPin size={10} className='shrink-0 mt-0.5' />
+                          <span className='break-words'>{lead.address}</span>
+                        </div>
+                      )}
+                    </td>
+
+                    {/* Phone + Email */}
+                    <td className='px-4 py-3'>
+                      <div className='flex flex-col gap-1'>
+                        {lead.phone ? (
+                          <div className='flex items-center gap-1'>
+                            <LuPhone size={12} className='text-muted shrink-0' />
+                            <a href={`tel:${lead.phone}`} className='text-accent-700 hover:underline whitespace-nowrap'>{lead.phone}</a>
+                            <CopyBtn text={lead.phone} />
+                          </div>
+                        ) : (
+                          <span className='text-muted text-xs flex items-center gap-1'><LuPhone size={12} />—</span>
+                        )}
+                        {lead.email ? (
+                          <div className='flex items-center gap-1'>
+                            <LuMail size={12} className='text-muted shrink-0' />
+                            <a href={`mailto:${lead.email}`} className='text-accent-700 hover:underline' title={lead.email}>{lead.email}</a>
+                            <CopyBtn text={lead.email} />
+                          </div>
+                        ) : (
+                          <span className='text-muted text-xs flex items-center gap-1'><LuMail size={12} />Non trouvé</span>
+                        )}
+                      </div>
+                    </td>
+
+                    {/* Website */}
+                    <td className='px-4 py-3 hidden xl:table-cell'>
+                      {lead.website ? (
+                        <div className='flex items-center gap-1'>
+                          <LuGlobe size={12} className='text-muted shrink-0' />
+                          <a
+                            href={lead.website}
+                            target='_blank'
+                            rel='noopener noreferrer'
+                            className='text-accent-700 hover:underline truncate max-w-[220px]'
+                            title={lead.website}
+                          >
+                            {lead.website.replace(/^https?:\/\//, '').replace(/\/$/, '')}
+                          </a>
+                        </div>
+                      ) : (
+                        <span className='text-muted'>—</span>
+                      )}
+                    </td>
+
+                    {/* Rating + Maps */}
+                    <td className='px-4 py-3 hidden md:table-cell'>
+                      <div>
+                        {lead.mapsUrl ? (
+                          <a href={lead.mapsUrl} target='_blank' rel='noopener noreferrer' className='hover:opacity-75 transition-opacity'>
+                            <Stars value={lead.rating ?? null} />
+                          </a>
+                        ) : (
+                          <Stars value={lead.rating ?? null} />
+                        )}
+                        {lead.reviewCount != null && lead.reviewCount > 0 && (
+                          <div className='text-xs text-muted'>{lead.reviewCount} avis</div>
+                        )}
+                      </div>
+                    </td>
+
+                    {/* Status */}
+                    <td className='px-4 py-3'>
+                      <StatusDropdown lead={lead} />
+                    </td>
+
+                    {/* Actions */}
+                    <td className='px-4 py-3'>
+                      <div className='flex items-center justify-end gap-1'>
+                        <IconBtn title='Modifier le prospect' onClick={() => setEditTarget(lead)}>
+                          <EditIcon />
+                        </IconBtn>
+                        <div className='relative'>
+                          <IconBtn
+                            title={lead.notes ? 'Modifier la note' : 'Ajouter une note'}
+                            onClick={() => setNoteTarget(lead)}
+                          >
+                            <LuNotebook size={15} />
+                          </IconBtn>
+                          {lead.notes && (
+                            <span className='absolute -top-1 -right-1 w-2 h-2 rounded-full bg-accent-500 pointer-events-none' />
+                          )}
+                        </div>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </>
+  );
+}
+
+// ─── Search list ──────────────────────────────────────────────────────────────
+
+function SearchList({
+  onSelect,
+  onNew,
+}: {
+  onSelect: (id: string) => void;
+  onNew: () => void;
+}) {
+  const { data: searches, isLoading } = useQuery(getLeadSearches);
+  const { ask, Dialog: ConfirmDialog } = useConfirm();
+
+  async function handleDelete(id: string, title: string) {
+    if (await ask(`Supprimer la recherche « ${title} » ?`, { description: 'Tous les prospects associés seront supprimés.' })) {
+      try {
+        await deleteLeadSearch({ id });
+        toast.success('Recherche supprimée');
+      } catch {
+        toast.error('Erreur lors de la suppression');
+      }
+    }
+  }
+
+  if (isLoading) return <div className='text-muted text-sm'>Chargement…</div>;
+
+  const list = searches ?? [];
+
+  if (list.length === 0) {
+    return (
+      <EmptyState
+        title='Aucune recherche'
+        description='Lancez votre première prospection pour trouver des clients potentiels.'
+        action={<button className='btn-primary' onClick={onNew}>Nouvelle recherche</button>}
+      />
+    );
+  }
+
+  return (
+    <>
+      {ConfirmDialog}
+      <div className='grid md:grid-cols-2 lg:grid-cols-3 gap-4'>
+        {list.map((s: any) => {
+          const f: any = s.filters ?? {};
+          const leadCount = s.leads?.length ?? s.totalFound ?? 0;
+          return (
+            <div
+              key={s.id}
+              role='button'
+              tabIndex={0}
+              className='card p-5 text-left hover:border-accent-300 transition-colors group cursor-pointer w-full'
+              onClick={() => onSelect(s.id)}
+              onKeyDown={e => e.key === 'Enter' && onSelect(s.id)}
+            >
+              <div className='flex items-start justify-between gap-2'>
+                <h3 className='font-semibold text-sm leading-tight group-hover:text-accent-700 transition-colors'>
+                  {s.title}
+                </h3>
+                <div onClick={e => e.stopPropagation()}>
+                  <IconBtn
+                    variant='danger'
+                    title='Supprimer'
+                    onClick={() => handleDelete(s.id, s.title)}
+                  >
+                    <TrashIcon />
+                  </IconBtn>
+                </div>
+              </div>
+
+              {s.description && (
+                <p className='text-xs text-muted mt-1 line-clamp-2'>{s.description}</p>
+              )}
+
+              <div className='mt-3 flex items-center gap-2 text-xs text-muted'>
+                {f.businessType && (
+                  <span className='badge-neutral'>{f.businessType}</span>
+                )}
+                {f.city && (
+                  <span className='flex items-center gap-1'>
+                    <LuMapPin size={10} /> {f.city}
+                  </span>
+                )}
+              </div>
+
+              <div className='mt-3 flex items-center gap-1.5 text-xs'>
+                <LuUsers size={12} className='text-accent-600' />
+                <span className='font-semibold text-accent-700'>{leadCount}</span>
+                <span className='text-muted'>prospect(s)</span>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </>
+  );
+}
+
+// ─── Page ─────────────────────────────────────────────────────────────────────
+
+export default function LeadSearchPage() {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const selectedId = searchParams.get('id');
+  const [showForm, setShowForm] = useState(false);
+
+  function handleDone(id: string) {
+    setShowForm(false);
+    setSearchParams({ id });
+  }
+
+  function handleSelect(id: string) {
+    setSearchParams({ id });
+  }
+
+  function handleBack() {
+    setSearchParams({});
+  }
+
+  return (
+    <>
+      <Modal open={showForm} title='Nouvelle prospection' onClose={() => setShowForm(false)}>
+        <SearchForm onClose={() => setShowForm(false)} onDone={handleDone} />
+      </Modal>
+
+      <PageHeader
+        title='Prospection'
+        subtitle='Trouvez des entreprises à démarcher à partir de Google Maps.'
+        actions={
+          !selectedId ? (
+            <button className='btn-primary gap-2' onClick={() => setShowForm(true)}>
+              <LuSearch size={16} />
+              Nouvelle recherche
+            </button>
+          ) : (
+            <button className='btn-primary gap-2' onClick={() => setShowForm(true)}>
+              <LuRefreshCw size={16} />
+              Nouvelle recherche
+            </button>
+          )
+        }
+      />
+
+      {selectedId ? (
+        <LeadsTable searchId={selectedId} onBack={handleBack} />
+      ) : (
+        <SearchList onSelect={handleSelect} onNew={() => setShowForm(true)} />
+      )}
+    </>
+  );
+}

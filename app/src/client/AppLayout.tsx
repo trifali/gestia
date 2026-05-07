@@ -4,7 +4,7 @@ import { useQuery, getCurrentCompany } from 'wasp/client/operations';
 import { useState, type ReactNode } from 'react';
 import {
   LuLayoutDashboard, LuUsers, LuFolder, LuFileText,
-  LuCreditCard, LuCalendar, LuZap, LuSettings, LuMenu, LuX
+  LuCreditCard, LuCalendar, LuSearch, LuSettings, LuMenu, LuX
 } from 'react-icons/lu';
 import Logo from './Logo';
 
@@ -20,7 +20,7 @@ const NAV = [
   { to: '/facturation', label: 'Facturation', icon: LuFileText },
   { to: '/paiements', label: 'Paiements', icon: LuCreditCard },
   { to: '/rencontres', label: 'Rencontres', icon: LuCalendar },
-  { to: '/automatisations', label: 'Automatisations', icon: LuZap },
+  { to: '/prospection', label: 'Prospection', icon: LuSearch },
 ];
 
 export default function AppLayout({ user, children }: AppLayoutProps) {

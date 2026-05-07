@@ -143,10 +143,10 @@ page MeetingsPage {
   component: import MeetingsPage from "@src/app/meetings/MeetingsPage"
 }
 
-route AutomationsRoute { path: "/automatisations", to: AutomationsPage }
-page AutomationsPage {
+route LeadSearchRoute { path: "/prospection", to: LeadSearchPage }
+page LeadSearchPage {
   authRequired: true,
-  component: import AutomationsPage from "@src/app/automations/AutomationsPage"
+  component: import LeadSearchPage from "@src/app/leads/LeadSearchPage"
 }
 
 route SettingsRoute { path: "/parametres", to: SettingsPage }
@@ -527,21 +527,29 @@ action disconnectGoogleCalendar {
   entities: [User]
 }
 
-query getAutomations {
-  fn: import { getAutomations } from "@src/app/automations/operations",
-  entities: [User, Automation]
+query getLeadSearches {
+  fn: import { getLeadSearches } from "@src/app/leads/operations",
+  entities: [User, LeadSearch, Lead]
 }
-action createAutomation {
-  fn: import { createAutomation } from "@src/app/automations/operations",
-  entities: [User, Automation]
+query getLeadSearchDetail {
+  fn: import { getLeadSearchDetail } from "@src/app/leads/operations",
+  entities: [User, LeadSearch, Lead]
 }
-action updateAutomation {
-  fn: import { updateAutomation } from "@src/app/automations/operations",
-  entities: [User, Automation]
+action searchLeads {
+  fn: import { searchLeads } from "@src/app/leads/operations",
+  entities: [User, LeadSearch, Lead]
 }
-action deleteAutomation {
-  fn: import { deleteAutomation } from "@src/app/automations/operations",
-  entities: [User, Automation]
+action updateLead {
+  fn: import { updateLead } from "@src/app/leads/operations",
+  entities: [User, LeadSearch, Lead]
+}
+action deleteLeadSearch {
+  fn: import { deleteLeadSearch } from "@src/app/leads/operations",
+  entities: [User, LeadSearch]
+}
+action exportLeads {
+  fn: import { exportLeads } from "@src/app/leads/operations",
+  entities: [User, LeadSearch, Lead]
 }
 
 query getPriceItems {
