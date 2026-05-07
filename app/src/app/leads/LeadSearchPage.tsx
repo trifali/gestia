@@ -1455,6 +1455,29 @@ function LeadsKanban({
   const [fetchExhausted, setFetchExhausted] = useState<{ nextExpandedRadiusKm: number; currentRadiusKm: number } | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Lead | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [activeFilters, setActiveFilters] = useState<Set<string>>(new Set());
+
+  function toggleFilter(key: string) {
+    setActiveFilters(prev => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key); else next.add(key);
+      return next;
+    });
+  }
+
+  function getEmailDomain(email: string): string {
+    return email.split('@')[1]?.toLowerCase() ?? '';
+  }
+  function getWebsiteDomain(url: string): string {
+    try { return new URL(url.startsWith('http') ? url : `https://${url}`).hostname.replace(/^www\./, '').toLowerCase(); }
+    catch { return url.toLowerCase().replace(/^www\./, ''); }
+  }
+  function emailMatchesDomain(lead: Lead): boolean {
+    if (!lead.email || !lead.website) return true;
+    const eDomain = getEmailDomain(lead.email);
+    const wDomain = getWebsiteDomain(lead.website);
+    return eDomain === wDomain || wDomain.endsWith(`.${eDomain}`) || eDomain.endsWith(`.${wDomain}`);
+  }
 
   async function handleFetchMore(radiusOverride?: number) {
     setFetchingMore(true);
@@ -1500,9 +1523,21 @@ function LeadsKanban({
     }
   }
 
+  const filteredLeads = useMemo(() => {
+    if (activeFilters.size === 0) return leads;
+    return leads.filter(l => {
+      for (const f of activeFilters) {
+        if (f === 'no_email' && !!l.email) return false;
+        if (f === 'no_website' && !!l.website) return false;
+        if (f === 'email_mismatch' && (!l.email || !l.website || emailMatchesDomain(l))) return false;
+      }
+      return true;
+    });
+  }, [leads, activeFilters]);
+
   const kanbanData = useMemo(
-    () => extend([], leads.map(l => ({ ...l })), undefined, true) as any[],
-    [leads],
+    () => extend([], filteredLeads.map(l => ({ ...l })), undefined, true) as any[],
+    [filteredLeads],
   );
 
   async function handleDragStop(args: any) {
@@ -1803,6 +1838,46 @@ function LeadsKanban({
       </Modal>
 
       <div className='overflow-x-auto -mx-4 px-4'>
+        {/* Quick filters */}
+        {(() => {
+          const chips: { key: string; label: string; title: string }[] = [
+            { key: 'no_email', label: '✉ Sans courriel', title: 'Afficher uniquement les prospects sans courriel' },
+            { key: 'no_website', label: '🌐 Sans site web', title: 'Afficher uniquement les prospects sans site web' },
+            { key: 'email_mismatch', label: '⚠ Courriel hors domaine', title: 'Courriel dont le domaine ne correspond pas au site web (opportunité de vente)' },
+          ];
+          return (
+            <div className='flex items-center gap-2 flex-wrap pb-3'>
+              {chips.map(c => (
+                <button
+                  key={c.key}
+                  title={c.title}
+                  onClick={() => toggleFilter(c.key)}
+                  className={`text-xs px-2.5 py-1 rounded-full border transition-colors ${
+                    activeFilters.has(c.key)
+                      ? 'bg-accent-600 border-accent-600 text-white'
+                      : 'bg-canvas border-line text-muted hover:border-accent-400 hover:text-ink'
+                  }`}
+                >
+                  {c.label}
+                </button>
+              ))}
+              {activeFilters.size > 0 && (
+                <button
+                  onClick={() => setActiveFilters(new Set())}
+                  className='text-xs px-2 py-1 text-muted hover:text-ink transition-colors'
+                  title='Réinitialiser les filtres'
+                >
+                  Réinitialiser
+                </button>
+              )}
+              {activeFilters.size > 0 && (
+                <span className='text-xs text-muted ml-auto'>
+                  {filteredLeads.length} / {leads.length} prospect{leads.length !== 1 ? 's' : ''}
+                </span>
+              )}
+            </div>
+          );
+        })()}
         <KanbanComponent
           id='prospect-kanban'
           keyField='status'
