@@ -196,8 +196,8 @@ function CopyBtn({ text }: { text: string }) {
 
 // ─── New search form ──────────────────────────────────────────────────────────
 
-function SearchForm({ onClose, onDone }: { onClose: () => void; onDone: (id: string) => void }) {
-  const [form, setForm] = useState(defaultForm());
+function SearchForm({ onClose, onDone, initialValues, readOnly }: { onClose: () => void; onDone: (id: string) => void; initialValues?: Partial<ReturnType<typeof defaultForm>>; readOnly?: boolean }) {
+  const [form, setForm] = useState(() => ({ ...defaultForm(), ...initialValues }));
   const [loading, setLoading] = useState(false);
 
   function set(field: string, value: any) {
@@ -240,10 +240,12 @@ function SearchForm({ onClose, onDone }: { onClose: () => void; onDone: (id: str
 
   return (
     <form onSubmit={handleSubmit} className='space-y-5'>
-      <p className='text-sm text-muted'>
-        Décrivez le type d'entreprise que vous cherchez, choisissez la zone géographique et
-        lancez la prospection. Gestia extraira les coordonnées depuis Google Maps.
-      </p>
+      {!readOnly && (
+        <p className='text-sm text-muted'>
+          Décrivez le type d'entreprise que vous cherchez, choisissez la zone géographique et
+          lancez la prospection. Gestia extraira les coordonnées depuis Google Maps.
+        </p>
+      )}
 
       {/* Title */}
       <div>
@@ -253,8 +255,9 @@ function SearchForm({ onClose, onDone }: { onClose: () => void; onDone: (id: str
           placeholder='Ex : Plombiers Montréal — Mai 2026'
           value={form.title}
           onChange={e => set('title', e.target.value)}
+          disabled={readOnly}
         />
-        <p className='text-xs text-muted mt-1'>Laissez vide pour générer automatiquement.</p>
+        {!readOnly && <p className='text-xs text-muted mt-1'>Laissez vide pour générer automatiquement.</p>}
       </div>
 
       <hr className='border-line' />
@@ -268,16 +271,21 @@ function SearchForm({ onClose, onDone }: { onClose: () => void; onDone: (id: str
           placeholder='Ex : Agence web, Plombier, Restaurant…'
           value={form.businessType}
           onChange={e => set('businessType', e.target.value)}
-          required
+          required={!readOnly}
+          disabled={readOnly}
         />
-        <datalist id='biz-types'>
-          {BUSINESS_TYPE_SUGGESTIONS.map(s => (
-            <option key={s} value={s} />
-          ))}
-        </datalist>
-        <p className='text-xs text-muted mt-1'>
-          Soyez précis : "Agence web React" donne de meilleurs résultats que "agence".
-        </p>
+        {!readOnly && (
+          <>
+            <datalist id='biz-types'>
+              {BUSINESS_TYPE_SUGGESTIONS.map(s => (
+                <option key={s} value={s} />
+              ))}
+            </datalist>
+            <p className='text-xs text-muted mt-1'>
+              Soyez précis : "Agence web React" donne de meilleurs résultats que "agence".
+            </p>
+          </>
+        )}
       </div>
 
       {/* Location */}
@@ -289,12 +297,13 @@ function SearchForm({ onClose, onDone }: { onClose: () => void; onDone: (id: str
             placeholder='Ex : Montréal, Québec, Laval'
             value={form.city}
             onChange={e => set('city', e.target.value)}
-            required
+            required={!readOnly}
+            disabled={readOnly}
           />
         </div>
         <div>
           <label className='label'>Province</label>
-          <select className='input' value={form.province} onChange={e => set('province', e.target.value)}>
+          <select className='input' value={form.province} onChange={e => set('province', e.target.value)} disabled={readOnly}>
             {PROVINCES.map(p => <option key={p} value={p}>{p}</option>)}
           </select>
         </div>
@@ -304,13 +313,13 @@ function SearchForm({ onClose, onDone }: { onClose: () => void; onDone: (id: str
       <div className='grid grid-cols-2 gap-3'>
         <div>
           <label className='label'>Rayon de recherche</label>
-          <select className='input' value={form.radius} onChange={e => set('radius', Number(e.target.value))}>
+          <select className='input' value={form.radius} onChange={e => set('radius', Number(e.target.value))} disabled={readOnly}>
             {RADIUS_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
           </select>
         </div>
         <div>
           <label className='label'>Note Google minimale</label>
-          <select className='input' value={form.minRating} onChange={e => set('minRating', Number(e.target.value))}>
+          <select className='input' value={form.minRating} onChange={e => set('minRating', Number(e.target.value))} disabled={readOnly}>
             {RATING_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
           </select>
         </div>
@@ -320,13 +329,13 @@ function SearchForm({ onClose, onDone }: { onClose: () => void; onDone: (id: str
       <div className='grid grid-cols-2 gap-3'>
         <div>
           <label className='label'>Nombre de résultats</label>
-          <select className='input' value={form.maxResults} onChange={e => set('maxResults', Number(e.target.value))}>
+          <select className='input' value={form.maxResults} onChange={e => set('maxResults', Number(e.target.value))} disabled={readOnly}>
             {MAX_RESULTS_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
           </select>
         </div>
         <div>
           <label className='label'>Langue des résultats</label>
-          <select className='input' value={form.language} onChange={e => set('language', e.target.value)}>
+          <select className='input' value={form.language} onChange={e => set('language', e.target.value)} disabled={readOnly}>
             <option value='fr'>Français</option>
             <option value='en'>Anglais</option>
           </select>
@@ -334,30 +343,32 @@ function SearchForm({ onClose, onDone }: { onClose: () => void; onDone: (id: str
       </div>
 
       {/* Toggles */}
-      <label className='flex items-center gap-3 cursor-pointer select-none'>
+      <label className={`flex items-center gap-3 select-none ${readOnly ? 'cursor-default opacity-70' : 'cursor-pointer'}`}>
         <input
           type='checkbox'
           className='w-4 h-4 rounded accent-accent-600'
           checked={form.requireWebsite}
           onChange={e => set('requireWebsite', e.target.checked)}
+          disabled={readOnly}
         />
         <span className='text-sm'>Exiger un site web (filtre les entreprises sans site)</span>
       </label>
 
-      {/* Info box */}
-      <div className='bg-blue-50 border border-blue-200 rounded-xl p-4 text-sm text-blue-800'>
-        <p className='font-medium mb-1'>Ce que Gestia va extraire :</p>
-        <ul className='space-y-0.5 text-blue-700 text-xs list-disc list-inside'>
-          <li>Nom, adresse, ville, code postal</li>
-          <li>Numéro de téléphone (si disponible sur Google)</li>
-          <li>Site web + tentative d'extraction du courriel</li>
-          <li>Note Google et nombre d'avis</li>
-          <li>Lien Google Maps</li>
-        </ul>
-        <p className='mt-2 text-xs text-blue-600'>
-          Nécessite <code className='bg-blue-100 px-1 rounded'>GOOGLE_PLACES_API_KEY</code> dans votre fichier <code className='bg-blue-100 px-1 rounded'>.env.server</code>.
-        </p>
-      </div>
+      {!readOnly && (
+        <div className='bg-blue-50 border border-blue-200 rounded-xl p-4 text-sm text-blue-800'>
+          <p className='font-medium mb-1'>Ce que Gestia va extraire :</p>
+          <ul className='space-y-0.5 text-blue-700 text-xs list-disc list-inside'>
+            <li>Nom, adresse, ville, code postal</li>
+            <li>Numéro de téléphone (si disponible sur Google)</li>
+            <li>Site web + tentative d'extraction du courriel</li>
+            <li>Note Google et nombre d'avis</li>
+            <li>Lien Google Maps</li>
+          </ul>
+          <p className='mt-2 text-xs text-blue-600'>
+            Nécessite <code className='bg-blue-100 px-1 rounded'>GOOGLE_PLACES_API_KEY</code> dans votre fichier <code className='bg-blue-100 px-1 rounded'>.env.server</code>.
+          </p>
+        </div>
+      )}
 
       {loading && (
         <div className='flex items-center gap-3 text-sm text-accent-700 bg-accent-50 border border-accent-200 rounded-xl p-4'>
@@ -368,12 +379,14 @@ function SearchForm({ onClose, onDone }: { onClose: () => void; onDone: (id: str
 
       <div className='flex justify-end gap-2 pt-2'>
         <button type='button' className='btn-secondary' onClick={onClose} disabled={loading}>
-          Annuler
+          {readOnly ? 'Fermer' : 'Annuler'}
         </button>
-        <button type='submit' className='btn-primary gap-2' disabled={loading}>
-          {loading ? <LuLoader size={16} className='animate-spin' /> : <LuSearch size={16} />}
-          Lancer la prospection
-        </button>
+        {!readOnly && (
+          <button type='submit' className='btn-primary gap-2' disabled={loading}>
+            {loading ? <LuLoader size={16} className='animate-spin' /> : <LuSearch size={16} />}
+            Lancer la prospection
+          </button>
+        )}
       </div>
     </form>
   );
@@ -496,7 +509,7 @@ function NoteModal({ lead, onClose }: { lead: Lead; onClose: () => void }) {
 
 // ─── Leads table ─────────────────────────────────────────────────────────────
 
-function LeadsTable({ searchId, onBack }: { searchId: string; onBack: () => void }) {
+function LeadsTable({ searchId, onBack, onShowDetails }: { searchId: string; onBack: () => void; onShowDetails: (values: ReturnType<typeof defaultForm>) => void }) {
   const [searchParams, setSearchParams] = useSearchParams();
   const statusFilter = searchParams.get('status') ?? '';
   const search2 = searchParams.get('q') ?? '';
@@ -594,17 +607,64 @@ function LeadsTable({ searchId, onBack }: { searchId: string; onBack: () => void
           </button>
           <div>
             <h2 className='text-lg font-semibold'>{search.title}</h2>
-            <p className='text-sm text-muted'>
-              {leads.length} prospect(s) •{' '}
-              {filters.businessType && <span>{filters.businessType}</span>}
-              {filters.city && <span> • {filters.city}, {filters.province ?? 'QC'}</span>}
-            </p>
+            {search.description && (
+              <p className='text-sm text-muted italic mb-1'>{search.description}</p>
+            )}
+            <div className='flex flex-wrap gap-1.5 mt-1'>
+              {filters.businessType && (
+                <span className='badge-info'>{filters.businessType}</span>
+              )}
+              {filters.city && (
+                <span className='badge-neutral flex items-center gap-1'>
+                  <LuMapPin size={11} />{filters.city}{filters.province ? `, ${filters.province}` : ''}
+                </span>
+              )}
+              {filters.radius && (
+                <span className='badge-neutral'>
+                  {RADIUS_OPTIONS.find(r => r.value === filters.radius)?.label ?? `${filters.radius / 1000} km`}
+                </span>
+              )}
+              {filters.minRating > 0 && (
+                <span className='badge-neutral flex items-center gap-1'>
+                  <LuStar size={11} />{filters.minRating}+
+                </span>
+              )}
+              {filters.requireWebsite && (
+                <span className='badge-neutral flex items-center gap-1'>
+                  <LuGlobe size={11} />Site web requis
+                </span>
+              )}
+              {filters.language && (
+                <span className='badge-neutral'>{filters.language === 'fr' ? 'Français' : 'English'}</span>
+              )}
+              <span className='text-xs text-muted self-center'>{leads.length} prospect(s)</span>
+            </div>
           </div>
         </div>
-        <button className='btn-secondary gap-2 shrink-0' onClick={handleExport} disabled={exporting}>
-          {exporting ? <LuLoader size={15} className='animate-spin' /> : <LuDownload size={15} />}
-          Exporter CSV
-        </button>
+        <div className='flex items-center gap-2 shrink-0'>
+          <button
+            className='btn-ghost gap-2 text-sm'
+            onClick={() => onShowDetails({
+              title: search.title,
+              description: (search as any).description ?? '',
+              businessType: filters.businessType ?? '',
+              city: filters.city ?? '',
+              province: filters.province ?? 'QC',
+              radius: filters.radius ?? 10000,
+              minRating: filters.minRating ?? 0,
+              requireWebsite: filters.requireWebsite ?? false,
+              maxResults: filters.maxResults ?? 20,
+              language: filters.language ?? 'fr',
+            })}
+          >
+            <LuSlidersHorizontal size={15} />
+            Détails de la recherche
+          </button>
+          <button className='btn-secondary gap-2' onClick={handleExport} disabled={exporting}>
+            {exporting ? <LuLoader size={15} className='animate-spin' /> : <LuDownload size={15} />}
+            Exporter CSV
+          </button>
+        </div>
       </div>
 
       {/* Filters bar */}
@@ -857,9 +917,11 @@ export default function LeadSearchPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const selectedId = searchParams.get('id');
   const [showForm, setShowForm] = useState(false);
+  const [formPrefill, setFormPrefill] = useState<Partial<ReturnType<typeof defaultForm>> | undefined>(undefined);
 
   function handleDone(id: string) {
     setShowForm(false);
+    setFormPrefill(undefined);
     setSearchParams({ id });
   }
 
@@ -871,10 +933,24 @@ export default function LeadSearchPage() {
     setSearchParams({});
   }
 
+  function handleShowDetails(values: ReturnType<typeof defaultForm>) {
+    setFormPrefill(values);
+    setShowForm(true);
+  }
+
   return (
     <>
-      <Modal open={showForm} title='Nouvelle prospection' onClose={() => setShowForm(false)}>
-        <SearchForm onClose={() => setShowForm(false)} onDone={handleDone} />
+      <Modal
+        open={showForm}
+        title={formPrefill ? 'Détails de la recherche' : 'Nouvelle prospection'}
+        onClose={() => { setShowForm(false); setFormPrefill(undefined); }}
+      >
+        <SearchForm
+          onClose={() => { setShowForm(false); setFormPrefill(undefined); }}
+          onDone={handleDone}
+          initialValues={formPrefill}
+          readOnly={!!formPrefill}
+        />
       </Modal>
 
       <PageHeader
@@ -886,17 +962,12 @@ export default function LeadSearchPage() {
               <LuSearch size={16} />
               Nouvelle recherche
             </button>
-          ) : (
-            <button className='btn-primary gap-2' onClick={() => setShowForm(true)}>
-              <LuRefreshCw size={16} />
-              Nouvelle recherche
-            </button>
-          )
+          ) : undefined
         }
       />
 
       {selectedId ? (
-        <LeadsTable searchId={selectedId} onBack={handleBack} />
+        <LeadsTable searchId={selectedId} onBack={handleBack} onShowDetails={handleShowDetails} />
       ) : (
         <SearchList onSelect={handleSelect} onNew={() => setShowForm(true)} />
       )}
