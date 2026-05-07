@@ -547,6 +547,10 @@ action deleteLeadSearch {
   fn: import { deleteLeadSearch } from "@src/app/leads/operations",
   entities: [User, LeadSearch]
 }
+action updateLeadSearch {
+  fn: import { updateLeadSearch } from "@src/app/leads/operations",
+  entities: [User, LeadSearch]
+}
 action exportLeads {
   fn: import { exportLeads } from "@src/app/leads/operations",
   entities: [User, LeadSearch, Lead]
@@ -662,6 +666,10 @@ action magicCorrect {
 action generateTemplateContent {
   fn: import { generateTemplateContent } from "@src/app/ai/operations",
   entities: [User, Company]
+}
+action generateProspectEmail {
+  fn: import { generateProspectEmail } from "@src/app/ai/operations",
+  entities: [User, Company, LeadSearch]
 }
 
 // Hourly background sweep that advances document statuses based on time

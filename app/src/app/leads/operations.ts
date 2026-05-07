@@ -5,6 +5,8 @@ import type {
   GetLeadSearchDetail,
   SearchLeads,
   UpdateLead,
+  // @ts-ignore -- generated on next Wasp restart
+  UpdateLeadSearch,
   DeleteLeadSearch,
   ExportLeads,
   GetLeadStatusConfigs,
@@ -207,9 +209,9 @@ export const getLeadSearchDetail: GetLeadSearchDetail<
 // ─── Actions ──────────────────────────────────────────────────────────────────
 
 export const searchLeads: SearchLeads<
-  { title: string; description?: string; filters: SearchFilters },
+  { title: string; description?: string; purpose?: string; filters: SearchFilters },
   LeadSearchWithLeads
-> = async ({ title, description, filters }, context) => {
+> = async ({ title, description, purpose, filters }, context) => {
   const companyId = ensureCompany(context.user);
 
   const apiKey = process.env.GOOGLE_PLACES_API_KEY;
@@ -359,6 +361,7 @@ export const searchLeads: SearchLeads<
       companyId,
       title,
       description,
+      purpose: purpose || null,
       filters: filters as any,
       status: 'done',
       totalFound: rawLeads.length,
@@ -441,6 +444,20 @@ export const deleteLeadSearch: DeleteLeadSearch<{ id: string }, { id: string }> 
   const search = await context.entities.LeadSearch.findUnique({ where: { id } });
   if (!search || search.companyId !== companyId) throw new HttpError(404);
   await context.entities.LeadSearch.delete({ where: { id } });
+  return { id };
+};
+
+export const updateLeadSearch = async (
+  { id, title, purpose }: { id: string; title: string; purpose?: string | null },
+  context: any,
+): Promise<{ id: string }> => {
+  const companyId = ensureCompany(context.user);
+  const search = await context.entities.LeadSearch.findUnique({ where: { id } });
+  if (!search || search.companyId !== companyId) throw new HttpError(404);
+  await context.entities.LeadSearch.update({
+    where: { id },
+    data: { title: title.trim(), purpose: purpose?.trim() || null },
+  });
   return { id };
 };
 

@@ -151,12 +151,14 @@ export function Modal({
   title,
   children,
   footer,
+  headerRight,
 }: {
   open: boolean;
   onClose: () => void;
   title: string;
   children: ReactNode;
   footer?: ReactNode;
+  headerRight?: ReactNode;
 }) {
   if (!open) return null;
   return createPortal(
@@ -164,11 +166,14 @@ export function Modal({
       <div className='modal-panel' onClick={(e) => e.stopPropagation()}>
         <div className='shrink-0 px-6 py-4 border-b border-line flex items-center justify-between'>
           <h2 className='font-semibold text-lg'>{title}</h2>
-          <button onClick={onClose} className='text-muted hover:text-ink' aria-label='Fermer'>
-            <svg className='w-5 h-5' fill='none' viewBox='0 0 24 24' stroke='currentColor' strokeWidth='2'>
-              <path strokeLinecap='round' strokeLinejoin='round' d='M6 6l12 12M6 18L18 6' />
-            </svg>
-          </button>
+          <div className='flex items-center gap-1'>
+            {headerRight}
+            <button onClick={onClose} className='text-muted hover:text-ink' aria-label='Fermer'>
+              <svg className='w-5 h-5' fill='none' viewBox='0 0 24 24' stroke='currentColor' strokeWidth='2'>
+                <path strokeLinecap='round' strokeLinejoin='round' d='M6 6l12 12M6 18L18 6' />
+              </svg>
+            </button>
+          </div>
         </div>
         <div className='px-6 py-5 overflow-y-auto flex-1 min-h-0'>{children}</div>
         {footer && <div className='shrink-0 px-6 py-4 border-t border-line flex justify-end gap-2 bg-canvas-100'>{footer}</div>}

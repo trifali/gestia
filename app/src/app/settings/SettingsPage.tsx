@@ -169,6 +169,7 @@ function BrandForm({ company, canEdit }: { company: any; canEdit: boolean }) {
   const [accent, setAccent] = useState<string>(company.brandAccentColor || '#D4A24C');
   const [textColor, setTextColor] = useState<string>(company.brandTextColor || '#1A1A1A');
   const [tagline, setTagline] = useState<string>(company.brandTagline || '');
+  const [description, setDescription] = useState<string>((company as any).brandDescription || '');
   const [signature, setSignature] = useState<string>(company.brandEmailSignature || '');
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -179,6 +180,7 @@ function BrandForm({ company, canEdit }: { company: any; canEdit: boolean }) {
     setAccent(company.brandAccentColor || '#D4A24C');
     setTextColor(company.brandTextColor || '#1A1A1A');
     setTagline(company.brandTagline || '');
+    setDescription((company as any).brandDescription || '');
     setSignature(company.brandEmailSignature || '');
   }, [company?.id]);
 
@@ -191,6 +193,7 @@ function BrandForm({ company, canEdit }: { company: any; canEdit: boolean }) {
         brandAccentColor: accent,
         brandTextColor: textColor,
         brandTagline: tagline,
+        brandDescription: description,
         brandEmailSignature: signature,
       });
       toast.success('Identité visuelle enregistrée');
@@ -320,6 +323,19 @@ function BrandForm({ company, canEdit }: { company: any; canEdit: boolean }) {
             value={tagline}
             onChange={(e) => setTagline(e.target.value)}
             placeholder='Ex. Gestion intelligente pour entreprises québécoises'
+            disabled={!canEdit}
+          />
+        </div>
+
+        <div className='mt-6'>
+          <label className='label'>Description de l'entreprise <span className='text-muted font-normal'>(utilisée dans les courriels de prospection)</span></label>
+          <p className='text-xs text-muted mb-2'>En 1-2 phrases : ce que vous faites et votre valeur ajoutée.</p>
+          <MagicTextarea
+            className='input min-h-[80px] resize-y'
+            rows={3}
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            placeholder="Ex. Trifali Concept conçoit et développe des sites web sur mesure pour les PME québécoises — modernes, rapides et pensés pour attirer des clients."
             disabled={!canEdit}
           />
         </div>

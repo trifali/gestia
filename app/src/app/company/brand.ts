@@ -91,6 +91,7 @@ type BrandArgs = Partial<{
   brandAccentColor: string;
   brandTextColor: string;
   brandTagline: string;
+  brandDescription: string;
   brandEmailSignature: string;
 }>;
 
@@ -110,6 +111,7 @@ export const updateCompanyBrand: UpdateCompanyBrand<BrandArgs, Company> = async 
       brandAccentColor: sanitizeColor(args.brandAccentColor, '#D4A24C'),
       brandTextColor: sanitizeColor(args.brandTextColor, '#1A1A1A'),
       brandTagline: (args.brandTagline ?? '').toString().slice(0, 200) || null,
+      brandDescription: (args.brandDescription ?? '').toString().slice(0, 1000) || null,
       brandEmailSignature: (args.brandEmailSignature ?? '').toString().slice(0, 2000) || null,
     },
   });
