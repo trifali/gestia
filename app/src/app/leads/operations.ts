@@ -408,7 +408,7 @@ export const updateLead: UpdateLead<
   const updated = await context.entities.Lead.update({
     where: { id },
     data: {
-      ...(status !== undefined && { status }),
+      ...(status !== undefined && { status, statusUpdatedAt: new Date() }),
       ...(notes !== undefined && { notes }),
       ...(email !== undefined && { email }),
       ...(name !== undefined && { name }),

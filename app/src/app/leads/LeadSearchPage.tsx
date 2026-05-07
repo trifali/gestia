@@ -95,6 +95,7 @@ import {
   LuEyeOff,
   LuUserPlus,
   LuUserCheck,
+  LuClock,
 } from 'react-icons/lu';
 import { MagicInput, MagicTextarea } from '../../client/magic';
 
@@ -1424,6 +1425,11 @@ function LeadsKanban({
   onEmail,
   onConvert,
   existingClientNames,
+  searchQuery,
+  setSearchQuery,
+  activeFilters,
+  setActiveFilters,
+  onResetFilters,
 }: {
   leads: Lead[];
   statusConfigs: LeadStatusConfig[];
@@ -1437,6 +1443,11 @@ function LeadsKanban({
   onEmail: (lead: Lead) => void;
   onConvert: (lead: Lead) => void;
   existingClientNames: Set<string>;
+  searchQuery: string;
+  setSearchQuery: (v: string) => void;
+  activeFilters: Set<string>;
+  setActiveFilters: (fn: (prev: Set<string>) => Set<string>) => void;
+  onResetFilters: () => void;
 }) {
   const onEditRef = useRef(onEdit);
   onEditRef.current = onEdit;
@@ -1455,8 +1466,6 @@ function LeadsKanban({
   const [fetchExhausted, setFetchExhausted] = useState<{ nextExpandedRadiusKm: number; currentRadiusKm: number } | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Lead | null>(null);
   const [deleting, setDeleting] = useState(false);
-  const [activeFilters, setActiveFilters] = useState<Set<string>>(new Set());
-
   function toggleFilter(key: string) {
     setActiveFilters(prev => {
       const next = new Set(prev);
@@ -1524,8 +1533,11 @@ function LeadsKanban({
   }
 
   const filteredLeads = useMemo(() => {
-    if (activeFilters.size === 0) return leads;
+    const q = searchQuery.trim().toLowerCase();
     return leads.filter(l => {
+      if (q && ![
+        l.name, l.email, l.phone, l.website, l.address, l.category,
+      ].some(v => v?.toLowerCase().includes(q))) return false;
       for (const f of activeFilters) {
         if (f === 'no_email' && !!l.email) return false;
         if (f === 'no_website' && !!l.website) return false;
@@ -1533,7 +1545,7 @@ function LeadsKanban({
       }
       return true;
     });
-  }, [leads, activeFilters]);
+  }, [leads, activeFilters, searchQuery]);
 
   const kanbanData = useMemo(
     () => extend([], filteredLeads.map(l => ({ ...l })), undefined, true) as any[],
@@ -1555,10 +1567,21 @@ function LeadsKanban({
   }
 
   const cardTemplate = useCallback((props: any): React.ReactElement => {
-    const lead = props as Lead & { notes?: string | null };
+    const lead = props as Lead & { notes?: string | null; statusUpdatedAt?: string | Date | null };
+    const movedAt = lead.statusUpdatedAt ? new Date(lead.statusUpdatedAt) : null;
+    const movedLabel = movedAt
+      ? movedAt.toLocaleDateString('fr-CA', { day: 'numeric', month: 'short' }) +
+        ' ' + movedAt.toLocaleTimeString('fr-CA', { hour: '2-digit', minute: '2-digit' })
+      : null;
     return (
       <div className='p-3 space-y-2'>
         <div className='font-semibold text-sm leading-tight'>{lead.name}</div>
+        {movedLabel && (
+          <div className='flex items-center gap-1 text-[10px] text-muted' title={`Déplacé le ${movedLabel}`}>
+            <LuClock size={9} className='shrink-0' />
+            <span>{movedLabel}</span>
+          </div>
+        )}
         <div className='space-y-0.5'>
           {lead.website && (
             <div className='flex items-center gap-1.5 text-xs'>
@@ -1599,26 +1622,30 @@ function LeadsKanban({
             </div>
           )}
         </div>
-        <div className='flex items-center gap-1.5 pt-1.5 border-t border-line'>
-          {lead.rating != null && (
-            <span className='flex items-center gap-0.5 text-xs'>
-              <LuStar size={10} className='text-amber-400 fill-amber-400' />
-              <span className='font-medium'>{Number(lead.rating).toFixed(1)}</span>
-            </span>
+        <div className='pt-1.5 border-t border-line space-y-1.5'>
+          {(lead.rating != null || lead.mapsUrl) && (
+            <div className='flex items-center gap-1.5'>
+              {lead.rating != null && (
+                <span className='flex items-center gap-0.5 text-xs'>
+                  <LuStar size={10} className='text-amber-400 fill-amber-400' />
+                  <span className='font-medium'>{Number(lead.rating).toFixed(1)}</span>
+                </span>
+              )}
+              {lead.mapsUrl && (
+                <a
+                  href={lead.mapsUrl}
+                  target='_blank'
+                  rel='noopener noreferrer'
+                  className='text-xs text-accent-700 hover:underline flex items-center gap-0.5'
+                  onClick={e => e.stopPropagation()}
+                >
+                  <LuExternalLink size={10} />
+                  Maps
+                </a>
+              )}
+            </div>
           )}
-          {lead.mapsUrl && (
-            <a
-              href={lead.mapsUrl}
-              target='_blank'
-              rel='noopener noreferrer'
-              className='text-xs text-accent-700 hover:underline flex items-center gap-0.5'
-              onClick={e => e.stopPropagation()}
-            >
-              <LuExternalLink size={10} />
-              Maps
-            </a>
-          )}
-          <div className='ml-auto flex items-center gap-1'>
+          <div className='flex items-center gap-1'>
             {lead.email && (
               <button
                 className='w-6 h-6 rounded flex items-center justify-center hover:bg-canvas text-muted hover:text-ink transition-colors relative'
@@ -1845,8 +1872,19 @@ function LeadsKanban({
             { key: 'no_website', label: '🌐 Sans site web', title: 'Afficher uniquement les prospects sans site web' },
             { key: 'email_mismatch', label: '⚠ Courriel hors domaine', title: 'Courriel dont le domaine ne correspond pas au site web (opportunité de vente)' },
           ];
+          const isFiltered = activeFilters.size > 0 || searchQuery.trim() !== '';
           return (
             <div className='flex items-center gap-2 flex-wrap pb-3'>
+              <div className='relative'>
+                <LuSearch size={13} className='absolute left-2.5 top-1/2 -translate-y-1/2 text-muted pointer-events-none' />
+                <input
+                  type='text'
+                  value={searchQuery}
+                  onChange={e => setSearchQuery(e.target.value)}
+                  placeholder='Rechercher…'
+                  className='text-xs pl-7 pr-2.5 py-1 rounded-full border border-line bg-canvas text-ink placeholder-muted focus:outline-none focus:border-accent-400 w-40'
+                />
+              </div>
               {chips.map(c => (
                 <button
                   key={c.key}
@@ -1861,16 +1899,16 @@ function LeadsKanban({
                   {c.label}
                 </button>
               ))}
-              {activeFilters.size > 0 && (
+              {isFiltered && (
                 <button
-                  onClick={() => setActiveFilters(new Set())}
+                  onClick={() => onResetFilters()}
                   className='text-xs px-2 py-1 text-muted hover:text-ink transition-colors'
                   title='Réinitialiser les filtres'
                 >
                   Réinitialiser
                 </button>
               )}
-              {activeFilters.size > 0 && (
+              {isFiltered && (
                 <span className='text-xs text-muted ml-auto'>
                   {filteredLeads.length} / {leads.length} prospect{leads.length !== 1 ? 's' : ''}
                 </span>
@@ -1934,7 +1972,29 @@ function LeadsTable({ searchId, onBack, onShowDetails }: { searchId: string; onB
   );
   const { ask, Dialog: ConfirmDialog } = useConfirm();
   const navigate = useNavigate();
-  const [view, setView] = useState<'kanban' | 'table'>('kanban');
+  const view = (searchParams.get('view') ?? 'kanban') as 'kanban' | 'table';
+  function setView(v: 'kanban' | 'table') {
+    setSearchParams(prev => {
+      const next = new URLSearchParams(prev);
+      next.set('view', v);
+      if (v === 'kanban') { next.delete('q'); next.delete('status'); }
+      if (v === 'table') { next.delete('kq'); next.delete('kf'); }
+      return next;
+    });
+  }
+  const kanbanQuery = searchParams.get('kq') ?? '';
+  function setKanbanQuery(val: string) {
+    setSearchParams(prev => { const next = new URLSearchParams(prev); if (val) next.set('kq', val); else next.delete('kq'); return next; });
+  }
+  const kanbanFiltersRaw = searchParams.get('kf') ?? '';
+  const kanbanActiveFilters = useMemo(() => new Set(kanbanFiltersRaw ? kanbanFiltersRaw.split(',') : []), [kanbanFiltersRaw]);
+  function setKanbanActiveFilters(fn: (prev: Set<string>) => Set<string>) {
+    const next = fn(kanbanActiveFilters);
+    setSearchParams(prev => { const p = new URLSearchParams(prev); const arr = [...next]; if (arr.length) p.set('kf', arr.join(',')); else p.delete('kf'); return p; });
+  }
+  function resetKanbanFilters() {
+    setSearchParams(prev => { const p = new URLSearchParams(prev); p.delete('kf'); p.delete('kq'); return p; });
+  }
   const [noteTarget, setNoteTarget] = useState<Lead | null>(null);
   const [editTarget, setEditTarget] = useState<Lead | null>(null);
   const [emailTarget, setEmailTarget] = useState<Lead | null>(null);
@@ -2185,6 +2245,11 @@ function LeadsTable({ searchId, onBack, onShowDetails }: { searchId: string; onB
           onEmail={setEmailTarget}
           onConvert={setConvertTarget}
           existingClientNames={existingClientNames}
+          searchQuery={kanbanQuery}
+          setSearchQuery={setKanbanQuery}
+          activeFilters={kanbanActiveFilters}
+          setActiveFilters={setKanbanActiveFilters}
+          onResetFilters={resetKanbanFilters}
         />
       ) : (
         <>

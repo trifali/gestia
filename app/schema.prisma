@@ -452,21 +452,22 @@ model Lead {
   search   LeadSearch @relation(fields: [searchId], references: [id], onDelete: Cascade)
   searchId String
 
-  name        String
-  address     String?
-  phone       String?
-  website     String?
-  email       String?
-  rating      Float?
-  reviewCount Int?
-  category    String?
-  placeId     String?
-  mapsUrl     String?
-  latitude    Float?
-  longitude   Float?
-  isOpen      Boolean?
-  notes       String?
-  status      String   @default("nouveau") // nouveau | contacte | qualifie | rejete
+  name            String
+  address         String?
+  phone           String?
+  website         String?
+  email           String?
+  rating          Float?
+  reviewCount     Int?
+  category        String?
+  placeId         String?
+  mapsUrl         String?
+  latitude        Float?
+  longitude       Float?
+  isOpen          Boolean?
+  notes           String?
+  status          String    @default("nouveau") // nouveau | contacte | qualifie | rejete
+  statusUpdatedAt DateTime?
 
   @@index([searchId])
 }
