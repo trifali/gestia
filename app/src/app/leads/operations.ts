@@ -779,3 +779,184 @@ export const deleteProspectEmailTemplate = async (
   await (context.entities as any).ProspectEmailTemplate.delete({ where: { searchId } });
   return { deleted: true };
 };
+
+// ─── fetchMoreLeads ───────────────────────────────────────────────────────────
+
+export const fetchMoreLeads = async (
+  { searchId, radiusOverride }: { searchId: string; radiusOverride?: number },
+  context: any,
+): Promise<{ added: number; exhausted: boolean; nextExpandedRadiusKm: number }> => {
+  const companyId = ensureCompany(context.user);
+
+  const apiKey = process.env.GOOGLE_PLACES_API_KEY;
+  if (!apiKey) throw new HttpError(500, 'Clé API Google Places non configurée.');
+
+  const search = await context.entities.LeadSearch.findUnique({
+    where: { id: searchId },
+    include: { leads: { select: { placeId: true, name: true } } },
+  });
+  if (!search || search.companyId !== companyId) throw new HttpError(404);
+
+  const filters = search.filters as SearchFilters;
+  const {
+    businessType,
+    city,
+    province = 'QC',
+    radius = 10000,
+    minRating = 0,
+    requireWebsite = false,
+    maxResults = 20,
+    language = 'fr',
+  } = filters;
+
+  // Build dedup sets from existing leads
+  const existingPlaceIds = new Set(
+    (search.leads as any[]).map((l: any) => l.placeId).filter(Boolean),
+  );
+  const existingNames = new Set(
+    (search.leads as any[]).map((l: any) => l.name.toLowerCase()),
+  );
+
+  const queryStr = encodeURIComponent(`${businessType} ${city} ${province} Canada`);
+  const searchRadius = radiusOverride ?? radius;
+  const nextExpandedM = Math.min(Math.round(searchRadius * 2.5), 50000);
+
+  async function fetchAllPages(searchRadius: number): Promise<any[]> {
+    const results: any[] = [];
+    let token: string | undefined;
+    for (let p = 0; p < 3; p++) {
+      if (p > 0 && token) await new Promise(r => setTimeout(r, 2000));
+      let url = `${PLACES_BASE}/textsearch/json?query=${queryStr}&radius=${searchRadius}&language=${language}&key=${apiKey}`;
+      if (token) url += `&pagetoken=${token}`;
+      const data = await fetchJson(url);
+      if (data.status !== 'OK' && data.status !== 'ZERO_RESULTS') break;
+      results.push(...(data.results ?? []));
+      token = data.next_page_token;
+      if (!token) break;
+    }
+    return results;
+  }
+
+  function filterNew(stubs: any[]): any[] {
+    return stubs.filter((s: any) => {
+      if (s.place_id && existingPlaceIds.has(s.place_id)) return false;
+      if (!s.place_id && existingNames.has((s.name ?? '').toLowerCase())) return false;
+      return true;
+    });
+  }
+
+  const allStubs = await fetchAllPages(searchRadius);
+  const newStubs = filterNew(allStubs).slice(0, maxResults);
+  const exhausted = newStubs.length === 0;
+
+  if (exhausted) return { added: 0, exhausted: true, nextExpandedRadiusKm: nextExpandedM / 1000 };
+
+  async function getDetails(placeId: string): Promise<any> {
+    const fields = [
+      'name', 'formatted_address', 'formatted_phone_number',
+      'website', 'rating', 'user_ratings_total', 'geometry',
+      'types', 'business_status', 'url', 'opening_hours',
+    ].join('%2C');
+    const url = `${PLACES_BASE}/details/json?place_id=${placeId}&fields=${fields}&language=${language}&key=${apiKey}`;
+    const data = await fetchJson(url);
+    return data.result ?? {};
+  }
+
+  async function batchRun<T>(items: T[], fn: (item: T) => Promise<any>, batchSize = 5): Promise<any[]> {
+    const results: any[] = [];
+    for (let i = 0; i < items.length; i += batchSize) {
+      const batch = items.slice(i, i + batchSize);
+      const settled = await Promise.allSettled(batch.map(fn));
+      results.push(...settled.map(s => (s.status === 'fulfilled' ? s.value : null)));
+    }
+    return results;
+  }
+
+  const details = await batchRun(newStubs, (s: any) => getDetails(s.place_id));
+
+  type RawLead = {
+    name: string; address?: string; phone?: string; website?: string;
+    email?: string; rating?: number; reviewCount?: number; category?: string;
+    placeId?: string; mapsUrl?: string; latitude?: number; longitude?: number; isOpen?: boolean;
+  };
+
+  let rawLeads: RawLead[] = newStubs
+    .map((stub: any, i: number) => {
+      const d = details[i] ?? {};
+      const rating = d.rating ?? stub.rating ?? null;
+      if (minRating > 0 && (rating === null || rating < minRating)) return null;
+      const website = d.website ?? null;
+      if (requireWebsite && !website) return null;
+      const resolvedName = (d.name ?? stub.name ?? '').toLowerCase();
+      if (existingNames.has(resolvedName)) return null;
+      return {
+        name: d.name ?? stub.name,
+        address: d.formatted_address ?? stub.formatted_address ?? undefined,
+        phone: d.formatted_phone_number ?? undefined,
+        website: website ?? undefined,
+        rating: rating ?? undefined,
+        reviewCount: d.user_ratings_total ?? stub.user_ratings_total ?? undefined,
+        category: (d.types ?? stub.types ?? [])[0]?.replace(/_/g, ' ') ?? undefined,
+        placeId: stub.place_id ?? undefined,
+        mapsUrl: d.url ?? undefined,
+        latitude: d.geometry?.location?.lat ?? stub.geometry?.location?.lat ?? undefined,
+        longitude: d.geometry?.location?.lng ?? stub.geometry?.location?.lng ?? undefined,
+        isOpen: d.opening_hours?.open_now ?? stub.opening_hours?.open_now ?? undefined,
+      } as RawLead;
+    })
+    .filter((l): l is RawLead => l !== null);
+
+  // Scrape emails
+  const emailResults = await batchRun(
+    rawLeads.map(l => l.website ?? ''),
+    (url: string) => (url ? extractEmailFromWebsite(url) : Promise.resolve('')),
+    5,
+  );
+  rawLeads = rawLeads.map((l, i) => ({ ...l, email: emailResults[i] || null }));
+
+  // Insert new leads into existing search
+  await context.entities.Lead.createMany({
+    data: rawLeads.map(l => ({
+      searchId,
+      name: l.name,
+      address: l.address ?? null,
+      phone: l.phone ?? null,
+      website: l.website ?? null,
+      email: l.email ?? null,
+      rating: l.rating ?? null,
+      reviewCount: l.reviewCount ?? null,
+      category: l.category ?? null,
+      placeId: l.placeId ?? null,
+      mapsUrl: l.mapsUrl ?? null,
+      latitude: l.latitude ?? null,
+      longitude: l.longitude ?? null,
+      isOpen: l.isOpen ?? null,
+      status: 'nouveau',
+      notes: null,
+    })),
+  });
+
+  // Update totalFound
+  await context.entities.LeadSearch.update({
+    where: { id: searchId },
+    data: { totalFound: { increment: rawLeads.length } },
+  });
+
+  return { added: rawLeads.length, exhausted: false, nextExpandedRadiusKm: nextExpandedM / 1000 };
+};
+
+// ─── deleteLead ───────────────────────────────────────────────────────────────
+
+export const deleteLead = async (
+  { leadId }: { leadId: string },
+  context: any,
+): Promise<{ deleted: boolean }> => {
+  const companyId = ensureCompany(context.user);
+  const lead = await context.entities.Lead.findUnique({
+    where: { id: leadId },
+    include: { search: { select: { companyId: true } } },
+  });
+  if (!lead || lead.search.companyId !== companyId) throw new HttpError(404);
+  await context.entities.Lead.delete({ where: { id: leadId } });
+  return { deleted: true };
+};

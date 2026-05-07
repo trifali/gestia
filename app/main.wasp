@@ -615,6 +615,14 @@ action deleteProspectEmailTemplate {
   fn: import { deleteProspectEmailTemplate } from "@src/app/leads/operations",
   entities: [User, LeadSearch, ProspectEmailTemplate]
 }
+action fetchMoreLeads {
+  fn: import { fetchMoreLeads } from "@src/app/leads/operations",
+  entities: [User, LeadSearch, Lead]
+}
+action deleteLead {
+  fn: import { deleteLead } from "@src/app/leads/operations",
+  entities: [User, LeadSearch, Lead]
+}
 
 query getPriceItems {
   fn: import { getPriceItems } from "@src/app/prices/operations",
