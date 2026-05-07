@@ -533,7 +533,7 @@ query getLeadSearches {
 }
 query getLeadSearchDetail {
   fn: import { getLeadSearchDetail } from "@src/app/leads/operations",
-  entities: [User, LeadSearch, Lead]
+  entities: [User, LeadSearch, Lead, LeadNote]
 }
 action searchLeads {
   fn: import { searchLeads } from "@src/app/leads/operations",
@@ -570,6 +570,18 @@ action deleteLeadStatusConfig {
 action reorderLeadStatusConfigs {
   fn: import { reorderLeadStatusConfigs } from "@src/app/leads/operations",
   entities: [User, LeadStatusConfig]
+}
+query getLeadNotes {
+  fn: import { getLeadNotes } from "@src/app/leads/operations",
+  entities: [User, LeadNote]
+}
+action addLeadNote {
+  fn: import { addLeadNote } from "@src/app/leads/operations",
+  entities: [User, LeadNote, Lead]
+}
+action deleteLeadNote {
+  fn: import { deleteLeadNote } from "@src/app/leads/operations",
+  entities: [User, LeadNote]
 }
 
 query getPriceItems {

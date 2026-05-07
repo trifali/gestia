@@ -169,7 +169,23 @@ export const getLeadSearchDetail: GetLeadSearchDetail<
     duplicateSearchTitles: l.placeId ? (dupMap.get(l.placeId) ?? []) : [],
   }));
 
-  return { ...search, leads: leadsWithDups } as any;
+  // Attach hasNotes flag (per placeId or lead.id)
+  const identifiers = search.leads.map(l => l.placeId ?? l.id);
+  const notedIdentifiers = identifiers.length
+    ? await (context.entities as any).LeadNote.findMany({
+        where: { companyId, identifier: { in: identifiers } },
+        select: { identifier: true },
+        distinct: ['identifier'],
+      })
+    : [];
+  const noteSet = new Set<string>(notedIdentifiers.map((n: any) => n.identifier));
+
+  const leadsWithFlags = leadsWithDups.map(l => ({
+    ...l,
+    hasNotes: noteSet.has(l.placeId ?? l.id),
+  }));
+
+  return { ...search, leads: leadsWithFlags } as any;
 };
 
 // ─── Actions ──────────────────────────────────────────────────────────────────
@@ -550,4 +566,44 @@ export const reorderLeadStatusConfigs = async (
       })
     )
   );
+};
+
+// ─── Lead notes (timeline) ────────────────────────────────────────────────────
+
+export const getLeadNotes = async (
+  { identifier }: { identifier: string },
+  context: any,
+): Promise<any[]> => {
+  const companyId = ensureCompany(context.user);
+  return (context.entities as any).LeadNote.findMany({
+    where: { companyId, identifier },
+    orderBy: { createdAt: 'asc' },
+  });
+};
+
+export const addLeadNote = async (
+  { leadId, text }: { leadId: string; text: string },
+  context: any,
+): Promise<any> => {
+  const companyId = ensureCompany(context.user);
+  const lead = await context.entities.Lead.findUnique({
+    where: { id: leadId },
+    include: { search: { select: { companyId: true } } },
+  });
+  if (!lead || (lead as any).search.companyId !== companyId) throw new HttpError(404);
+  const identifier = lead.placeId ?? lead.id;
+  return (context.entities as any).LeadNote.create({
+    data: { companyId, identifier, text: text.trim() },
+  });
+};
+
+export const deleteLeadNote = async (
+  { id }: { id: string },
+  context: any,
+): Promise<{ id: string }> => {
+  const companyId = ensureCompany(context.user);
+  const note = await (context.entities as any).LeadNote.findUnique({ where: { id } });
+  if (!note || note.companyId !== companyId) throw new HttpError(404);
+  await (context.entities as any).LeadNote.delete({ where: { id } });
+  return { id };
 };

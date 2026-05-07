@@ -84,6 +84,7 @@ model Company {
   leadSearches      LeadSearch[]
   prospectStatuses  ProspectStatus[]
   leadStatusConfigs LeadStatusConfig[]
+  leadNotes         LeadNote[]
 }
 
 model Client {
@@ -495,4 +496,18 @@ model ProspectStatus {
 
   @@unique([companyId, placeId])
   @@index([companyId])
+}
+
+// Timeline notes for a prospect (keyed by placeId if available, else lead.id)
+model LeadNote {
+  id        String   @id @default(uuid())
+  createdAt DateTime @default(now())
+
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  companyId String
+
+  identifier String // placeId when available, else lead.id
+  text       String
+
+  @@index([companyId, identifier])
 }
