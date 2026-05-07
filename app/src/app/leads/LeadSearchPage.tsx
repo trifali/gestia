@@ -2319,11 +2319,8 @@ function LeadsTable({ searchId, onBack, onShowDetails }: { searchId: string; onB
 
       {/* Header */}
       <div className='flex flex-col gap-3 mb-5'>
-        {/* Top row: back + title + actions */}
+        {/* Top row: title + actions */}
         <div className='flex items-start gap-2 sm:gap-4'>
-          <button className='btn-ghost gap-1.5 text-sm shrink-0' onClick={onBack}>
-            <LuChevronLeft size={16} /> Retour
-          </button>
           {/* Title block */}
           <div className='flex-1 min-w-0'>
             <div className='flex items-center gap-1.5'>
@@ -2857,7 +2854,8 @@ export default function LeadSearchPage() {
 
       <PageHeader
         title='Prospection'
-        subtitle='Trouvez des entreprises à démarcher à partir de Google Maps.'
+        subtitle={selectedId ? undefined : 'Trouvez des entreprises à démarcher à partir de Google Maps.'}
+        onBack={selectedId ? handleBack : undefined}
         actions={
           <div className='flex items-center gap-2'>
             {!selectedId && (
