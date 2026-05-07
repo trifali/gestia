@@ -107,11 +107,15 @@ else
 fi
 
 # 4. Migrations
+# SAFETY: use `migrate deploy` — non-interactive, never resets, never wipes data.
+# To author a NEW migration: npm run migrate -- --name <description>
 info "Application des migrations Prisma..."
-if ! "$WASP_BIN" db migrate-dev --name auto >/dev/null 2>&1; then
-  # Replay en mode interactif si nécessaire
-  "$WASP_BIN" db migrate-dev
+if echo "${WASP_ALLOW_RESET:-}" | grep -q "yes"; then
+  fail "WASP_ALLOW_RESET is set — refusing to run dev.sh with that flag."
+  exit 1
 fi
+DATABASE_URL="$(grep '^DATABASE_URL=' "$APP_DIR/.env.server" | head -1 | cut -d= -f2-)" \
+  npx --prefix "$APP_DIR" prisma migrate deploy --schema "$APP_DIR/.wasp/out/db/schema.prisma" 2>&1 | grep -v "^$" || true
 ok "Migrations à jour."
 
 # 5. Lancement de l'application

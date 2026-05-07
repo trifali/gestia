@@ -108,7 +108,7 @@ export type SearchFilters = {
   language?: string;       // fr | en
 };
 
-type LeadSearchWithLeads = LeadSearch & { leads: Lead[] };
+type LeadSearchWithLeads = LeadSearch & { leads: (Lead & { duplicateSearchTitles?: string[] })[] };
 type LeadSearchSummary = LeadSearch & { leads: { id: string }[] };
 
 // ─── Queries ──────────────────────────────────────────────────────────────────
@@ -135,7 +135,37 @@ export const getLeadSearchDetail: GetLeadSearchDetail<
     include: { leads: { orderBy: { createdAt: 'asc' } } },
   });
   if (!search || search.companyId !== companyId) throw new HttpError(404);
-  return search as any;
+
+  // Duplicate detection: find placeIds that appear in other searches of this company
+  const placeIds = search.leads.map(l => l.placeId).filter(Boolean) as string[];
+  const duplicates = placeIds.length
+    ? await context.entities.Lead.findMany({
+        where: {
+          placeId: { in: placeIds },
+          searchId: { not: searchId },
+          search: { companyId },
+        },
+        select: { placeId: true, search: { select: { title: true } } },
+      })
+    : [];
+
+  // Build a map: placeId → list of other search titles
+  const dupMap = new Map<string, string[]>();
+  for (const d of duplicates) {
+    if (!d.placeId) continue;
+    if (!dupMap.has(d.placeId)) dupMap.set(d.placeId, []);
+    const title = (d as any).search?.title;
+    if (title && !dupMap.get(d.placeId)!.includes(title)) {
+      dupMap.get(d.placeId)!.push(title);
+    }
+  }
+
+  const leadsWithDups = search.leads.map(l => ({
+    ...l,
+    duplicateSearchTitles: l.placeId ? (dupMap.get(l.placeId) ?? []) : [],
+  }));
+
+  return { ...search, leads: leadsWithDups } as any;
 };
 
 // ─── Actions ──────────────────────────────────────────────────────────────────
@@ -275,6 +305,18 @@ export const searchLeads: SearchLeads<
   );
   rawLeads = rawLeads.map((l, i) => ({ ...l, email: emailResults[i] || null }));
 
+  // Carry over persistent prospect status for known placeIds
+  const placeIds = rawLeads.map(l => l.placeId).filter(Boolean) as string[];
+  const existingStatuses = placeIds.length
+    ? await (context.entities as any).ProspectStatus.findMany({
+        where: { companyId, placeId: { in: placeIds } },
+        select: { placeId: true, status: true, notes: true },
+      })
+    : [];
+  const statusMap = new Map<string, { placeId: string; status: string; notes: string | null }>(
+    existingStatuses.map((s: any) => [s.placeId, s])
+  );
+
   // Persist results
   const savedSearch = await context.entities.LeadSearch.create({
     data: {
@@ -285,22 +327,26 @@ export const searchLeads: SearchLeads<
       status: 'done',
       totalFound: rawLeads.length,
       leads: {
-        create: rawLeads.map(l => ({
-          name: l.name,
-          address: l.address ?? null,
-          phone: l.phone ?? null,
-          website: l.website ?? null,
-          email: l.email ?? null,
-          rating: l.rating ?? null,
-          reviewCount: l.reviewCount ?? null,
-          category: l.category ?? null,
-          placeId: l.placeId ?? null,
-          mapsUrl: l.mapsUrl ?? null,
-          latitude: l.latitude ?? null,
-          longitude: l.longitude ?? null,
-          isOpen: l.isOpen ?? null,
-          status: 'nouveau',
-        })),
+        create: rawLeads.map(l => {
+          const saved = l.placeId ? statusMap.get(l.placeId) : undefined;
+          return {
+            name: l.name,
+            address: l.address ?? null,
+            phone: l.phone ?? null,
+            website: l.website ?? null,
+            email: l.email ?? null,
+            rating: l.rating ?? null,
+            reviewCount: l.reviewCount ?? null,
+            category: l.category ?? null,
+            placeId: l.placeId ?? null,
+            mapsUrl: l.mapsUrl ?? null,
+            latitude: l.latitude ?? null,
+            longitude: l.longitude ?? null,
+            isOpen: l.isOpen ?? null,
+            status: saved?.status ?? 'nouveau',
+            notes: saved?.notes ?? null,
+          };
+        }),
       },
     },
     include: { leads: { orderBy: { createdAt: 'asc' } } },
@@ -319,7 +365,8 @@ export const updateLead: UpdateLead<
     include: { search: { select: { companyId: true } } },
   });
   if (!lead || (lead as any).search.companyId !== companyId) throw new HttpError(404);
-  return context.entities.Lead.update({
+
+  const updated = await context.entities.Lead.update({
     where: { id },
     data: {
       ...(status !== undefined && { status }),
@@ -332,6 +379,22 @@ export const updateLead: UpdateLead<
       ...(category !== undefined && { category }),
     },
   });
+
+  // Persist status/notes to ProspectStatus so they survive search deletion
+  if ((status !== undefined || notes !== undefined) && lead.placeId) {
+    const currentStatus = status ?? lead.status;
+    const currentNotes = notes !== undefined ? notes : lead.notes;
+    await (context.entities as any).ProspectStatus.upsert({
+      where: { companyId_placeId: { companyId, placeId: lead.placeId } },
+      create: { companyId, placeId: lead.placeId, status: currentStatus, notes: currentNotes ?? null },
+      update: {
+        ...(status !== undefined && { status }),
+        ...(notes !== undefined && { notes }),
+      },
+    });
+  }
+
+  return updated;
 };
 
 export const deleteLeadSearch: DeleteLeadSearch<{ id: string }, { id: string }> = async (

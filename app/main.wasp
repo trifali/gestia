@@ -537,11 +537,11 @@ query getLeadSearchDetail {
 }
 action searchLeads {
   fn: import { searchLeads } from "@src/app/leads/operations",
-  entities: [User, LeadSearch, Lead]
+  entities: [User, LeadSearch, Lead, ProspectStatus]
 }
 action updateLead {
   fn: import { updateLead } from "@src/app/leads/operations",
-  entities: [User, LeadSearch, Lead]
+  entities: [User, LeadSearch, Lead, ProspectStatus]
 }
 action deleteLeadSearch {
   fn: import { deleteLeadSearch } from "@src/app/leads/operations",

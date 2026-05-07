@@ -53,7 +53,7 @@
   "scripts": {
     "dev": "bash scripts/dev.sh",
     "db": "wasp start db",
-    "migrate": "wasp db migrate-dev",
+    "migrate": "bash scripts/migrate.sh",
     "start": "wasp start",
     "studio": "wasp db studio",
     "clean": "wasp clean"

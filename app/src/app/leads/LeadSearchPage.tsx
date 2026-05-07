@@ -37,6 +37,7 @@ import {
   LuSlidersHorizontal,
   LuUsers,
   LuNotebook,
+  LuTriangleAlert,
 } from 'react-icons/lu';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -716,6 +717,12 @@ function LeadsTable({ searchId, onBack, onShowDetails }: { searchId: string; onB
                         <div className='flex items-start gap-1 text-xs text-muted mt-0.5'>
                           <LuMapPin size={10} className='shrink-0 mt-0.5' />
                           <span className='break-words'>{lead.address}</span>
+                        </div>
+                      )}
+                      {(lead as any).duplicateSearchTitles?.length > 0 && (
+                        <div className='mt-1 flex items-center gap-1 text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded-md px-1.5 py-0.5' title={`Déjà trouvé dans : ${(lead as any).duplicateSearchTitles.join(', ')}`}>
+                          <LuTriangleAlert size={11} className='shrink-0' />
+                          <span className='truncate'>Déjà dans {(lead as any).duplicateSearchTitles.length === 1 ? `« ${(lead as any).duplicateSearchTitles[0]} »` : `${(lead as any).duplicateSearchTitles.length} recherches`}</span>
                         </div>
                       )}
                     </td>
