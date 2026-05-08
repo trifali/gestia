@@ -1608,6 +1608,7 @@ function LeadsKanban({
         l.name, l.email, l.phone, l.website, l.address, l.category,
       ].some(v => v?.toLowerCase().includes(q))) return false;
       for (const f of activeFilters) {
+        if (f === 'has_email' && !l.email) return false;
         if (f === 'no_email' && !!l.email) return false;
         if (f === 'no_website' && !!l.website) return false;
         if (f === 'email_mismatch' && (!l.email || !l.website || emailMatchesDomain(l))) return false;
@@ -1816,6 +1817,7 @@ function LeadsKanban({
         ) : undefined}
         searchBarSlot={(() => {
           const chips: { key: string; label: string; title: string }[] = [
+            { key: 'has_email', label: '✉ Avec courriel', title: 'Afficher uniquement les prospects avec un courriel' },
             { key: 'no_email', label: '✉ Sans courriel', title: 'Afficher uniquement les prospects sans courriel' },
             { key: 'no_website', label: '🌐 Sans site web', title: 'Afficher uniquement les prospects sans site web' },
             { key: 'email_mismatch', label: '⚠ Courriel hors domaine', title: 'Courriel dont le domaine ne correspond pas au site web (opportunité de vente)' },
