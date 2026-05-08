@@ -89,6 +89,7 @@ model Company {
   leadEmailLogs          LeadEmailLog[]
   leadEmailDrafts        LeadEmailDraft[]
   prospectEmailTemplates ProspectEmailTemplate[]
+  leadShareTokens        LeadSearchShareToken[]
 }
 
 model Client {
@@ -441,6 +442,7 @@ model LeadSearch {
 
   leads         Lead[]
   emailTemplate ProspectEmailTemplate?
+  shareToken    LeadSearchShareToken?
 
   @@index([companyId])
 }
@@ -550,6 +552,25 @@ model LeadEmailLog {
   subject    String
 
   @@index([companyId, identifier])
+}
+
+// Shareable link token for an employee to access prospect details (no login)
+model LeadSearchShareToken {
+  id        String   @id @default(uuid())
+  createdAt DateTime @default(now())
+
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  companyId String
+
+  search   LeadSearch @relation(fields: [searchId], references: [id], onDelete: Cascade)
+  searchId String     @unique
+
+  token      String    @unique
+  label      String?
+  isRevoked  Boolean   @default(false)
+  lastUsedAt DateTime?
+
+  @@index([companyId])
 }
 
 // Draft email content for a prospect (one per identifier, upserted)

@@ -1,4 +1,5 @@
 import { HttpError } from 'wasp/server';
+import { randomBytes } from 'crypto';
 import { sendEmailWithAttachment } from '../../server/mail';
 import type {
   GetLeadSearches,
@@ -172,14 +173,14 @@ export const getLeadSearchDetail: GetLeadSearchDetail<
     duplicateSearchTitles: l.placeId ? (dupMap.get(l.placeId) ?? []) : [],
   }));
 
-  // Attach hasNotes flag (per placeId or lead.id)
+  // Attach note count + email flags (per placeId or lead.id)
   const identifiers = search.leads.map(l => l.placeId ?? l.id);
-  const [notedIdentifiers, emailedIdentifiers, draftIdentifiers] = identifiers.length
+  const [noteCounts, emailedIdentifiers, draftIdentifiers] = identifiers.length
     ? await Promise.all([
-        (context.entities as any).LeadNote.findMany({
+        (context.entities as any).LeadNote.groupBy({
+          by: ['identifier'],
           where: { companyId, identifier: { in: identifiers } },
-          select: { identifier: true },
-          distinct: ['identifier'],
+          _count: { id: true },
         }),
         (context.entities as any).LeadEmailLog.findMany({
           where: { companyId, identifier: { in: identifiers } },
@@ -192,13 +193,14 @@ export const getLeadSearchDetail: GetLeadSearchDetail<
         }),
       ])
     : [[], [], []];
-  const noteSet = new Set<string>(notedIdentifiers.map((n: any) => n.identifier));
+  const noteCountMap = new Map<string, number>((noteCounts as any[]).map((n: any) => [n.identifier, n._count.id]));
   const emailSet = new Set<string>(emailedIdentifiers.map((e: any) => e.identifier));
   const draftSet = new Set<string>(draftIdentifiers.map((d: any) => d.identifier));
 
   const leadsWithFlags = leadsWithDups.map(l => ({
     ...l,
-    hasNotes: noteSet.has(l.placeId ?? l.id),
+    noteCount: noteCountMap.get(l.placeId ?? l.id) ?? 0,
+    hasNotes: noteCountMap.has(l.placeId ?? l.id),
     hasEmailSent: emailSet.has(l.placeId ?? l.id),
     hasEmailDraft: draftSet.has(l.placeId ?? l.id),
   }));
@@ -959,4 +961,225 @@ export const deleteLead = async (
   if (!lead || lead.search.companyId !== companyId) throw new HttpError(404);
   await context.entities.Lead.delete({ where: { id: leadId } });
   return { deleted: true };
+};
+
+// ─── Share token helpers ──────────────────────────────────────────────────────
+
+function generateShareToken(): string {
+  return randomBytes(24).toString('hex');
+}
+
+async function validateShareToken(token: string, entities: any) {
+  const shareToken = await (entities as any).LeadSearchShareToken.findUnique({ where: { token } });
+  if (!shareToken || shareToken.isRevoked) throw new HttpError(403, 'Lien invalide ou révoqué');
+  // Update lastUsedAt
+  await (entities as any).LeadSearchShareToken.update({
+    where: { id: shareToken.id },
+    data: { lastUsedAt: new Date() },
+  });
+  return shareToken;
+}
+
+// ─── createLeadShareToken (auth) ──────────────────────────────────────────────
+
+export const createLeadShareToken = async (
+  { searchId, label }: { searchId: string; label?: string },
+  context: any,
+) => {
+  const companyId = ensureCompany(context.user);
+  const search = await context.entities.LeadSearch.findUnique({ where: { id: searchId } });
+  if (!search || search.companyId !== companyId) throw new HttpError(404);
+
+  // Upsert: if a token already exists for this search, regenerate it by deleting and creating
+  const existing = await (context.entities as any).LeadSearchShareToken.findUnique({ where: { searchId } });
+  if (existing) {
+    await (context.entities as any).LeadSearchShareToken.delete({ where: { id: existing.id } });
+  }
+
+  return (context.entities as any).LeadSearchShareToken.create({
+    data: {
+      companyId,
+      searchId,
+      token: generateShareToken(),
+      label: label?.trim() || null,
+    },
+  });
+};
+
+// ─── revokeLeadShareToken (auth) ──────────────────────────────────────────────
+
+export const revokeLeadShareToken = async (
+  { searchId }: { searchId: string },
+  context: any,
+) => {
+  const companyId = ensureCompany(context.user);
+  const shareToken = await (context.entities as any).LeadSearchShareToken.findUnique({ where: { searchId } });
+  if (!shareToken || shareToken.companyId !== companyId) throw new HttpError(404);
+  return (context.entities as any).LeadSearchShareToken.update({
+    where: { id: shareToken.id },
+    data: { isRevoked: true },
+  });
+};
+
+// ─── getLeadSearchByToken (public – no auth) ──────────────────────────────────
+
+export const getLeadSearchByToken = async (
+  { token }: { token: string },
+  context: any,
+) => {
+  const shareToken = await validateShareToken(token, context.entities);
+  const search = await context.entities.LeadSearch.findUnique({
+    where: { id: shareToken.searchId },
+    include: { leads: { orderBy: { createdAt: 'asc' } } },
+  });
+  if (!search) throw new HttpError(404);
+
+  const statusConfigs = await (context.entities as any).LeadStatusConfig.findMany({
+    where: { companyId: search.companyId },
+    orderBy: { order: 'asc' },
+  });
+
+  // Attach note counts
+  const identifiers = (search as any).leads.map((l: any) => l.placeId ?? l.id);
+  const noteCounts = identifiers.length
+    ? await (context.entities as any).LeadNote.groupBy({
+        by: ['identifier'],
+        where: { companyId: search.companyId, identifier: { in: identifiers } },
+        _count: { id: true },
+      })
+    : [];
+  const noteCountMap = new Map<string, number>((noteCounts as any[]).map((n: any) => [n.identifier, n._count.id]));
+
+  const leadsWithFlags = (search as any).leads.map((l: any) => ({
+    ...l,
+    noteCount: noteCountMap.get(l.placeId ?? l.id) ?? 0,
+    hasNotes: noteCountMap.has(l.placeId ?? l.id),
+  }));
+
+  return {
+    search: {
+      id: search.id,
+      title: search.title,
+      description: (search as any).description,
+      filters: (search as any).filters,
+    },
+    leads: leadsWithFlags,
+    statusConfigs,
+  };
+};
+
+// ─── updateLeadByToken (public – no auth) ────────────────────────────────────
+
+export const updateLeadByToken = async (
+  { token, leadId, ...rest }: { token: string; leadId: string; status?: string; name?: string; phone?: string; email?: string; website?: string; address?: string; category?: string },
+  context: any,
+) => {
+  const shareToken = await validateShareToken(token, context.entities);
+  const lead = await context.entities.Lead.findUnique({
+    where: { id: leadId },
+    include: { search: { select: { id: true } } },
+  });
+  if (!lead || lead.search.id !== shareToken.searchId) throw new HttpError(403);
+
+  const updateData: any = {};
+  if (rest.status !== undefined) {
+    updateData.status = rest.status;
+    updateData.statusUpdatedAt = new Date();
+  }
+  if (rest.name !== undefined) updateData.name = rest.name;
+  if (rest.phone !== undefined) updateData.phone = rest.phone || null;
+  if (rest.email !== undefined) updateData.email = rest.email || null;
+  if (rest.website !== undefined) updateData.website = rest.website || null;
+  if (rest.address !== undefined) updateData.address = rest.address || null;
+  if (rest.category !== undefined) updateData.category = rest.category || null;
+
+  return context.entities.Lead.update({ where: { id: leadId }, data: updateData });
+};
+
+// ─── deleteLeadByToken (public – no auth) ────────────────────────────────────
+
+export const deleteLeadByToken = async (
+  { token, leadId }: { token: string; leadId: string },
+  context: any,
+) => {
+  const shareToken = await validateShareToken(token, context.entities);
+  const lead = await context.entities.Lead.findUnique({
+    where: { id: leadId },
+    include: { search: { select: { id: true } } },
+  });
+  if (!lead || lead.search.id !== shareToken.searchId) throw new HttpError(403);
+  await context.entities.Lead.delete({ where: { id: leadId } });
+  return { deleted: true };
+};
+
+// ─── addLeadNoteByToken (public – no auth) ────────────────────────────────────
+
+export const addLeadNoteByToken = async (
+  { token, leadId, text }: { token: string; leadId: string; text: string },
+  context: any,
+) => {
+  const shareToken = await validateShareToken(token, context.entities);
+  const lead = await context.entities.Lead.findUnique({
+    where: { id: leadId },
+    include: { search: { select: { id: true, companyId: true } } },
+  });
+  if (!lead || lead.search.id !== shareToken.searchId) throw new HttpError(403);
+  if (!text?.trim()) throw new HttpError(400, 'Le texte est requis');
+
+  const identifier = lead.placeId ?? lead.id;
+  return (context.entities as any).LeadNote.create({
+    data: {
+      companyId: lead.search.companyId,
+      identifier,
+      text: text.trim(),
+    },
+  });
+};
+
+// ─── getLeadNotesByToken (public – no auth) ───────────────────────────────────
+
+export const getLeadNotesByToken = async (
+  { token, leadId }: { token: string; leadId: string },
+  context: any,
+) => {
+  const shareToken = await validateShareToken(token, context.entities);
+  const lead = await context.entities.Lead.findUnique({
+    where: { id: leadId },
+    include: { search: { select: { id: true, companyId: true } } },
+  });
+  if (!lead || lead.search.id !== shareToken.searchId) throw new HttpError(403);
+
+  const identifier = lead.placeId ?? lead.id;
+  return (context.entities as any).LeadNote.findMany({
+    where: { companyId: lead.search.companyId, identifier },
+    orderBy: { createdAt: 'asc' },
+  });
+};
+
+// ─── deleteLeadNoteByToken (public – no auth) ─────────────────────────────────
+
+export const deleteLeadNoteByToken = async (
+  { token, noteId }: { token: string; noteId: string },
+  context: any,
+) => {
+  const shareToken = await validateShareToken(token, context.entities);
+  const note = await (context.entities as any).LeadNote.findUnique({ where: { id: noteId } });
+  if (!note) throw new HttpError(404);
+  // Verify the note belongs to the correct search by checking companyId matches token's search
+  const search = await context.entities.LeadSearch.findUnique({ where: { id: shareToken.searchId } });
+  if (!search || search.companyId !== note.companyId) throw new HttpError(403);
+  await (context.entities as any).LeadNote.delete({ where: { id: noteId } });
+  return { deleted: true };
+};
+
+// ─── getLeadShareToken (auth) ──────────────────────────────────────────────────
+
+export const getLeadShareToken = async (
+  { searchId }: { searchId: string },
+  context: any,
+) => {
+  const companyId = ensureCompany(context.user);
+  const search = await context.entities.LeadSearch.findUnique({ where: { id: searchId } });
+  if (!search || search.companyId !== companyId) throw new HttpError(404);
+  return (context.entities as any).LeadSearchShareToken.findUnique({ where: { searchId } });
 };

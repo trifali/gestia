@@ -149,6 +149,11 @@ page LeadSearchPage {
   component: import LeadSearchPage from "@src/app/leads/LeadSearchPage"
 }
 
+route ProspectPortalRoute { path: "/prospect-portail/:token", to: ProspectPortalPage }
+page ProspectPortalPage {
+  component: import ProspectPortalPage from "@src/app/leads/ProspectPortalPage"
+}
+
 route SettingsRoute { path: "/parametres", to: SettingsPage }
 page SettingsPage {
   authRequired: true,
@@ -622,6 +627,42 @@ action fetchMoreLeads {
 action deleteLead {
   fn: import { deleteLead } from "@src/app/leads/operations",
   entities: [User, LeadSearch, Lead]
+}
+query getLeadShareToken {
+  fn: import { getLeadShareToken } from "@src/app/leads/operations",
+  entities: [User, LeadSearch, LeadSearchShareToken]
+}
+action createLeadShareToken {
+  fn: import { createLeadShareToken } from "@src/app/leads/operations",
+  entities: [User, LeadSearch, LeadSearchShareToken]
+}
+action revokeLeadShareToken {
+  fn: import { revokeLeadShareToken } from "@src/app/leads/operations",
+  entities: [User, LeadSearch, LeadSearchShareToken]
+}
+query getLeadSearchByToken {
+  fn: import { getLeadSearchByToken } from "@src/app/leads/operations",
+  entities: [LeadSearch, Lead, LeadSearchShareToken, LeadStatusConfig, LeadNote]
+}
+action updateLeadByToken {
+  fn: import { updateLeadByToken } from "@src/app/leads/operations",
+  entities: [Lead, LeadSearch, LeadSearchShareToken]
+}
+action deleteLeadByToken {
+  fn: import { deleteLeadByToken } from "@src/app/leads/operations",
+  entities: [Lead, LeadSearch, LeadSearchShareToken]
+}
+action addLeadNoteByToken {
+  fn: import { addLeadNoteByToken } from "@src/app/leads/operations",
+  entities: [Lead, LeadSearch, LeadSearchShareToken, LeadNote]
+}
+query getLeadNotesByToken {
+  fn: import { getLeadNotesByToken } from "@src/app/leads/operations",
+  entities: [Lead, LeadSearch, LeadSearchShareToken, LeadNote]
+}
+action deleteLeadNoteByToken {
+  fn: import { deleteLeadNoteByToken } from "@src/app/leads/operations",
+  entities: [LeadNote, LeadSearch, LeadSearchShareToken]
 }
 
 query getPriceItems {
