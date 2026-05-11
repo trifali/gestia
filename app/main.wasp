@@ -166,6 +166,21 @@ page GoogleCalendarCallbackPage {
   component: import GoogleCalendarCallbackPage from "@src/app/settings/GoogleCalendarCallbackPage"
 }
 
+route PrivacyRoute { path: "/confidentialite", to: PrivacyPage }
+page PrivacyPage {
+  component: import PrivacyPage from "@src/landing/PrivacyPage"
+}
+
+route TermsRoute { path: "/conditions", to: TermsPage }
+page TermsPage {
+  component: import TermsPage from "@src/landing/TermsPage"
+}
+
+route ContactRoute { path: "/contact", to: ContactPage }
+page ContactPage {
+  component: import ContactPage from "@src/landing/ContactPage"
+}
+
 route NotFoundRoute { path: "*", to: NotFoundPage }
 page NotFoundPage {
   component: import { NotFoundPage } from "@src/client/NotFoundPage"
@@ -454,6 +469,10 @@ action duplicateDocument {
 action sendDocumentEmail {
   fn: import { sendDocumentEmail } from "@src/app/documents/operations",
   entities: [User, Document, Client, ActivityLog, Company]
+}
+action sendContactEmail {
+  fn: import { sendContactEmail } from "@src/landing/contactAction",
+  entities: []
 }
 action saveDocumentEmailDraft {
   fn: import { saveDocumentEmailDraft } from "@src/app/documents/operations",

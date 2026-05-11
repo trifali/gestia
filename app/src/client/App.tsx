@@ -16,6 +16,9 @@ const PUBLIC_PATHS = new Set([
   '/mot-de-passe-oublie',
   '/reinitialiser-mot-de-passe',
   '/verification-courriel',
+  '/confidentialite',
+  '/conditions',
+  '/contact',
 ]);
 
 export default function App() {
