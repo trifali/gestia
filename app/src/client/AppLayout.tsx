@@ -4,7 +4,7 @@ import { useQuery, getCurrentCompany } from 'wasp/client/operations';
 import { useState, type ReactNode } from 'react';
 import {
   LuLayoutDashboard, LuUsers, LuFolder, LuFileText,
-  LuCreditCard, LuCalendar, LuSearch, LuSettings, LuMenu, LuX
+  LuCreditCard, LuCalendar, LuSearch, LuSettings, LuMenu, LuX, LuShield
 } from 'react-icons/lu';
 import Logo from './Logo';
 
@@ -36,6 +36,7 @@ export default function AppLayout({ user, children }: AppLayoutProps) {
     return <Navigate to='/tableau-de-bord' replace />;
   }
 
+  const isAdmin = user?.role === 'admin' || user?.isAdmin;
   const initials = (user?.email || 'U').slice(0, 2).toUpperCase();
 
   const Sidebar = (
@@ -47,20 +48,38 @@ export default function AppLayout({ user, children }: AppLayoutProps) {
         </Link>
       </div>
 
-      <nav className='flex-1 px-3 py-4 space-y-1 overflow-y-auto'>
-        {NAV.map((item) => (
-          <NavLink
-            key={item.to}
-            to={item.to}
-            className={({ isActive }) =>
-              `sidebar-link ${isActive ? 'sidebar-link-active' : ''}`
-            }
-            onClick={() => setMobileOpen(false)}
-          >
-            <item.icon size={18} />
-            <span>{item.label}</span>
-          </NavLink>
-        ))}
+      <nav className='flex-1 px-3 py-4 overflow-y-auto'>
+        <div className='space-y-1'>
+          {NAV.map((item) => (
+            <NavLink
+              key={item.to}
+              to={item.to}
+              className={({ isActive }) =>
+                `sidebar-link ${isActive ? 'sidebar-link-active' : ''}`
+              }
+              onClick={() => setMobileOpen(false)}
+            >
+              <item.icon size={18} />
+              <span>{item.label}</span>
+            </NavLink>
+          ))}
+        </div>
+
+        {(user?.role === 'admin' || user?.isAdmin) && (
+          <div className='mt-4 pt-4 border-t border-line'>
+            <p className='px-2 mb-1.5 text-[10px] font-semibold uppercase tracking-widest text-muted'>Administration</p>
+            <NavLink
+              to='/admin/utilisateurs'
+              className={({ isActive }) =>
+                `sidebar-link ${isActive ? 'sidebar-link-active' : ''}`
+              }
+              onClick={() => setMobileOpen(false)}
+            >
+              <LuShield size={18} />
+              <span>Utilisateurs</span>
+            </NavLink>
+          </div>
+        )}
       </nav>
 
       <div className='border-t border-line p-3'>

@@ -166,6 +166,12 @@ page GoogleCalendarCallbackPage {
   component: import GoogleCalendarCallbackPage from "@src/app/settings/GoogleCalendarCallbackPage"
 }
 
+route AdminUsersRoute { path: "/admin/utilisateurs", to: AdminUsersPage }
+page AdminUsersPage {
+  authRequired: true,
+  component: import AdminUsersPage from "@src/app/admin/AdminUsersPage"
+}
+
 route PrivacyRoute { path: "/confidentialite", to: PrivacyPage }
 page PrivacyPage {
   component: import PrivacyPage from "@src/landing/PrivacyPage"
@@ -473,6 +479,22 @@ action sendDocumentEmail {
 action sendContactEmail {
   fn: import { sendContactEmail } from "@src/landing/contactAction",
   entities: []
+}
+action adminCreateUser {
+  fn: import { adminCreateUser } from "@src/app/admin/operations",
+  entities: [User]
+}
+action adminUpdateUser {
+  fn: import { adminUpdateUser } from "@src/app/admin/operations",
+  entities: [User]
+}
+action adminDeleteUser {
+  fn: import { adminDeleteUser } from "@src/app/admin/operations",
+  entities: [User]
+}
+query getAdminUsers {
+  fn: import { getAdminUsers } from "@src/app/admin/operations",
+  entities: [User, Company]
 }
 action saveDocumentEmailDraft {
   fn: import { saveDocumentEmailDraft } from "@src/app/documents/operations",
