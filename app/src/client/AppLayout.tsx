@@ -36,7 +36,7 @@ export default function AppLayout({ user, children }: AppLayoutProps) {
     return <Navigate to='/tableau-de-bord' replace />;
   }
 
-  const isAdmin = user?.role === 'admin' || user?.isAdmin;
+  const isAdmin = (user as any)?.isAdmin === true;
   const initials = (user?.email || 'U').slice(0, 2).toUpperCase();
 
   const Sidebar = (
@@ -65,7 +65,7 @@ export default function AppLayout({ user, children }: AppLayoutProps) {
           ))}
         </div>
 
-        {(user?.role === 'admin' || user?.isAdmin) && (
+        {isAdmin && (
           <div className='mt-4 pt-4 border-t border-line'>
             <p className='px-2 mb-1.5 text-[10px] font-semibold uppercase tracking-widest text-muted'>Administration</p>
             <NavLink
@@ -93,7 +93,7 @@ export default function AppLayout({ user, children }: AppLayoutProps) {
           </div>
           <div className='flex-1 min-w-0'>
             <div className='text-sm font-medium text-ink truncate'>{user?.email || 'Utilisateur'}</div>
-            <div className='text-xs text-muted'>{(user as any)?.role === 'admin' ? 'Administrateur' : 'Client'}</div>
+            <div className='text-xs text-muted'>{(user as any)?.isAdmin === true ? 'Administrateur' : 'Utilisateur'}</div>
           </div>
           <LuSettings size={16} className='text-muted shrink-0' />
         </Link>

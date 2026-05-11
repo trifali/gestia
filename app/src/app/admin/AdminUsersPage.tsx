@@ -16,9 +16,11 @@ import {
   LuX,
   LuCheck,
   LuUsers,
+  LuBan,
 } from 'react-icons/lu';
 
 const EMPTY_FORM = { email: '', password: '', fullName: '' };
+const EMPTY_EDIT = { email: '', fullName: '', status: 'active', password: '' };
 
 export default function AdminUsersPage() {
   const { data: user } = useAuth();
@@ -32,17 +34,17 @@ export default function AdminUsersPage() {
   const [success, setSuccess] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  // Inline edit state
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [editFields, setEditFields] = useState({ email: '', fullName: '' });
+  // Modal edit state
+  const [editUser, setEditUser] = useState<any | null>(null);
+  const [editFields, setEditFields] = useState(EMPTY_EDIT);
   const [editSaving, setEditSaving] = useState(false);
   const [editError, setEditError] = useState<string | null>(null);
 
-  // Delete confirm
-  const [deletingId, setDeletingId] = useState<string | null>(null);
+  // Delete confirm modal
+  const [deleteUser, setDeleteUser] = useState<any | null>(null);
   const [deleteWorking, setDeleteWorking] = useState(false);
 
-  const isAdmin = (user as any)?.role === 'admin' || (user as any)?.isAdmin;
+  const isAdmin = (user as any)?.isAdmin === true;
   if (user !== undefined && !isAdmin) return <Navigate to='/tableau-de-bord' replace />;
 
   // ── Create ────────────────────────────────────────────────────────────────
@@ -76,21 +78,28 @@ export default function AdminUsersPage() {
     }
   };
 
-  // ── Edit ──────────────────────────────────────────────────────────────────
-  const startEdit = (u: any) => {
-    setEditingId(u.id);
-    setEditFields({ email: u.email ?? '', fullName: u.fullName ?? '' });
+  // ── Modal edit ────────────────────────────────────────────────────────────
+  const openEdit = (u: any) => {
+    setEditUser(u);
+    setEditFields({ email: u.email ?? '', fullName: u.fullName ?? '', status: u.status ?? 'active', password: '' });
     setEditError(null);
   };
 
-  const cancelEdit = () => { setEditingId(null); setEditError(null); };
+  const closeEdit = () => { setEditUser(null); setEditError(null); };
 
-  const saveEdit = async (userId: string) => {
+  const saveEdit = async (e: React.FormEvent) => {
+    e.preventDefault();
     setEditError(null);
     setEditSaving(true);
     try {
-      await updateUserAction({ userId, email: editFields.email, fullName: editFields.fullName });
-      setEditingId(null);
+      // @ts-ignore — status field added to UpdateArgs, regen on next wasp start
+      await (updateUserAction as any)({
+        userId: editUser.id,
+        fullName: editFields.fullName,
+        status: editFields.status,
+        password: editFields.password || undefined,
+      });
+      closeEdit();
       // @ts-ignore
       refetch?.();
     } catch (err: any) {
@@ -101,20 +110,23 @@ export default function AdminUsersPage() {
   };
 
   // ── Delete ────────────────────────────────────────────────────────────────
-  const confirmDelete = async (userId: string) => {
+  const confirmDelete = async () => {
+    if (!deleteUser) return;
     setDeleteWorking(true);
     try {
-      await deleteUserAction({ userId });
-      setDeletingId(null);
+      await deleteUserAction({ userId: deleteUser.id });
+      setDeleteUser(null);
       // @ts-ignore
       refetch?.();
     } catch (err: any) {
       setError(err?.message || 'Erreur lors de la suppression.');
-      setDeletingId(null);
+      setDeleteUser(null);
     } finally {
       setDeleteWorking(false);
     }
   };
+
+  const myId = (user as any)?.id;
 
   return (
     <>
@@ -222,81 +234,29 @@ export default function AdminUsersPage() {
             <div className='divide-y divide-line'>
               {users.map((u: any) => (
                 <div key={u.id} className='px-6 py-4'>
-                  {editingId === u.id ? (
-                    // ── Inline edit row ──────────────────────────────────
-                    <div className='space-y-3'>
-                      {editError && (
-                        <p className='text-xs text-red-600 flex items-center gap-1'>
-                          <LuTriangleAlert size={13} /> {editError}
-                        </p>
-                      )}
-                      <div className='grid sm:grid-cols-2 gap-3'>
-                        <div>
-                          <label className='label text-xs'>Courriel</label>
-                          <input
-                            type='email'
-                            className='input text-sm py-1.5'
-                            value={editFields.email}
-                            onChange={(e) => setEditFields((f) => ({ ...f, email: e.target.value }))}
-                          />
-                        </div>
-                        <div>
-                          <label className='label text-xs'>Nom complet</label>
-                          <input
-                            type='text'
-                            className='input text-sm py-1.5'
-                            value={editFields.fullName}
-                            onChange={(e) => setEditFields((f) => ({ ...f, fullName: e.target.value }))}
-                          />
-                        </div>
-                      </div>
-                      <div className='flex gap-2'>
-                        <button
-                          className='btn-accent text-sm py-1.5 px-3'
-                          onClick={() => saveEdit(u.id)}
-                          disabled={editSaving}
-                        >
-                          {editSaving ? <LuLoader size={14} className='animate-spin' /> : <LuCheck size={14} />}
-                          Enregistrer
-                        </button>
-                        <button className='btn-ghost text-sm py-1.5 px-3' onClick={cancelEdit}>
-                          <LuX size={14} /> Annuler
-                        </button>
-                      </div>
-                    </div>
-                  ) : deletingId === u.id ? (
-                    // ── Delete confirm row ───────────────────────────────
-                    <div className='flex items-center gap-3 flex-wrap'>
-                      <LuTriangleAlert size={16} className='text-amber-500 shrink-0' />
-                      <span className='text-sm'>
-                        Supprimer <strong>{u.email}</strong> ? Cette action est irréversible.
-                      </span>
-                      <div className='flex gap-2 ml-auto'>
-                        <button
-                          className='btn-danger text-sm py-1.5 px-3'
-                          onClick={() => confirmDelete(u.id)}
-                          disabled={deleteWorking}
-                        >
-                          {deleteWorking ? <LuLoader size={14} className='animate-spin' /> : <LuTrash2 size={14} />}
-                          Supprimer
-                        </button>
-                        <button className='btn-ghost text-sm py-1.5 px-3' onClick={() => setDeletingId(null)}>
-                          <LuX size={14} /> Annuler
-                        </button>
-                      </div>
-                    </div>
-                  ) : (
+              {(
                     // ── Normal row ───────────────────────────────────────
                     <div className='flex items-center gap-4'>
                       <div className='w-9 h-9 rounded-full bg-accent-50 text-accent-700 flex items-center justify-center font-semibold text-sm shrink-0'>
                         {(u.email || 'U').slice(0, 2).toUpperCase()}
                       </div>
                       <div className='flex-1 min-w-0'>
-                        <div className='text-sm font-medium text-ink truncate'>
-                          {u.fullName || u.email}
+                        <div className='flex items-center gap-2 flex-wrap'>
+                          <span className='text-sm font-medium text-ink truncate'>
+                            {u.fullName || u.email}
+                          </span>
                           {u.isAdmin && (
-                            <span className='ml-2 inline-flex items-center gap-1 text-[10px] font-semibold bg-amber-50 text-amber-700 border border-amber-200 px-1.5 py-0.5 rounded-full'>
+                            <span className='inline-flex items-center gap-1 text-[10px] font-semibold bg-amber-50 text-amber-700 border border-amber-200 px-1.5 py-0.5 rounded-full'>
                               <LuShield size={9} /> Admin
+                            </span>
+                          )}
+                          {u.status === 'cancelled' ? (
+                            <span className='inline-flex items-center gap-1 text-[10px] font-semibold bg-red-50 text-red-700 border border-red-200 px-1.5 py-0.5 rounded-full'>
+                              <LuBan size={9} /> Suspendu
+                            </span>
+                          ) : (
+                            <span className='inline-flex items-center gap-1 text-[10px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200 px-1.5 py-0.5 rounded-full'>
+                              <LuCircleCheck size={9} /> Actif
                             </span>
                           )}
                         </div>
@@ -314,24 +274,24 @@ export default function AdminUsersPage() {
                           </span>
                         </div>
                       </div>
-                      <div className='flex items-center gap-1 shrink-0'>
-                        <button
-                          className='btn-ghost text-sm p-2'
-                          title='Modifier'
-                          onClick={() => startEdit(u)}
-                        >
-                          <LuPencil size={15} />
-                        </button>
-                        {u.id !== (user as any)?.id && (
+                      {u.id !== myId && (
+                        <div className='flex items-center gap-1 shrink-0'>
+                          <button
+                            className='btn-ghost text-sm p-2'
+                            title='Modifier'
+                            onClick={() => openEdit(u)}
+                          >
+                            <LuPencil size={15} />
+                          </button>
                           <button
                             className='btn-ghost text-sm p-2 text-danger hover:bg-red-50'
                             title='Supprimer'
-                            onClick={() => setDeletingId(u.id)}
+                            onClick={() => setDeleteUser(u)}
                           >
                             <LuTrash2 size={15} />
                           </button>
-                        )}
-                      </div>
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
@@ -340,12 +300,137 @@ export default function AdminUsersPage() {
           )}
         </div>
 
-        <div className='flex items-center gap-2 px-3 py-2 rounded-lg bg-amber-50 border border-amber-200 text-amber-800 text-xs w-fit'>
-          <LuShield size={13} />
-          <span>Accès administrateur uniquement</span>
-        </div>
-
       </div>
+
+      {/* ── Delete modal ──────────────────────────────────────────────────── */}
+      {deleteUser && (
+        <div
+          className='fixed inset-0 z-50 flex items-center justify-center p-4'
+          style={{ background: 'rgba(10,10,11,0.5)' }}
+          onClick={(e) => { if (e.target === e.currentTarget) setDeleteUser(null); }}
+        >
+          <div className='bg-canvas rounded-2xl shadow-2xl w-full max-w-sm'>
+            <div className='flex items-center gap-3 px-6 py-4 border-b border-line'>
+              <div className='w-8 h-8 rounded-lg bg-red-50 flex items-center justify-center'>
+                <LuTrash2 size={15} className='text-danger' />
+              </div>
+              <h2 className='font-semibold text-ink flex-1'>Supprimer le compte</h2>
+              <button className='btn-ghost p-1.5' onClick={() => setDeleteUser(null)} aria-label='Fermer'>
+                <LuX size={16} />
+              </button>
+            </div>
+            <div className='px-6 py-5 space-y-5'>
+              <p className='text-sm text-muted leading-relaxed'>
+                Vous êtes sur le point de supprimer le compte de{' '}
+                <span className='font-semibold text-ink'>{deleteUser.fullName || deleteUser.email}</span>.
+                Cette action est <span className='font-semibold text-danger'>irréversible</span>.
+              </p>
+              <div className='flex gap-3'>
+                <button
+                  className='btn-danger flex-1 justify-center py-2.5'
+                  onClick={confirmDelete}
+                  disabled={deleteWorking}
+                >
+                  {deleteWorking ? <LuLoader size={15} className='animate-spin' /> : <LuTrash2 size={15} />}
+                  Supprimer
+                </button>
+                <button className='btn-ghost py-2.5 px-4' onClick={() => setDeleteUser(null)}>
+                  Annuler
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Edit modal ────────────────────────────────────────────────────── */}
+      {editUser && (
+        <div
+          className='fixed inset-0 z-50 flex items-center justify-center p-4'
+          style={{ background: 'rgba(10,10,11,0.5)' }}
+          onClick={(e) => { if (e.target === e.currentTarget) closeEdit(); }}
+        >
+          <div className='bg-canvas rounded-2xl shadow-2xl w-full max-w-md'>
+            {/* Modal header */}
+            <div className='flex items-center gap-3 px-6 py-4 border-b border-line'>
+              <div className='w-8 h-8 rounded-lg bg-accent-50 flex items-center justify-center'>
+                <LuPencil size={15} className='text-accent' />
+              </div>
+              <h2 className='font-semibold text-ink flex-1'>Modifier le compte</h2>
+              <button className='btn-ghost p-1.5' onClick={closeEdit} aria-label='Fermer'>
+                <LuX size={16} />
+              </button>
+            </div>
+
+            {/* Modal body */}
+            <form onSubmit={saveEdit} className='px-6 py-5 space-y-4'>
+              {editError && (
+                <div className='flex items-start gap-2 rounded-lg bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-800'>
+                  <LuTriangleAlert size={15} className='mt-0.5 shrink-0' />
+                  {editError}
+                </div>
+              )}
+
+              <div>
+                <label className='label'>Courriel</label>
+                <div className='input bg-canvas-200 text-muted cursor-not-allowed'>{editUser?.email}</div>
+              </div>
+
+              <div>
+                <label className='label'>Nom complet</label>
+                <input
+                  type='text'
+                  className='input'
+                  placeholder='(optionnel)'
+                  value={editFields.fullName}
+                  onChange={(e) => setEditFields((f) => ({ ...f, fullName: e.target.value }))}
+                />
+              </div>
+
+              <div>
+                <label className='label'>Nouveau mot de passe <span className='text-muted font-normal'>(laisser vide pour ne pas changer)</span></label>
+                <input
+                  type='password'
+                  className='input'
+                  placeholder='8 caractères minimum'
+                  value={editFields.password}
+                  onChange={(e) => setEditFields((f) => ({ ...f, password: e.target.value }))}
+                  minLength={8}
+                  autoComplete='new-password'
+                />
+              </div>
+
+              <div>
+                <label className='label'>Statut du compte</label>
+                <select
+                  className='input'
+                  value={editFields.status}
+                  onChange={(e) => setEditFields((f) => ({ ...f, status: e.target.value }))}
+                >
+                  <option value='active'>Actif</option>
+                  <option value='cancelled'>Suspendu</option>
+                </select>
+                {editFields.status === 'cancelled' && (
+                  <p className='mt-1.5 text-xs text-red-600 flex items-center gap-1'>
+                    <LuBan size={11} /> L'utilisateur ne pourra plus accéder à la plateforme.
+                  </p>
+                )}
+              </div>
+
+              <div className='flex gap-3 pt-2'>
+                <button type='submit' className='btn-accent flex-1 justify-center py-2.5' disabled={editSaving}>
+                  {editSaving ? <LuLoader size={15} className='animate-spin' /> : <LuCheck size={15} />}
+                  Enregistrer
+                </button>
+                <button type='button' className='btn-ghost py-2.5 px-4' onClick={closeEdit}>
+                  Annuler
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </>
   );
 }
+

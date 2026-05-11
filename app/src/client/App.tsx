@@ -1,9 +1,10 @@
 import './Main.css';
 import { useEffect } from 'react';
 import { Outlet, useLocation } from 'react-router';
-import { useAuth } from 'wasp/client/auth';
+import { useAuth, logout } from 'wasp/client/auth';
 import { Toaster } from 'react-hot-toast';
 import AppLayout from './AppLayout';
+import { LuBan } from 'react-icons/lu';
 
 // Le routeur est généré par Wasp et ne nous permet pas d'activer les `future`
 // flags de react-router v6. On masque les avertissements de dépréciation v7
@@ -76,6 +77,38 @@ export default function App() {
 
   // Project detail and client portal pages render without the sidebar
   const isFullPage = /^\/projets\/[^/]+/.test(location.pathname) || /^\/portail\//.test(location.pathname);
+
+  // Cancelled users are blocked from all protected pages
+  if ((user as any).status === 'cancelled' && !isFullPage) {
+    return (
+      <>
+        {toaster}
+        <div className='min-h-screen bg-canvas flex items-center justify-center px-4'>
+          <div className='max-w-md w-full text-center'>
+            <div className='w-16 h-16 rounded-2xl bg-red-50 flex items-center justify-center mx-auto mb-6'>
+              <LuBan size={28} className='text-red-600' />
+            </div>
+            <h1 className='text-2xl font-bold text-ink mb-3'>Compte suspendu</h1>
+            <p className='text-muted mb-6 leading-relaxed'>
+              Votre accès à la plateforme a été suspendu. Pour rétablir votre compte, veuillez effectuer votre paiement et contacter notre équipe.
+            </p>
+            <div className='flex flex-col gap-3 items-center'>
+              <p className='text-sm text-muted'>
+                Contactez-nous :{' '}
+                <a href='mailto:info@trifali.com' className='text-accent hover:underline'>
+                  info@trifali.com
+                </a>
+              </p>
+              <button onClick={() => logout()} className='btn-ghost text-sm text-muted'>
+                Se déconnecter
+              </button>
+            </div>
+          </div>
+        </div>
+      </>
+    );
+  }
+
   if (isFullPage) {
     return <>{toaster}<div className='min-h-screen bg-canvas'><Outlet /></div></>;
   }
