@@ -250,6 +250,7 @@ export function SharedFileManager({ ops }: { ops: FileManagerOperations }) {
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const fmRef = useRef<FileManagerComponent>(null);
+  const fmWrapperRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!rawFiles) return;
@@ -418,6 +419,34 @@ export function SharedFileManager({ ops }: { ops: FileManagerOperations }) {
       setPreviewFile({ name: d.name, mimeType: d._mimeType ?? null, url: d._url ?? null });
     }
   }, [getEditorContent, fileSystemData, currentFolderId]);
+
+  // ─── Intercept OS file drops into the FileManager (before Syncfusion) ──────
+
+  const handleUploadRef = useRef(handleUpload);
+  useEffect(() => { handleUploadRef.current = handleUpload; }, [handleUpload]);
+
+  useEffect(() => {
+    const wrapper = fmWrapperRef.current;
+    if (!wrapper) return;
+    const onDrop = (e: DragEvent) => {
+      if (!e.dataTransfer?.files?.length) return;
+      e.preventDefault();
+      e.stopPropagation();
+      handleUploadRef.current(e.dataTransfer.files);
+    };
+    const onDragOver = (e: DragEvent) => {
+      if (e.dataTransfer?.types.includes('Files')) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+    };
+    wrapper.addEventListener('drop', onDrop, true);
+    wrapper.addEventListener('dragover', onDragOver, true);
+    return () => {
+      wrapper.removeEventListener('drop', onDrop, true);
+      wrapper.removeEventListener('dragover', onDragOver, true);
+    };
+  }, []);
 
   // ─── Syncfusion restoreFocus crash workaround ─────────────────────────────
 
@@ -686,7 +715,7 @@ export function SharedFileManager({ ops }: { ops: FileManagerOperations }) {
       </div>
 
       {/* Syncfusion FileManager */}
-      <div className='rounded-xl border border-line overflow-hidden' style={{ height: '520px' }}>
+      <div ref={fmWrapperRef} className='rounded-xl border border-line overflow-hidden' style={{ height: '520px' }}>
         {!dataReady && (
           <div className='flex items-center justify-center h-full text-muted text-sm'>Chargement…</div>
         )}
