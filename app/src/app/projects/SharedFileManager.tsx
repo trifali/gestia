@@ -8,7 +8,7 @@ import {
   type FileData,
 } from '@syncfusion/ej2-react-filemanager';
 import toast from 'react-hot-toast';
-import { LuUpload, LuFilePlus, LuX, LuFileText, LuChevronDown, LuSlidersHorizontal } from 'react-icons/lu';
+import { LuUpload, LuFilePlus, LuX, LuFileText, LuChevronDown, LuSlidersHorizontal, LuFile } from 'react-icons/lu';
 import { FilePreviewModal } from './FilePreviewModal';
 import { FileEditorModal, type EditorFileInfo } from './FileEditorModal';
 import { ClientDocEditorModal, StandaloneEditDynamicVarsModal } from '../clients/ClientDocEditorModal';
@@ -136,6 +136,49 @@ export function toFileData(files: any[]): FileData[] {
 
 // ─── New File Dialog ──────────────────────────────────────────────────────────
 
+// ─── Upload Confirm Dialog ───────────────────────────────────────────────────
+
+function UploadConfirmDialog({
+  files,
+  onConfirm,
+  onClose,
+}: {
+  files: File[];
+  onConfirm: () => void;
+  onClose: () => void;
+}) {
+  return (
+    <div
+      className='fixed inset-0 z-50 flex items-center justify-center bg-black/50'
+      onClick={(e) => e.target === e.currentTarget && onClose()}
+    >
+      <div className='bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6 flex flex-col gap-4'>
+        <div className='flex items-center justify-between'>
+          <h2 className='font-semibold text-ink'>Téléverser des fichiers</h2>
+          <button onClick={onClose} className='p-1 rounded hover:bg-canvas-200'><LuX size={16} /></button>
+        </div>
+        <ul className='flex flex-col gap-1.5 max-h-60 overflow-y-auto'>
+          {files.map((f, i) => (
+            <li key={i} className='flex items-center gap-2.5 px-3 py-2 rounded-lg bg-canvas-50 border border-line text-sm'>
+              <LuFile size={14} className='text-muted shrink-0' />
+              <span className='flex-1 truncate text-ink'>{f.name}</span>
+              <span className='text-xs text-muted shrink-0'>{(f.size / 1024).toFixed(0)} KB</span>
+            </li>
+          ))}
+        </ul>
+        <div className='flex gap-2 justify-end'>
+          <button className='btn-secondary' onClick={onClose}>Annuler</button>
+          <button className='btn-primary flex items-center gap-2' onClick={onConfirm}>
+            <LuUpload size={14} /> Téléverser
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── New File Dialog ──────────────────────────────────────────────────────────
+
 function NewFileDialog({
   onClose,
   onConfirm,
@@ -242,6 +285,7 @@ export function SharedFileManager({ ops }: { ops: FileManagerOperations }) {
   const [dynVarsCache, setDynVarsCache] = useState<Record<string, string>>({});
   // File targeted by the right-click "Modifier les variables" action (no editor, just vars modal)
   const [ctxVarsFile, setCtxVarsFile] = useState<{ id: string; clientId: string | null; dynamicVars: string | null } | null>(null);
+  const [pendingDropFiles, setPendingDropFiles] = useState<File[] | null>(null);
 
   const updateFolder = useCallback((id: string | null) => {
     setCurrentFolderId(id);
@@ -432,7 +476,7 @@ export function SharedFileManager({ ops }: { ops: FileManagerOperations }) {
       if (!e.dataTransfer?.files?.length) return;
       e.preventDefault();
       e.stopPropagation();
-      handleUploadRef.current(e.dataTransfer.files);
+      setPendingDropFiles(Array.from(e.dataTransfer.files));
     };
     const onDragOver = (e: DragEvent) => {
       if (e.dataTransfer?.types.includes('Files')) {
@@ -753,6 +797,20 @@ export function SharedFileManager({ ops }: { ops: FileManagerOperations }) {
         <NewFileDialog
           onClose={() => setShowNewFileDialog(false)}
           onConfirm={handleNewFile}
+        />
+      )}
+
+      {pendingDropFiles && (
+        <UploadConfirmDialog
+          files={pendingDropFiles}
+          onConfirm={() => {
+            const list = pendingDropFiles;
+            setPendingDropFiles(null);
+            const dt = new DataTransfer();
+            list.forEach((f) => dt.items.add(f));
+            handleUpload(dt.files);
+          }}
+          onClose={() => setPendingDropFiles(null)}
         />
       )}
 
