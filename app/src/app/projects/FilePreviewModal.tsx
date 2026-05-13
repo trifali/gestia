@@ -1,5 +1,8 @@
 import { useState, useEffect } from 'react';
-import { LuX, LuDownload, LuFileText, LuZoomIn, LuZoomOut, LuChevronLeft, LuChevronRight } from 'react-icons/lu';
+import { LuX, LuDownload, LuFileText, LuZoomIn, LuZoomOut, LuChevronLeft, LuChevronRight, LuExternalLink } from 'react-icons/lu';
+
+const isMobileDevice = () =>
+  typeof navigator !== 'undefined' && /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
 
 interface PreviewFile {
   name: string;
@@ -59,7 +62,31 @@ function ImagePreview({ url, name }: { url: string; name: string }) {
   );
 }
 
-function PdfPreview({ url }: { url: string }) {
+function PdfPreview({ url, name }: { url: string; name: string }) {
+  if (isMobileDevice()) {
+    return (
+      <div className='flex flex-col items-center justify-center h-full gap-4 text-center px-4'>
+        <LuFileText size={48} className='text-muted' />
+        <p className='text-sm text-muted max-w-xs'>
+          L'aperçu PDF intégré est limité sur mobile. Ouvrez le fichier pour voir toutes les pages.
+        </p>
+        <a
+          href={url}
+          target='_blank'
+          rel='noopener noreferrer'
+          className='btn-primary flex items-center gap-2'
+        >
+          <LuExternalLink size={15} /> Ouvrir le PDF
+        </a>
+        <button
+          onClick={() => downloadFile(url, name)}
+          className='btn-secondary flex items-center gap-2'
+        >
+          <LuDownload size={15} /> Télécharger
+        </button>
+      </div>
+    );
+  }
   return (
     <iframe
       src={url}
@@ -219,7 +246,7 @@ export function FilePreviewModal({ file, onClose, onNavigate, hasPrev, hasNext }
           ) : category === 'image' ? (
             <ImagePreview url={file.url} name={file.name} />
           ) : category === 'pdf' ? (
-            <PdfPreview url={file.url} />
+            <PdfPreview url={file.url} name={file.name} />
           ) : category === 'text' ? (
             <TextPreview url={file.url} name={file.name} />
           ) : category === 'video' ? (
