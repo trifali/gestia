@@ -96,6 +96,12 @@ page DashboardPage {
   component: import DashboardPage from "@src/app/dashboard/DashboardPage"
 }
 
+route PipelineRoute { path: "/suivi", to: PipelinePage }
+page PipelinePage {
+  authRequired: true,
+  component: import PipelinePage from "@src/app/pipeline/PipelinePage"
+}
+
 route ClientsRoute { path: "/clients", to: ClientsPage }
 page ClientsPage {
   authRequired: true,
@@ -758,6 +764,21 @@ action deleteDocumentTemplate {
 query getDashboardStats {
   fn: import { getDashboardStats } from "@src/app/dashboard/operations",
   entities: [User, Client, Project, Document, Payment, Meeting]
+}
+
+query getPipelineDocuments {
+  fn: import { getPipelineDocuments } from "@src/app/pipeline/operations",
+  entities: [User, Document, Client]
+}
+
+query getActivityFeed {
+  fn: import { getActivityFeed } from "@src/app/pipeline/operations",
+  entities: [User, ActivityLog, Client, Document]
+}
+
+action addActivityNote {
+  fn: import { addActivityNote } from "@src/app/pipeline/operations",
+  entities: [User, ActivityLog, Client]
 }
 
 action magicCorrect {

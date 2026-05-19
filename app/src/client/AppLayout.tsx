@@ -4,7 +4,8 @@ import { useQuery, getCurrentCompany } from 'wasp/client/operations';
 import { useState, type ReactNode } from 'react';
 import {
   LuLayoutDashboard, LuUsers, LuFolder, LuFileText,
-  LuCreditCard, LuCalendar, LuSearch, LuSettings, LuMenu, LuX, LuShield
+  LuCreditCard, LuCalendar, LuSearch, LuSettings, LuMenu, LuX, LuShield,
+  LuLayoutList,
 } from 'react-icons/lu';
 import Logo from './Logo';
 
@@ -15,6 +16,7 @@ type AppLayoutProps = {
 
 const NAV = [
   { to: '/tableau-de-bord', label: 'Tableau de bord', icon: LuLayoutDashboard },
+  { to: '/suivi', label: 'Suivi', icon: LuLayoutList },
   { to: '/clients', label: 'Clients', icon: LuUsers },
   { to: '/projets', label: 'Projets', icon: LuFolder },
   { to: '/facturation', label: 'Facturation', icon: LuFileText },
