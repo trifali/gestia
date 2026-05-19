@@ -26,6 +26,7 @@ import {
   LuActivity,
   LuX,
   LuUser,
+  LuExternalLink,
 } from 'react-icons/lu';
 import { PageHeader, Modal } from '../../client/ui';
 import { formatCurrency, formatDate, formatDateTime } from '../../shared/format';
@@ -365,10 +366,11 @@ function PipelineCard({
       {/* Client */}
       <Link
         to={`/clients/${doc.clientId}`}
-        className='flex items-center gap-1.5 text-sm font-medium text-ink hover:text-accent transition-colors leading-tight'
+        className='flex items-center gap-1.5 text-sm font-medium text-ink hover:text-accent transition-colors leading-tight group'
       >
         <LuUser size={13} className='text-muted shrink-0' />
         <span className='truncate'>{doc.clientName}</span>
+        <LuExternalLink size={11} className='text-muted shrink-0 opacity-0 group-hover:opacity-100 transition-opacity' />
       </Link>
 
       {/* Contact actions */}
