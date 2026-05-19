@@ -454,6 +454,10 @@ query getDocuments {
   fn: import { getDocuments } from "@src/app/documents/operations",
   entities: [User, Document, Client, Project, Payment, ActivityLog]
 }
+query getDocumentById {
+  fn: import { getDocumentById } from "@src/app/documents/operations",
+  entities: [User, Document, Client, Project, Payment, ActivityLog]
+}
 action createDocument {
   fn: import { createDocument } from "@src/app/documents/operations",
   entities: [User, Document, DocumentItem]

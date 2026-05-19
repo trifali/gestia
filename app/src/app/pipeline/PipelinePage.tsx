@@ -4,7 +4,11 @@ import {
   getActivityFeed,
   getClients,
   addActivityNote,
+  getCurrentCompany,
+  getCompanyBrandAssets,
 } from 'wasp/client/operations';
+// @ts-ignore — generated after Wasp restart
+import { getDocumentById } from 'wasp/client/operations';
 import { useState } from 'react';
 import { Link } from 'react-router';
 import toast from 'react-hot-toast';
@@ -24,6 +28,7 @@ import {
 } from 'react-icons/lu';
 import { PageHeader, Modal } from '../../client/ui';
 import { formatCurrency, formatDate, formatDateTime } from '../../shared/format';
+import { SendDocumentEmailModal } from '../shared/SendDocumentEmailModal';
 import type { PipelineDocument, ActivityFeedItem } from './operations';
 
 // ─── Status definitions ────────────────────────────────────────────────────
@@ -199,7 +204,7 @@ export default function PipelinePage() {
             </div>
           ) : (
             <KanbanBoard
-              docs={pipelineTab === 'quotes' ? quotes : invoices}
+              docs={(pipelineTab === 'quotes' ? quotes : invoices) as any}
               columns={pipelineTab === 'quotes' ? QUOTE_COLUMNS : INVOICE_COLUMNS}
             />
           )}
@@ -229,6 +234,7 @@ function KanbanBoard({
   columns: typeof QUOTE_COLUMNS;
 }) {
   const [noteDoc, setNoteDoc] = useState<PipelineDocument | null>(null);
+  const [emailDocId, setEmailDocId] = useState<string | null>(null);
 
   const byStatus = new Map<string, PipelineDocument[]>();
   for (const col of columns) byStatus.set(col.status, []);
@@ -277,6 +283,7 @@ function KanbanBoard({
                         doc={doc}
                         badgeCls={col.badgeCls}
                         onOpenNotes={() => setNoteDoc(doc)}
+                        onOpenEmail={() => setEmailDocId(doc.id)}
                       />
                     ))
                   )}
@@ -290,6 +297,10 @@ function KanbanBoard({
       {noteDoc && (
         <DocumentNoteModal doc={noteDoc} onClose={() => setNoteDoc(null)} />
       )}
+
+      {emailDocId && (
+        <DocumentEmailModal docId={emailDocId} onClose={() => setEmailDocId(null)} />
+      )}
     </>
   );
 }
@@ -300,10 +311,12 @@ function PipelineCard({
   doc,
   badgeCls,
   onOpenNotes,
+  onOpenEmail,
 }: {
   doc: PipelineDocument;
   badgeCls: string;
   onOpenNotes: () => void;
+  onOpenEmail: () => void;
 }) {
   const now = new Date();
   const due = doc.dueDate ? new Date(doc.dueDate) : null;
@@ -414,6 +427,20 @@ function PipelineCard({
               </span>
             )}
           </button>
+          {/* Email button with badge */}
+          <button
+            type='button'
+            onClick={onOpenEmail}
+            title={doc.emailSentCount > 0 ? `${doc.emailSentCount} courriel${doc.emailSentCount > 1 ? 's' : ''} envoyé${doc.emailSentCount > 1 ? 's' : ''} — Relancer` : 'Envoyer par courriel'}
+            className='relative flex items-center justify-center w-7 h-7 rounded-lg text-muted hover:text-accent hover:bg-canvas transition-colors shrink-0'
+          >
+            <LuMail size={15} className={doc.emailSentCount > 0 ? 'text-success' : ''} />
+            {doc.emailSentCount > 0 && (
+              <span className='absolute -top-1 -right-1 min-w-[14px] h-[14px] rounded-full bg-success text-white text-[9px] font-bold flex items-center justify-center px-0.5 leading-none'>
+                {doc.emailSentCount > 9 ? '9+' : doc.emailSentCount}
+              </span>
+            )}
+          </button>
         </div>
       </div>
     </div>
@@ -433,6 +460,42 @@ function statusLabel(s: string): string {
     annulee: 'Annulée',
   };
   return map[s] || s;
+}
+
+// ─── Document Email Modal ─────────────────────────────────────────────────
+
+function DocumentEmailModal({ docId, onClose }: { docId: string; onClose: () => void }) {
+  const { data: doc, isLoading: docLoading } = useQuery(getDocumentById, { id: docId });
+  const { data: company, isLoading: companyLoading } = useQuery(getCurrentCompany);
+  const { data: brand, isLoading: brandLoading } = useQuery(getCompanyBrandAssets);
+
+  const isLoading = docLoading || companyLoading || brandLoading;
+
+  if (isLoading || !doc || !company) {
+    return (
+      <Modal open onClose={onClose} title='Envoi par courriel'>
+        <div className='flex items-center gap-2 text-muted text-sm py-4'>
+          <LuLoader size={16} className='animate-spin' />
+          Chargement…
+        </div>
+      </Modal>
+    );
+  }
+
+  const sentActivities = ((doc as any).activities || []) as Array<{
+    createdAt: string | Date;
+    metadata?: any;
+  }>;
+
+  return (
+    <SendDocumentEmailModal
+      doc={doc as any}
+      company={company as any}
+      brand={(brand as any) ?? null}
+      activities={sentActivities}
+      onClose={onClose}
+    />
+  );
 }
 
 // ─── Document Note Modal ──────────────────────────────────────────────────

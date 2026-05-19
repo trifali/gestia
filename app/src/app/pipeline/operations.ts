@@ -24,6 +24,7 @@ export type PipelineDocument = {
   clientEmail: string | null;
   clientPhone: string | null;
   noteCount: number;
+  emailSentCount: number;
 };
 
 export type ActivityFeedItem = {
@@ -62,7 +63,7 @@ export const getPipelineDocuments: GetPipelineDocuments<void, PipelineDocument[]
     },
     include: {
       client: true,
-      activities: { where: { type: 'note' }, select: { id: true } },
+      activities: { where: { type: { in: ['note', 'document.email_sent'] } }, select: { id: true, type: true } },
     },
     orderBy: { createdAt: 'desc' },
   });
@@ -81,7 +82,8 @@ export const getPipelineDocuments: GetPipelineDocuments<void, PipelineDocument[]
     clientName: d.client.name,
     clientEmail: d.client.email,
     clientPhone: d.client.phone,
-    noteCount: (d.activities as any[]).length,
+    noteCount: (d.activities as any[]).filter((a: any) => a.type === 'note').length,
+    emailSentCount: (d.activities as any[]).filter((a: any) => a.type === 'document.email_sent').length,
   }));
 };
 

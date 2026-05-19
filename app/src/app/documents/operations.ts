@@ -442,3 +442,26 @@ export const saveDocumentEmailDraft: SaveDocumentEmailDraft<
   await context.entities.Document.update({ where: { id }, data: emailFields });
   return { ok: true } as const;
 };
+
+export const getDocumentById = async (
+  { id }: { id: string },
+  context: any,
+): Promise<DocumentWithDetails | null> => {
+  const companyId = ensureCompany(context.user);
+  const doc = await context.entities.Document.findUnique({
+    where: { id },
+    include: {
+      client: true,
+      project: true,
+      items: true,
+      payments: true,
+      activities: {
+        where: { type: 'document.email_sent' },
+        orderBy: { createdAt: 'desc' },
+        take: 20,
+      },
+    },
+  });
+  if (!doc || (doc as any).companyId !== companyId) return null;
+  return doc as DocumentWithDetails;
+};
