@@ -404,9 +404,13 @@ model ActivityLog {
   message  String
   metadata Json?
 
+  notificationRecipient String?   // 'admin' | 'client' — queued for email digest; null = no email
+  notifiedAt            DateTime? // set by cron once digest email is sent
+
   @@index([companyId, createdAt])
   @@index([clientId, createdAt])
   @@index([projectId, createdAt])
+  @@index([notificationRecipient, notifiedAt])
 }
 
 model DocumentTemplate {

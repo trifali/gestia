@@ -3,7 +3,7 @@ import { randomBytes } from 'crypto';
 import * as XLSX from 'xlsx';
 import sharp from 'sharp';
 import { putObject, removeObject, getPresignedUrl, getObjectBuffer } from '../../server/storage';
-import { notifyAdminOfClientActivity, notifyClientOfActivity } from '../../server/projectNotifications';
+import { logActivity } from '../activity/operations';
 
 // JPEG quality for compressed image uploads
 const IMAGE_JPEG_QUALITY = 82;
@@ -106,7 +106,7 @@ export const uploadProjectFile = async (
   context: any,
 ) => {
   const companyId = ensureCompany(context.user);
-  await ensureProjectOwned(projectId, companyId, context.entities);
+  const project = await ensureProjectOwned(projectId, companyId, context.entities);
 
   const m = /^data:([a-zA-Z0-9.+/\-]+);base64,(.+)$/.exec(dataUrl);
   if (!m) throw new HttpError(400, 'Format invalide');
@@ -152,24 +152,17 @@ export const uploadProjectFile = async (
     },
   });
 
-  // Notify client if enabled
-  try {
-    const project = await context.entities.Project.findUnique({
-      where: { id: projectId },
-      include: { client: true, company: true },
-    });
-    if (project?.notifyClientOnActivity && project.client?.email) {
-      notifyClientOfActivity({
-        clientEmail: project.client.email,
-        companyName: project.company?.name || 'Votre prestataire',
-        projectName: project.name,
-        activityType: 'file',
-        detail: name.trim() || originalName,
-      }).catch(() => {});
-    }
-  } catch {
-    // non-blocking
-  }
+  // Log to activity
+  const userName = (context.user as any)?.fullName || 'Équipe';
+  await logActivity(context.entities, {
+    companyId,
+    userId: context.user?.id,
+    clientId: project.clientId,
+    projectId,
+    type: 'project.file_upload',
+    message: `Fichier partagé par ${userName} : ${name.trim() || originalName}`,
+    notificationRecipient: project.notifyClientOnActivity ? 'client' : null,
+  });
 
   return file;
 };
@@ -482,20 +475,18 @@ export const uploadPortalFile = async (
     },
   });
 
-  // Notify admin if enabled
+  // Log to activity
   try {
-    const project = await context.entities.Project.findUnique({
-      where: { id: projectId },
-      include: { company: true },
-    });
-    if (project?.notifyAdminOnClientActivity && project.company?.email) {
-      notifyAdminOfClientActivity({
-        companyEmail: project.company.email,
-        companyName: project.company.name,
-        projectName: project.name,
-        activityType: 'file',
-        detail: name.trim() || originalName,
-      }).catch(() => {});
+    const project = await context.entities.Project.findUnique({ where: { id: projectId } });
+    if (project) {
+      await logActivity(context.entities, {
+        companyId,
+        clientId: project.clientId,
+        projectId,
+        type: 'project.client_file',
+        message: `Fichier téléversé par le client (portail) : ${name.trim() || originalName}`,
+        notificationRecipient: project.notifyAdminOnClientActivity ? 'admin' : null,
+      });
     }
   } catch {
     // non-blocking

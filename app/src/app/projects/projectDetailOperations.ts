@@ -2,7 +2,6 @@ import { HttpError } from 'wasp/server';
 import { randomBytes } from 'crypto';
 import { getPresignedUrl } from '../../server/storage';
 import { logActivity } from '../activity/operations';
-import { notifyAdminOfClientActivity, notifyClientOfActivity } from '../../server/projectNotifications';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -175,6 +174,8 @@ export const createProjectTask = async (args: CreateTaskArgs, context: any) => {
   });
 };
 
+const TASK_STATUS_LABELS: Record<string, string> = { todo: 'À faire', in_progress: 'En cours', done: 'Terminée' };
+
 type UpdateTaskArgs = { id: string; title?: string; description?: string; status?: string; priority?: string; sortOrder?: number };
 export const updateProjectTask = async (
   { id, ...rest }: UpdateTaskArgs,
@@ -183,31 +184,21 @@ export const updateProjectTask = async (
   const companyId = ensureCompany(context.user);
   const task = await context.entities.ProjectTask.findUnique({ where: { id } });
   if (!task) throw new HttpError(404);
-  await ensureProjectOwned(task.projectId, companyId, context.entities);
+  const project = await ensureProjectOwned(task.projectId, companyId, context.entities);
   const updated = await context.entities.ProjectTask.update({
     where: { id },
     data: rest,
   });
-  // Notify client on status change if enabled
   if (rest.status && rest.status !== task.status) {
-    try {
-      const project = await context.entities.Project.findUnique({
-        where: { id: task.projectId },
-        include: { client: true, company: true },
-      });
-      if (project?.notifyClientOnActivity && project.client?.email) {
-        const STATUS_LABELS: Record<string, string> = { todo: 'À faire', in_progress: 'En cours', done: 'Terminée' };
-        notifyClientOfActivity({
-          clientEmail: project.client.email,
-          companyName: project.company?.name || 'Votre prestataire',
-          projectName: project.name,
-          activityType: 'task',
-          detail: `« ${task.title} » → ${STATUS_LABELS[rest.status] || rest.status}`,
-        }).catch(() => {});
-      }
-    } catch {
-      // non-blocking
-    }
+    await logActivity(context.entities, {
+      companyId,
+      userId: context.user?.id,
+      clientId: project.clientId,
+      projectId: task.projectId,
+      type: 'project.task_status',
+      message: `Tâche « ${task.title} » : ${TASK_STATUS_LABELS[task.status] || task.status} → ${TASK_STATUS_LABELS[rest.status] || rest.status}`,
+      notificationRecipient: project.notifyClientOnActivity ? 'client' : null,
+    });
   }
   return updated;
 };
@@ -226,7 +217,7 @@ export const deleteProjectTask = async ({ id }: { id: string }, context: any) =>
 type CreateNoteArgs = { projectId: string; content: string; isPrivate?: boolean };
 export const createProjectNote = async (args: CreateNoteArgs, context: any) => {
   const companyId = ensureCompany(context.user);
-  await ensureProjectOwned(args.projectId, companyId, context.entities);
+  const project = await ensureProjectOwned(args.projectId, companyId, context.entities);
   if (!args.content?.trim()) throw new HttpError(400, 'Le contenu est requis');
   const note = await context.entities.ProjectNote.create({
     data: {
@@ -237,27 +228,17 @@ export const createProjectNote = async (args: CreateNoteArgs, context: any) => {
     },
     include: { user: { select: { fullName: true, email: true } } },
   });
-  // Notify client if non-private and flag is set
-  if (!args.isPrivate) {
-    try {
-      const project = await context.entities.Project.findUnique({
-        where: { id: args.projectId },
-        include: { client: true, company: true },
-      });
-      if (project?.notifyClientOnActivity && project.client?.email) {
-        const snippet = args.content.trim();
-        notifyClientOfActivity({
-          clientEmail: project.client.email,
-          companyName: project.company?.name || 'Votre prestataire',
-          projectName: project.name,
-          activityType: 'note',
-          detail: snippet.length > 120 ? snippet.slice(0, 120) + '…' : snippet,
-        }).catch(() => {});
-      }
-    } catch {
-      // non-blocking
-    }
-  }
+  const isPrivate = args.isPrivate ?? false;
+  const userName = (context.user as any)?.fullName || 'Équipe';
+  await logActivity(context.entities, {
+    companyId,
+    userId: context.user?.id,
+    clientId: project.clientId,
+    projectId: args.projectId,
+    type: isPrivate ? 'project.private_note' : 'project.note',
+    message: isPrivate ? `Note privée ajoutée par ${userName}` : `Note partagée par ${userName}`,
+    notificationRecipient: (!isPrivate && project.notifyClientOnActivity) ? 'client' : null,
+  });
   return note;
 };
 
@@ -329,22 +310,17 @@ export const submitClientNote = async (args: SubmitClientNoteArgs, context: any)
       authorName: args.authorName || 'Client',
     },
   });
-  // Notify admin if enabled
   try {
-    const project = await context.entities.Project.findUnique({
-      where: { id: access.projectId },
-      include: { company: true },
-    });
-    if (project?.notifyAdminOnClientActivity && project.company?.email) {
-      const snippet = args.content.trim();
-      notifyAdminOfClientActivity({
-        companyEmail: project.company.email,
-        companyName: project.company.name,
-        projectName: project.name,
-        activityType: 'note',
-        actorName: args.authorName || 'Client',
-        detail: snippet.length > 120 ? snippet.slice(0, 120) + '…' : snippet,
-      }).catch(() => {});
+    const project = await context.entities.Project.findUnique({ where: { id: access.projectId } });
+    if (project) {
+      await logActivity(context.entities, {
+        companyId: project.companyId,
+        clientId: project.clientId,
+        projectId: access.projectId,
+        type: 'project.client_note',
+        message: `Note laissée par ${args.authorName || 'Client'} (portail)`,
+        notificationRecipient: project.notifyAdminOnClientActivity ? 'admin' : null,
+      });
     }
   } catch {
     // non-blocking

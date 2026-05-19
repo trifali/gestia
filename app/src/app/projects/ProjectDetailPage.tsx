@@ -16,6 +16,7 @@ import {
   createProjectClientAccess,
   revokeProjectClientAccess,
   updateProjectNotifications,
+  getProjectActivity,
 } from 'wasp/client/operations';
 import {
   LuLayoutDashboard,
@@ -42,6 +43,9 @@ import {
   LuFlag,
   LuFolderOpen,
   LuBell,
+  LuActivity,
+  LuMessageSquare,
+  LuUpload,
 } from 'react-icons/lu';
 import { useConfirm, IconBtn, Modal } from '../../client/ui';
 import { ProjectFileManagerTab } from './ProjectFileManagerTab';
@@ -78,6 +82,7 @@ const TABS = [
   { id: 'taches', label: 'Tâches', icon: <LuSquareCheck size={16} />, shared: true },
   { id: 'notes', label: 'Notes', icon: <LuFileText size={16} />, shared: true },
   { id: 'fichiers', label: 'Fichiers', icon: <LuFolderOpen size={16} />, shared: true },
+  { id: 'activite', label: 'Activité', icon: <LuActivity size={16} />, shared: false },
 ] as const;
 
 type TabId = (typeof TABS)[number]['id'];
@@ -175,6 +180,7 @@ export default function ProjectDetailPage() {
           />
         )}
         {activeTab === 'fichiers' && <ProjectFileManagerTab projectId={projectId!} />}
+        {activeTab === 'activite' && <ActivityTab projectId={projectId!} />}
       </div>
     </div>
   );
@@ -863,3 +869,71 @@ function PortalTab({
     </div>
   );
 }
+
+// ─── Activity Tab ──────────────────────────────────────────────────────────────
+
+const ACTIVITY_TYPE_META: Record<string, { label: string; icon: React.ReactNode; color: string }> = {
+  'project.status_changed': { label: 'Statut modifié', icon: <LuRefreshCw size={14} />, color: 'text-blue-500' },
+  'project.task_status':    { label: 'Tâche mise à jour', icon: <LuSquareCheck size={14} />, color: 'text-green-500' },
+  'project.note':           { label: 'Note partagée', icon: <LuFileText size={14} />, color: 'text-indigo-500' },
+  'project.private_note':   { label: 'Note privée', icon: <LuLock size={14} />, color: 'text-gray-500' },
+  'project.client_note':    { label: 'Note du client', icon: <LuMessageSquare size={14} />, color: 'text-purple-500' },
+  'project.file_upload':    { label: 'Fichier partagé', icon: <LuUpload size={14} />, color: 'text-teal-500' },
+  'project.client_file':    { label: 'Fichier du client', icon: <LuFolderOpen size={14} />, color: 'text-orange-500' },
+};
+
+function ActivityTab({ projectId }: { projectId: string }) {
+  const { data: activities = [], isLoading } = useQuery(getProjectActivity, { projectId });
+
+  if (isLoading) {
+    return (
+      <div className='flex justify-center py-12'>
+        <span className='loading loading-spinner loading-md' />
+      </div>
+    );
+  }
+
+  if (activities.length === 0) {
+    return (
+      <div className='flex flex-col items-center gap-2 py-16 text-muted'>
+        <LuActivity size={32} className='opacity-30' />
+        <p className='text-sm'>Aucune activité enregistrée pour ce projet.</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className='flex flex-col gap-0'>
+      {(activities as any[]).map((entry, idx) => {
+        const meta = ACTIVITY_TYPE_META[entry.type] ?? { label: entry.type, icon: <LuClock size={14} />, color: 'text-gray-400' };
+        const actor = entry.user?.fullName || entry.user?.email || 'Client (portail)';
+        const isLast = idx === activities.length - 1;
+
+        return (
+          <div key={entry.id} className='flex gap-3 relative'>
+            {!isLast && (
+              <span className='absolute left-[17px] top-8 bottom-0 w-px bg-base-300' />
+            )}
+            <div className={`flex-shrink-0 w-9 h-9 rounded-full bg-base-200 flex items-center justify-center ${meta.color} mt-1`}>
+              {meta.icon}
+            </div>
+            <div className='flex flex-col pb-4 flex-1 min-w-0'>
+              <div className='flex items-center gap-2 flex-wrap'>
+                <span className='text-xs font-medium text-muted'>{meta.label}</span>
+                <span className='text-xs text-muted opacity-60'>·</span>
+                <span className='text-xs text-muted opacity-60'>
+                  {new Date(entry.createdAt).toLocaleString('fr-CA', {
+                    day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit',
+                  })}
+                </span>
+              </div>
+              <p className='text-sm mt-0.5 text-base-content'>{entry.message}</p>
+              <p className='text-xs text-muted opacity-70 mt-0.5'>{actor}</p>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+

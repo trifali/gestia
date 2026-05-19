@@ -343,7 +343,7 @@ action createProjectTask {
 }
 action updateProjectTask {
   fn: import { updateProjectTask } from "@src/app/projects/projectDetailOperations",
-  entities: [User, Project, ProjectTask, Client, Company]
+  entities: [User, Project, ProjectTask, Client, Company, ActivityLog]
 }
 action deleteProjectTask {
   fn: import { deleteProjectTask } from "@src/app/projects/projectDetailOperations",
@@ -351,7 +351,7 @@ action deleteProjectTask {
 }
 action createProjectNote {
   fn: import { createProjectNote } from "@src/app/projects/projectDetailOperations",
-  entities: [User, Project, ProjectNote, Client, Company]
+  entities: [User, Project, ProjectNote, Client, Company, ActivityLog]
 }
 action updateProjectNote {
   fn: import { updateProjectNote } from "@src/app/projects/projectDetailOperations",
@@ -376,7 +376,7 @@ action submitPortalFile {
 }
 action uploadPortalFile {
   fn: import { uploadPortalFile } from "@src/app/projects/projectFileOperations",
-  entities: [Project, ProjectFile, ProjectClientAccess, Company]
+  entities: [Project, ProjectFile, ProjectClientAccess, Company, ActivityLog]
 }
 action createPortalFolder {
   fn: import { createPortalFolder } from "@src/app/projects/projectFileOperations",
@@ -396,7 +396,7 @@ action movePortalFiles {
 }
 action submitClientNote {
   fn: import { submitClientNote } from "@src/app/projects/projectDetailOperations",
-  entities: [ProjectClientAccess, ProjectNote, Project, Company]
+  entities: [ProjectClientAccess, ProjectNote, Project, Company, ActivityLog]
 }
 action updateProjectNotifications {
   fn: import { updateProjectNotifications } from "@src/app/projects/projectDetailOperations",
@@ -415,7 +415,7 @@ action createProjectFolder {
 }
 action uploadProjectFile {
   fn: import { uploadProjectFile } from "@src/app/projects/projectFileOperations",
-  entities: [User, Project, ProjectFile, Client, Company]
+  entities: [User, Project, ProjectFile, Client, Company, ActivityLog]
 }
 action deleteProjectFiles {
   fn: import { deleteProjectFiles } from "@src/app/projects/projectFileOperations",
@@ -518,6 +518,11 @@ action saveDocumentEmailDraft {
 query getClientActivities {
   fn: import { getClientActivities } from "@src/app/activity/operations",
   entities: [User, ActivityLog]
+}
+
+query getProjectActivity {
+  fn: import { getProjectActivity } from "@src/app/activity/operations",
+  entities: [User, Project, ActivityLog]
 }
 
 query getPayments {
@@ -822,4 +827,16 @@ job documentLifecycleSweep {
     cron: "0 * * * *"
   },
   entities: [Document, ActivityLog]
+}
+
+// Every 5 minutes: send batched project notification emails (admin ← client activity, client ← admin activity)
+job sendProjectNotifications {
+  executor: PgBoss,
+  perform: {
+    fn: import { sendProjectNotifications } from "@src/server/jobs/sendProjectNotifications"
+  },
+  schedule: {
+    cron: "*/5 * * * *"
+  },
+  entities: [ActivityLog, Project, Company, Client]
 }

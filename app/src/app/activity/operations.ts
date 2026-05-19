@@ -27,6 +27,23 @@ export const getClientActivities: GetClientActivities<{ clientId: string; limit?
   }) as any;
 };
 
+export const getProjectActivity = async (
+  { projectId }: { projectId: string },
+  context: any,
+) => {
+  const companyId = ensureCompany(context.user);
+  const project = await context.entities.Project.findUnique({ where: { id: projectId } });
+  if (!project || project.companyId !== companyId) throw new HttpError(404);
+  return context.entities.ActivityLog.findMany({
+    where: { projectId },
+    orderBy: { createdAt: 'desc' },
+    take: 150,
+    include: {
+      user: { select: { id: true, fullName: true, email: true } },
+    },
+  });
+};
+
 /**
  * Server-side helper to record an activity. Failures are swallowed so they
  * never break the parent action.
@@ -42,6 +59,7 @@ export async function logActivity(
     type: string;
     message: string;
     metadata?: any;
+    notificationRecipient?: string | null;
   },
 ): Promise<void> {
   try {
@@ -55,6 +73,7 @@ export async function logActivity(
         type: params.type,
         message: params.message,
         metadata: params.metadata ?? undefined,
+        notificationRecipient: params.notificationRecipient ?? null,
       },
     });
   } catch (err) {
