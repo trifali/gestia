@@ -157,6 +157,9 @@ model Project {
   description String?
   status      String  @default("en_cours")
 
+  notifyAdminOnClientActivity Boolean @default(false)
+  notifyClientOnActivity      Boolean @default(false)
+
   documents    Document[]
   tasks        ProjectTask[]
   notes        ProjectNote[]

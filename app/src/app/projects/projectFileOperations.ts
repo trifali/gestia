@@ -3,6 +3,7 @@ import { randomBytes } from 'crypto';
 import * as XLSX from 'xlsx';
 import sharp from 'sharp';
 import { putObject, removeObject, getPresignedUrl, getObjectBuffer } from '../../server/storage';
+import { notifyAdminOfClientActivity, notifyClientOfActivity } from '../../server/projectNotifications';
 
 // JPEG quality for compressed image uploads
 const IMAGE_JPEG_QUALITY = 82;
@@ -139,7 +140,7 @@ export const uploadProjectFile = async (
     }
   }
 
-  return context.entities.ProjectFile.create({
+  const file = await context.entities.ProjectFile.create({
     data: {
       projectId,
       name: name.trim() || originalName,
@@ -150,6 +151,27 @@ export const uploadProjectFile = async (
       size: buffer.length,
     },
   });
+
+  // Notify client if enabled
+  try {
+    const project = await context.entities.Project.findUnique({
+      where: { id: projectId },
+      include: { client: true, company: true },
+    });
+    if (project?.notifyClientOnActivity && project.client?.email) {
+      notifyClientOfActivity({
+        clientEmail: project.client.email,
+        companyName: project.company?.name || 'Votre prestataire',
+        projectName: project.name,
+        activityType: 'file',
+        detail: name.trim() || originalName,
+      }).catch(() => {});
+    }
+  } catch {
+    // non-blocking
+  }
+
+  return file;
 };
 
 // ─── deleteProjectFiles ───────────────────────────────────────────────────────
@@ -448,7 +470,7 @@ export const uploadPortalFile = async (
   const key = minioKey(companyId, projectId, `${uid()}.${ext}`);
   await putObject(key, buffer, mimeType);
 
-  return context.entities.ProjectFile.create({
+  const portalFile = await context.entities.ProjectFile.create({
     data: {
       projectId,
       name: name.trim() || originalName,
@@ -459,6 +481,27 @@ export const uploadPortalFile = async (
       size: buffer.length,
     },
   });
+
+  // Notify admin if enabled
+  try {
+    const project = await context.entities.Project.findUnique({
+      where: { id: projectId },
+      include: { company: true },
+    });
+    if (project?.notifyAdminOnClientActivity && project.company?.email) {
+      notifyAdminOfClientActivity({
+        companyEmail: project.company.email,
+        companyName: project.company.name,
+        projectName: project.name,
+        activityType: 'file',
+        detail: name.trim() || originalName,
+      }).catch(() => {});
+    }
+  } catch {
+    // non-blocking
+  }
+
+  return portalFile;
 };
 
 // ─── createPortalFolder ───────────────────────────────────────────────────────

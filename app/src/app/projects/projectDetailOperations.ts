@@ -2,6 +2,7 @@ import { HttpError } from 'wasp/server';
 import { randomBytes } from 'crypto';
 import { getPresignedUrl } from '../../server/storage';
 import { logActivity } from '../activity/operations';
+import { notifyAdminOfClientActivity, notifyClientOfActivity } from '../../server/projectNotifications';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -183,10 +184,32 @@ export const updateProjectTask = async (
   const task = await context.entities.ProjectTask.findUnique({ where: { id } });
   if (!task) throw new HttpError(404);
   await ensureProjectOwned(task.projectId, companyId, context.entities);
-  return context.entities.ProjectTask.update({
+  const updated = await context.entities.ProjectTask.update({
     where: { id },
     data: rest,
   });
+  // Notify client on status change if enabled
+  if (rest.status && rest.status !== task.status) {
+    try {
+      const project = await context.entities.Project.findUnique({
+        where: { id: task.projectId },
+        include: { client: true, company: true },
+      });
+      if (project?.notifyClientOnActivity && project.client?.email) {
+        const STATUS_LABELS: Record<string, string> = { todo: 'À faire', in_progress: 'En cours', done: 'Terminée' };
+        notifyClientOfActivity({
+          clientEmail: project.client.email,
+          companyName: project.company?.name || 'Votre prestataire',
+          projectName: project.name,
+          activityType: 'task',
+          detail: `« ${task.title} » → ${STATUS_LABELS[rest.status] || rest.status}`,
+        }).catch(() => {});
+      }
+    } catch {
+      // non-blocking
+    }
+  }
+  return updated;
 };
 
 export const deleteProjectTask = async ({ id }: { id: string }, context: any) => {
@@ -205,7 +228,7 @@ export const createProjectNote = async (args: CreateNoteArgs, context: any) => {
   const companyId = ensureCompany(context.user);
   await ensureProjectOwned(args.projectId, companyId, context.entities);
   if (!args.content?.trim()) throw new HttpError(400, 'Le contenu est requis');
-  return context.entities.ProjectNote.create({
+  const note = await context.entities.ProjectNote.create({
     data: {
       projectId: args.projectId,
       content: args.content.trim(),
@@ -214,6 +237,28 @@ export const createProjectNote = async (args: CreateNoteArgs, context: any) => {
     },
     include: { user: { select: { fullName: true, email: true } } },
   });
+  // Notify client if non-private and flag is set
+  if (!args.isPrivate) {
+    try {
+      const project = await context.entities.Project.findUnique({
+        where: { id: args.projectId },
+        include: { client: true, company: true },
+      });
+      if (project?.notifyClientOnActivity && project.client?.email) {
+        const snippet = args.content.trim();
+        notifyClientOfActivity({
+          clientEmail: project.client.email,
+          companyName: project.company?.name || 'Votre prestataire',
+          projectName: project.name,
+          activityType: 'note',
+          detail: snippet.length > 120 ? snippet.slice(0, 120) + '…' : snippet,
+        }).catch(() => {});
+      }
+    } catch {
+      // non-blocking
+    }
+  }
+  return note;
 };
 
 type UpdateNoteArgs = { id: string; content?: string; isPrivate?: boolean };
@@ -275,7 +320,7 @@ type SubmitClientNoteArgs = { token: string; content: string; authorName?: strin
 export const submitClientNote = async (args: SubmitClientNoteArgs, context: any) => {
   const access = await validateToken(args.token, context.entities);
   if (!args.content?.trim()) throw new HttpError(400, 'Le contenu est requis');
-  return context.entities.ProjectNote.create({
+  const note = await context.entities.ProjectNote.create({
     data: {
       projectId: access.projectId,
       content: args.content.trim(),
@@ -283,5 +328,44 @@ export const submitClientNote = async (args: SubmitClientNoteArgs, context: any)
       isFromClient: true,
       authorName: args.authorName || 'Client',
     },
+  });
+  // Notify admin if enabled
+  try {
+    const project = await context.entities.Project.findUnique({
+      where: { id: access.projectId },
+      include: { company: true },
+    });
+    if (project?.notifyAdminOnClientActivity && project.company?.email) {
+      const snippet = args.content.trim();
+      notifyAdminOfClientActivity({
+        companyEmail: project.company.email,
+        companyName: project.company.name,
+        projectName: project.name,
+        activityType: 'note',
+        actorName: args.authorName || 'Client',
+        detail: snippet.length > 120 ? snippet.slice(0, 120) + '…' : snippet,
+      }).catch(() => {});
+    }
+  } catch {
+    // non-blocking
+  }
+  return note;
+};
+
+// ─── updateProjectNotifications ──────────────────────────────────────────────
+
+export const updateProjectNotifications = async (
+  { id, notifyAdminOnClientActivity, notifyClientOnActivity }: {
+    id: string;
+    notifyAdminOnClientActivity: boolean;
+    notifyClientOnActivity: boolean;
+  },
+  context: any,
+) => {
+  const companyId = ensureCompany(context.user);
+  await ensureProjectOwned(id, companyId, context.entities);
+  return context.entities.Project.update({
+    where: { id },
+    data: { notifyAdminOnClientActivity, notifyClientOnActivity },
   });
 };

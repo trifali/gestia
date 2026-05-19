@@ -15,6 +15,7 @@ import {
   deleteProjectNote,
   createProjectClientAccess,
   revokeProjectClientAccess,
+  updateProjectNotifications,
 } from 'wasp/client/operations';
 import {
   LuLayoutDashboard,
@@ -40,6 +41,7 @@ import {
   LuX,
   LuFlag,
   LuFolderOpen,
+  LuBell,
 } from 'react-icons/lu';
 import { useConfirm, IconBtn, Modal } from '../../client/ui';
 import { ProjectFileManagerTab } from './ProjectFileManagerTab';
@@ -164,7 +166,14 @@ export default function ProjectDetailPage() {
         {activeTab === 'taches' && <TasksTab projectId={projectId!} tasks={tasks} />}
         {activeTab === 'notes' && <NotesTab projectId={projectId!} notes={notes} isPrivate={false} />}
         {activeTab === 'privees' && <NotesTab projectId={projectId!} notes={privateNotes} isPrivate={true} />}
-        {activeTab === 'portail' && <PortalTab projectId={projectId!} clientAccess={clientAccess} />}
+        {activeTab === 'portail' && (
+          <PortalTab
+            projectId={projectId!}
+            clientAccess={clientAccess}
+            notifyAdminOnClientActivity={project.notifyAdminOnClientActivity ?? false}
+            notifyClientOnActivity={project.notifyClientOnActivity ?? false}
+          />
+        )}
         {activeTab === 'fichiers' && <ProjectFileManagerTab projectId={projectId!} />}
       </div>
     </div>
@@ -654,12 +663,38 @@ function NoteEditCard({ note, onClose }: { note: any; onClose: () => void }) {
 
 // ─── Tab: Portail client ──────────────────────────────────────────────────────
 
-function PortalTab({ projectId, clientAccess }: { projectId: string; clientAccess: any[] }) {
+function PortalTab({
+  projectId,
+  clientAccess,
+  notifyAdminOnClientActivity,
+  notifyClientOnActivity,
+}: {
+  projectId: string;
+  clientAccess: any[];
+  notifyAdminOnClientActivity: boolean;
+  notifyClientOnActivity: boolean;
+}) {
   const [label, setLabel] = useState('');
   const [creating, setCreating] = useState(false);
+  const [savingNotif, setSavingNotif] = useState(false);
   const { ask, Dialog } = useConfirm();
 
   const baseUrl = typeof window !== 'undefined' ? `${window.location.origin}/portail/` : '/portail/';
+
+  const toggleNotification = async (field: 'notifyAdminOnClientActivity' | 'notifyClientOnActivity', value: boolean) => {
+    setSavingNotif(true);
+    try {
+      await updateProjectNotifications({
+        id: projectId,
+        notifyAdminOnClientActivity: field === 'notifyAdminOnClientActivity' ? value : notifyAdminOnClientActivity,
+        notifyClientOnActivity: field === 'notifyClientOnActivity' ? value : notifyClientOnActivity,
+      });
+    } catch (err: any) {
+      toast.error(err?.message || 'Erreur lors de la mise à jour');
+    } finally {
+      setSavingNotif(false);
+    }
+  };
 
   const create = async () => {
     setCreating(true);
@@ -786,6 +821,43 @@ function PortalTab({ projectId, clientAccess }: { projectId: string; clientAcces
       {clientAccess.length === 0 && (
         <p className='text-muted text-sm text-center py-6'>Aucun lien client généré pour ce projet.</p>
       )}
+
+      {/* Notification settings */}
+      <div className='card p-5'>
+        <h3 className='font-semibold text-ink mb-1 flex items-center gap-2'>
+          <LuBell size={16} className='text-muted' />
+          Notifications par courriel
+        </h3>
+        <p className='text-xs text-muted mb-4'>Configurez les alertes automatiques liées à l'activité de ce projet.</p>
+        <div className='flex flex-col gap-4'>
+          <label className='flex items-start gap-3 cursor-pointer'>
+            <input
+              type='checkbox'
+              className='mt-0.5 accent-accent'
+              checked={notifyAdminOnClientActivity}
+              disabled={savingNotif}
+              onChange={(e) => toggleNotification('notifyAdminOnClientActivity', e.target.checked)}
+            />
+            <div>
+              <p className='text-sm font-medium text-ink'>M'avertir quand le client agit</p>
+              <p className='text-xs text-muted'>Reçois un courriel quand le client laisse une note ou téléverse un fichier via le portail.</p>
+            </div>
+          </label>
+          <label className='flex items-start gap-3 cursor-pointer'>
+            <input
+              type='checkbox'
+              className='mt-0.5 accent-accent'
+              checked={notifyClientOnActivity}
+              disabled={savingNotif}
+              onChange={(e) => toggleNotification('notifyClientOnActivity', e.target.checked)}
+            />
+            <div>
+              <p className='text-sm font-medium text-ink'>Avertir le client quand j'agis</p>
+              <p className='text-xs text-muted'>Le client reçoit un courriel quand tu ajoutes une note (non privée), partages un fichier ou déplaces une tâche.</p>
+            </div>
+          </label>
+        </div>
+      </div>
 
       {Dialog}
     </div>

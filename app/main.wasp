@@ -343,7 +343,7 @@ action createProjectTask {
 }
 action updateProjectTask {
   fn: import { updateProjectTask } from "@src/app/projects/projectDetailOperations",
-  entities: [User, Project, ProjectTask]
+  entities: [User, Project, ProjectTask, Client, Company]
 }
 action deleteProjectTask {
   fn: import { deleteProjectTask } from "@src/app/projects/projectDetailOperations",
@@ -351,7 +351,7 @@ action deleteProjectTask {
 }
 action createProjectNote {
   fn: import { createProjectNote } from "@src/app/projects/projectDetailOperations",
-  entities: [User, Project, ProjectNote]
+  entities: [User, Project, ProjectNote, Client, Company]
 }
 action updateProjectNote {
   fn: import { updateProjectNote } from "@src/app/projects/projectDetailOperations",
@@ -376,7 +376,7 @@ action submitPortalFile {
 }
 action uploadPortalFile {
   fn: import { uploadPortalFile } from "@src/app/projects/projectFileOperations",
-  entities: [Project, ProjectFile, ProjectClientAccess]
+  entities: [Project, ProjectFile, ProjectClientAccess, Company]
 }
 action createPortalFolder {
   fn: import { createPortalFolder } from "@src/app/projects/projectFileOperations",
@@ -396,7 +396,11 @@ action movePortalFiles {
 }
 action submitClientNote {
   fn: import { submitClientNote } from "@src/app/projects/projectDetailOperations",
-  entities: [ProjectClientAccess, ProjectNote]
+  entities: [ProjectClientAccess, ProjectNote, Project, Company]
+}
+action updateProjectNotifications {
+  fn: import { updateProjectNotifications } from "@src/app/projects/projectDetailOperations",
+  entities: [User, Project]
 }
 
 // ─── Project File Manager ────────────────────────────────────────────────────
@@ -411,7 +415,7 @@ action createProjectFolder {
 }
 action uploadProjectFile {
   fn: import { uploadProjectFile } from "@src/app/projects/projectFileOperations",
-  entities: [User, Project, ProjectFile]
+  entities: [User, Project, ProjectFile, Client, Company]
 }
 action deleteProjectFiles {
   fn: import { deleteProjectFiles } from "@src/app/projects/projectFileOperations",
