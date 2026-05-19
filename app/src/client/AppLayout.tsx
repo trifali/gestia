@@ -1,6 +1,6 @@
 import { Link, NavLink, useNavigate, useLocation, Navigate } from 'react-router';
 import { logout } from 'wasp/client/auth';
-import { useQuery, getCurrentCompany } from 'wasp/client/operations';
+import { useQuery, getCurrentCompany, getDashboardStats } from 'wasp/client/operations';
 import { useState, type ReactNode } from 'react';
 import {
   LuLayoutDashboard, LuUsers, LuFolder, LuFileText,
@@ -27,6 +27,8 @@ const NAV = [
 
 export default function AppLayout({ user, children }: AppLayoutProps) {
   const { data: company, isLoading: companyLoading } = useQuery(getCurrentCompany);
+  const { data: alertStats } = useQuery(getDashboardStats, undefined, { enabled: !!company });
+  const alertCount = (alertStats?.overdueInvoices.length ?? 0) + (alertStats?.expiredQuotes.length ?? 0);
   const [mobileOpen, setMobileOpen] = useState(false);
   const navigate = useNavigate();
   const location = useLocation();
@@ -62,7 +64,12 @@ export default function AppLayout({ user, children }: AppLayoutProps) {
               onClick={() => setMobileOpen(false)}
             >
               <item.icon size={18} />
-              <span>{item.label}</span>
+              <span className='flex-1'>{item.label}</span>
+              {item.to === '/suivi' && alertCount > 0 && (
+                <span className='ml-auto min-w-[18px] h-[18px] rounded-full bg-red-500 text-white text-[10px] font-bold flex items-center justify-center px-1 leading-none'>
+                  {alertCount > 99 ? '99+' : alertCount}
+                </span>
+              )}
             </NavLink>
           ))}
         </div>

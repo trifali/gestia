@@ -7,6 +7,7 @@ import {
   getCurrentCompany,
   getCompanyBrandAssets,
   getProjects,
+  updateDocumentStatus,
 } from 'wasp/client/operations';
 // @ts-ignore — generated after Wasp restart
 import { getDocumentById } from 'wasp/client/operations';
@@ -27,6 +28,7 @@ import {
   LuX,
   LuUser,
   LuExternalLink,
+  LuInfo,
 } from 'react-icons/lu';
 import { PageHeader, Modal } from '../../client/ui';
 import { formatCurrency, formatDate, formatDateTime } from '../../shared/format';
@@ -240,11 +242,42 @@ function KanbanBoard({
   const [emailDocId, setEmailDocId] = useState<string | null>(null);
   const [editDocId, setEditDocId] = useState<string | null>(null);
 
+  // Drag-and-drop state
+  const [draggingId, setDraggingId] = useState<string | null>(null);
+  const [dragOverStatus, setDragOverStatus] = useState<string | null>(null);
+
+  // Optimistic local override so the card moves instantly before the server
+  // confirms (reverted on error).
+  const [optimisticStatus, setOptimisticStatus] = useState<Record<string, string>>({});
+
+  function effectiveStatus(doc: PipelineDocument): string {
+    return optimisticStatus[doc.id] ?? doc.status;
+  }
+
   const byStatus = new Map<string, PipelineDocument[]>();
   for (const col of columns) byStatus.set(col.status, []);
   for (const doc of docs) {
-    if (byStatus.has(doc.status)) {
-      byStatus.get(doc.status)!.push(doc);
+    const s = effectiveStatus(doc);
+    if (byStatus.has(s)) byStatus.get(s)!.push(doc);
+  }
+
+  async function handleDrop(targetStatus: string) {
+    setDragOverStatus(null);
+    if (!draggingId) return;
+    const doc = docs.find((d) => d.id === draggingId);
+    if (!doc || effectiveStatus(doc) === targetStatus) {
+      setDraggingId(null);
+      return;
+    }
+    const previousStatus = effectiveStatus(doc);
+    setOptimisticStatus((prev) => ({ ...prev, [draggingId]: targetStatus }));
+    setDraggingId(null);
+    try {
+      await (updateDocumentStatus as any)({ id: draggingId, status: targetStatus });
+      toast.success(`Statut mis à jour : ${statusLabel(targetStatus)}`);
+    } catch (err: any) {
+      setOptimisticStatus((prev) => ({ ...prev, [draggingId!]: previousStatus }));
+      toast.error(err?.message || 'Impossible de modifier le statut');
     }
   }
 
@@ -258,15 +291,39 @@ function KanbanBoard({
 
   return (
     <>
+      {/* Drag-and-drop tip */}
+      <div className='flex items-center gap-2 text-xs text-muted mb-4 px-1'>
+        <LuInfo size={13} className='shrink-0 text-accent' />
+        <span>
+          Glissez une carte vers une autre colonne pour changer son statut. Le changement est
+          enregistré immédiatement.
+        </span>
+      </div>
+
       <div className='overflow-x-auto pb-4'>
         <div className='flex gap-4 min-w-max'>
           {columns.map((col) => {
             const cards = byStatus.get(col.status) || [];
+            const isOver = dragOverStatus === col.status;
             return (
-              <div key={col.status} className='w-72 flex flex-col'>
+              <div
+                key={col.status}
+                className='w-72 flex flex-col'
+                onDragOver={(e) => {
+                  e.preventDefault();
+                  setDragOverStatus(col.status);
+                }}
+                onDragLeave={(e) => {
+                  // Only clear if leaving the column entirely (not entering a child)
+                  if (!e.currentTarget.contains(e.relatedTarget as Node)) {
+                    setDragOverStatus(null);
+                  }
+                }}
+                onDrop={() => handleDrop(col.status)}
+              >
                 {/* Column header */}
                 <div
-                  className={`flex items-center justify-between px-3 py-2 rounded-t-lg border ${col.headerCls}`}
+                  className={`flex items-center justify-between px-3 py-2 rounded-t-lg border ${col.headerCls} transition-colors ${isOver ? 'ring-2 ring-accent ring-inset' : ''}`}
                 >
                   <span className='text-sm font-semibold text-ink'>{col.label}</span>
                   <span className='text-xs text-muted font-medium'>
@@ -274,23 +331,34 @@ function KanbanBoard({
                   </span>
                 </div>
 
-                {/* Cards */}
+                {/* Cards drop zone */}
                 <div
-                  className={`flex flex-col gap-2 p-2 rounded-b-lg border border-t-0 min-h-24 ${col.headerCls} bg-opacity-30`}
+                  className={`flex flex-col gap-2 p-2 rounded-b-lg border border-t-0 min-h-24 ${col.headerCls} bg-opacity-30 transition-colors ${
+                    isOver ? 'ring-2 ring-accent ring-inset bg-accent/5' : ''
+                  }`}
                 >
                   {cards.length === 0 ? (
-                    <div className='text-xs text-muted text-center py-4 opacity-60'>—</div>
+                    <div className={`text-xs text-muted text-center py-4 ${isOver ? 'opacity-100 text-accent' : 'opacity-60'}`}>
+                      {isOver ? 'Déposer ici' : '—'}
+                    </div>
                   ) : (
                     cards.map((doc) => (
                       <PipelineCard
                         key={doc.id}
-                        doc={doc}
+                        doc={{ ...doc, status: effectiveStatus(doc) }}
                         badgeCls={col.badgeCls}
+                        isDragging={draggingId === doc.id}
+                        onDragStart={() => setDraggingId(doc.id)}
+                        onDragEnd={() => { setDraggingId(null); setDragOverStatus(null); }}
                         onOpenNotes={() => setNoteDoc(doc)}
                         onOpenEmail={() => setEmailDocId(doc.id)}
                         onEdit={() => setEditDocId(doc.id)}
                       />
                     ))
+                  )}
+                  {/* Show drop target placeholder when dragging over non-empty column */}
+                  {isOver && cards.length > 0 && (
+                    <div className='h-14 rounded-lg border-2 border-dashed border-accent/40 bg-accent/5' />
                   )}
                 </div>
               </div>
@@ -319,12 +387,18 @@ function KanbanBoard({
 function PipelineCard({
   doc,
   badgeCls,
+  isDragging,
+  onDragStart,
+  onDragEnd,
   onOpenNotes,
   onOpenEmail,
   onEdit,
 }: {
   doc: PipelineDocument;
   badgeCls: string;
+  isDragging: boolean;
+  onDragStart: () => void;
+  onDragEnd: () => void;
   onOpenNotes: () => void;
   onOpenEmail: () => void;
   onEdit: () => void;
@@ -338,7 +412,17 @@ function PipelineCard({
   const rawPhone = doc.clientPhone?.replace(/\s/g, '') || '';
 
   return (
-    <div className='bg-white rounded-lg border border-line shadow-sm p-3 flex flex-col gap-2 hover:shadow-md transition-shadow'>
+    <div
+      draggable
+      onDragStart={(e) => {
+        e.dataTransfer.effectAllowed = 'move';
+        onDragStart();
+      }}
+      onDragEnd={onDragEnd}
+      className={`bg-white rounded-lg border border-line shadow-sm p-3 flex flex-col gap-2 hover:shadow-md transition-shadow cursor-grab active:cursor-grabbing select-none ${
+        isDragging ? 'opacity-40 scale-95' : ''
+      }`}
+    >
       {/* Header: number + status */}
       <div className='flex items-start justify-between gap-2'>
         <div className='flex flex-col gap-0.5 min-w-0'>

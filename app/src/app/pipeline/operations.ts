@@ -1,5 +1,9 @@
 import { HttpError } from 'wasp/server';
-import type { GetPipelineDocuments, GetActivityFeed, AddActivityNote } from 'wasp/server/operations';
+import type {
+  GetPipelineDocuments,
+  GetActivityFeed,
+  AddActivityNote,
+} from 'wasp/server/operations';
 
 function ensureCompany(user: any): string {
   if (!user) throw new HttpError(401);

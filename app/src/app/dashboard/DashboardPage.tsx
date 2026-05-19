@@ -93,7 +93,10 @@ export default function DashboardPage() {
                         <h2 className='font-semibold text-red-800'>
                           {stats.overdueInvoices.length} facture{stats.overdueInvoices.length > 1 ? 's' : ''} en retard
                         </h2>
-                        <span className='text-xs text-red-600 ml-auto'>La date d'échéance est dépassée — contactez le client</span>
+                        <div className='ml-auto flex items-center gap-3 shrink-0'>
+                          <span className='text-xs text-red-600 hidden sm:inline'>La date d'échéance est dépassée — contactez le client</span>
+                          <Link to='/suivi' className='text-xs font-semibold text-red-700 hover:underline whitespace-nowrap'>Gérer dans le suivi →</Link>
+                        </div>
                       </div>
                       <ul className='divide-y divide-red-100'>
                         {stats.overdueInvoices.map((doc) => (
@@ -109,7 +112,10 @@ export default function DashboardPage() {
                         <h2 className='font-semibold text-amber-800'>
                           {stats.expiredQuotes.length} soumission{stats.expiredQuotes.length > 1 ? 's' : ''} expirée{stats.expiredQuotes.length > 1 ? 's' : ''}
                         </h2>
-                        <span className='text-xs text-amber-700 ml-auto'>Date d'échéance dépassée — relancez ou fermez</span>
+                        <div className='ml-auto flex items-center gap-3 shrink-0'>
+                          <span className='text-xs text-amber-700 hidden sm:inline'>Date d'échéance dépassée — relancez ou fermez</span>
+                          <Link to='/suivi' className='text-xs font-semibold text-amber-800 hover:underline whitespace-nowrap'>Gérer dans le suivi →</Link>
+                        </div>
                       </div>
                       <ul className='divide-y divide-amber-100'>
                         {stats.expiredQuotes.map((doc) => (
