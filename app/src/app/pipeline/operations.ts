@@ -25,6 +25,7 @@ export type PipelineDocument = {
   issueDate: Date;
   clientId: string;
   clientName: string;
+  clientContactName: string | null;
   clientEmail: string | null;
   clientPhone: string | null;
   noteCount: number;
@@ -84,6 +85,7 @@ export const getPipelineDocuments: GetPipelineDocuments<void, PipelineDocument[]
     issueDate: d.issueDate,
     clientId: d.clientId,
     clientName: d.client.name,
+    clientContactName: d.client.contactName ?? null,
     clientEmail: d.client.email,
     clientPhone: d.client.phone,
     noteCount: (d.activities as any[]).filter((a: any) => a.type === 'note').length,

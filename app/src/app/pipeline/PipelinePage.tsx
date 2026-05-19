@@ -456,6 +456,9 @@ function PipelineCard({
         <span className='truncate'>{doc.clientName}</span>
         <LuExternalLink size={11} className='text-muted shrink-0 opacity-0 group-hover:opacity-100 transition-opacity' />
       </Link>
+      {doc.clientContactName && (
+        <p className='text-xs text-muted truncate pl-[17px]'>{doc.clientContactName}</p>
+      )}
 
       {/* Contact actions */}
       <div className='flex flex-col gap-1'>
