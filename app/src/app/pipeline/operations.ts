@@ -23,6 +23,7 @@ export type PipelineDocument = {
   clientName: string;
   clientEmail: string | null;
   clientPhone: string | null;
+  noteCount: number;
 };
 
 export type ActivityFeedItem = {
@@ -59,7 +60,10 @@ export const getPipelineDocuments: GetPipelineDocuments<void, PipelineDocument[]
         { type: 'invoice', status: { notIn: ['payee', 'annulee'] } },
       ],
     },
-    include: { client: true },
+    include: {
+      client: true,
+      activities: { where: { type: 'note' }, select: { id: true } },
+    },
     orderBy: { createdAt: 'desc' },
   });
 
@@ -77,6 +81,7 @@ export const getPipelineDocuments: GetPipelineDocuments<void, PipelineDocument[]
     clientName: d.client.name,
     clientEmail: d.client.email,
     clientPhone: d.client.phone,
+    noteCount: (d.activities as any[]).length,
   }));
 };
 
@@ -84,12 +89,13 @@ export const getPipelineDocuments: GetPipelineDocuments<void, PipelineDocument[]
  * Company-wide activity log, optionally filtered by client.
  */
 export const getActivityFeed: GetActivityFeed<
-  { clientId?: string; limit?: number },
+  { clientId?: string; documentId?: string; limit?: number },
   ActivityFeedItem[]
 > = async (args, context) => {
   const companyId = ensureCompany(context.user);
   const where: any = { companyId };
   if (args?.clientId) where.clientId = args.clientId;
+  if (args?.documentId) where.documentId = args.documentId;
 
   const rows = await context.entities.ActivityLog.findMany({
     where,
@@ -120,7 +126,7 @@ export const getActivityFeed: GetActivityFeed<
  * Manually records a note in the activity log, optionally linked to a client.
  */
 export const addActivityNote: AddActivityNote<
-  { clientId?: string; message: string },
+  { clientId?: string; documentId?: string; message: string },
   void
 > = async (args, context) => {
   const companyId = ensureCompany(context.user);
@@ -139,6 +145,7 @@ export const addActivityNote: AddActivityNote<
       companyId,
       userId: context.user?.id ?? null,
       clientId: args.clientId ?? null,
+      documentId: args.documentId ?? null,
       type: 'note',
       message: args.message.trim(),
     },

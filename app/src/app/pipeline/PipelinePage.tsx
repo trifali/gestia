@@ -22,8 +22,8 @@ import {
   LuX,
   LuUser,
 } from 'react-icons/lu';
-import { PageHeader } from '../../client/ui';
-import { formatCurrency, formatDate } from '../../shared/format';
+import { PageHeader, Modal } from '../../client/ui';
+import { formatCurrency, formatDate, formatDateTime } from '../../shared/format';
 import type { PipelineDocument, ActivityFeedItem } from './operations';
 
 // ─── Status definitions ────────────────────────────────────────────────────
@@ -228,6 +228,8 @@ function KanbanBoard({
   docs: PipelineDocument[];
   columns: typeof QUOTE_COLUMNS;
 }) {
+  const [noteDoc, setNoteDoc] = useState<PipelineDocument | null>(null);
+
   const byStatus = new Map<string, PipelineDocument[]>();
   for (const col of columns) byStatus.set(col.status, []);
   for (const doc of docs) {
@@ -236,9 +238,7 @@ function KanbanBoard({
     }
   }
 
-  const total = docs.length;
-
-  if (total === 0) {
+  if (docs.length === 0) {
     return (
       <div className='rounded-xl border border-line bg-canvas px-6 py-10 text-center text-sm text-muted'>
         Aucun document dans ce pipeline pour le moment.
@@ -247,51 +247,70 @@ function KanbanBoard({
   }
 
   return (
-    <div className='overflow-x-auto pb-4'>
-      <div className='flex gap-4 min-w-max'>
-        {columns.map((col) => {
-          const cards = byStatus.get(col.status) || [];
-          return (
-            <div key={col.status} className='w-72 flex flex-col'>
-              {/* Column header */}
-              <div
-                className={`flex items-center justify-between px-3 py-2 rounded-t-lg border ${col.headerCls}`}
-              >
-                <span className='text-sm font-semibold text-ink'>{col.label}</span>
-                <span className='text-xs text-muted font-medium'>
-                  {cards.length} {cards.length === 1 ? 'doc' : 'docs'}
-                </span>
-              </div>
+    <>
+      <div className='overflow-x-auto pb-4'>
+        <div className='flex gap-4 min-w-max'>
+          {columns.map((col) => {
+            const cards = byStatus.get(col.status) || [];
+            return (
+              <div key={col.status} className='w-72 flex flex-col'>
+                {/* Column header */}
+                <div
+                  className={`flex items-center justify-between px-3 py-2 rounded-t-lg border ${col.headerCls}`}
+                >
+                  <span className='text-sm font-semibold text-ink'>{col.label}</span>
+                  <span className='text-xs text-muted font-medium'>
+                    {cards.length} {cards.length === 1 ? 'doc' : 'docs'}
+                  </span>
+                </div>
 
-              {/* Cards */}
-              <div
-                className={`flex flex-col gap-2 p-2 rounded-b-lg border border-t-0 min-h-24 ${col.headerCls} bg-opacity-30`}
-              >
-                {cards.length === 0 ? (
-                  <div className='text-xs text-muted text-center py-4 opacity-60'>—</div>
-                ) : (
-                  cards.map((doc) => <PipelineCard key={doc.id} doc={doc} badgeCls={col.badgeCls} />)
-                )}
+                {/* Cards */}
+                <div
+                  className={`flex flex-col gap-2 p-2 rounded-b-lg border border-t-0 min-h-24 ${col.headerCls} bg-opacity-30`}
+                >
+                  {cards.length === 0 ? (
+                    <div className='text-xs text-muted text-center py-4 opacity-60'>—</div>
+                  ) : (
+                    cards.map((doc) => (
+                      <PipelineCard
+                        key={doc.id}
+                        doc={doc}
+                        badgeCls={col.badgeCls}
+                        onOpenNotes={() => setNoteDoc(doc)}
+                      />
+                    ))
+                  )}
+                </div>
               </div>
-            </div>
-          );
-        })}
+            );
+          })}
+        </div>
       </div>
-    </div>
+
+      {noteDoc && (
+        <DocumentNoteModal doc={noteDoc} onClose={() => setNoteDoc(null)} />
+      )}
+    </>
   );
 }
 
 // ─── Pipeline Card ──────────────────────────────────────────────────────────
 
-function PipelineCard({ doc, badgeCls }: { doc: PipelineDocument; badgeCls: string }) {
+function PipelineCard({
+  doc,
+  badgeCls,
+  onOpenNotes,
+}: {
+  doc: PipelineDocument;
+  badgeCls: string;
+  onOpenNotes: () => void;
+}) {
   const now = new Date();
   const due = doc.dueDate ? new Date(doc.dueDate) : null;
   const isOverdue = due ? due < now : false;
   const daysUntilDue = due
     ? Math.ceil((due.getTime() - now.getTime()) / (1000 * 60 * 60 * 24))
     : null;
-  const remaining = doc.total - doc.amountPaid;
-
   const rawPhone = doc.clientPhone?.replace(/\s/g, '') || '';
 
   return (
@@ -355,31 +374,47 @@ function PipelineCard({ doc, badgeCls }: { doc: PipelineDocument; badgeCls: stri
         )}
       </div>
 
-      {/* Amount + due date */}
+      {/* Amount + due date + note button */}
       <div className='pt-1 border-t border-line/60 flex items-end justify-between gap-2'>
         <div>
           <div className='font-semibold text-sm text-ink'>{formatCurrency(doc.total)}</div>
           {doc.amountPaid > 0 && (
             <div className='text-xs text-muted'>
-              Solde : {formatCurrency(remaining)}
+              Solde : {formatCurrency(doc.total - doc.amountPaid)}
             </div>
           )}
         </div>
-        {due && (
-          <div
-            className={`text-right text-[10px] leading-tight ${
-              isOverdue
-                ? 'text-red-600 font-semibold'
-                : daysUntilDue !== null && daysUntilDue <= 7
-                ? 'text-amber-600 font-medium'
-                : 'text-muted'
-            }`}
+        <div className='flex items-end gap-2'>
+          {due && (
+            <div
+              className={`text-right text-[10px] leading-tight ${
+                isOverdue
+                  ? 'text-red-600 font-semibold'
+                  : daysUntilDue !== null && daysUntilDue <= 7
+                  ? 'text-amber-600 font-medium'
+                  : 'text-muted'
+              }`}
+            >
+              {isOverdue ? 'En retard' : daysUntilDue === 0 ? "Auj." : null}
+              <br />
+              {formatDate(doc.dueDate)}
+            </div>
+          )}
+          {/* Note button with badge */}
+          <button
+            type='button'
+            onClick={onOpenNotes}
+            title={doc.noteCount > 0 ? `${doc.noteCount} note${doc.noteCount > 1 ? 's' : ''}` : 'Ajouter une note'}
+            className='relative flex items-center justify-center w-7 h-7 rounded-lg text-muted hover:text-accent hover:bg-canvas transition-colors shrink-0'
           >
-            {isOverdue ? 'En retard' : daysUntilDue === 0 ? "Auj." : null}
-            <br />
-            {formatDate(doc.dueDate)}
-          </div>
-        )}
+            <LuStickyNote size={15} />
+            {doc.noteCount > 0 && (
+              <span className='absolute -top-1 -right-1 min-w-[14px] h-[14px] rounded-full bg-accent text-white text-[9px] font-bold flex items-center justify-center px-0.5 leading-none'>
+                {doc.noteCount > 9 ? '9+' : doc.noteCount}
+              </span>
+            )}
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -398,6 +433,116 @@ function statusLabel(s: string): string {
     annulee: 'Annulée',
   };
   return map[s] || s;
+}
+
+// ─── Document Note Modal ──────────────────────────────────────────────────
+
+function DocumentNoteModal({
+  doc,
+  onClose,
+}: {
+  doc: PipelineDocument;
+  onClose: () => void;
+}) {
+  const { data: notes, isLoading } = useQuery(getActivityFeed, {
+    documentId: doc.id,
+    limit: 50,
+  });
+  const [message, setMessage] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!message.trim()) return;
+    setSaving(true);
+    try {
+      await addActivityNote({
+        documentId: doc.id,
+        clientId: doc.clientId,
+        message: message.trim(),
+      });
+      toast.success('Note ajoutée');
+      setMessage('');
+    } catch (err: any) {
+      toast.error(err?.message || 'Erreur');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const docNotes = (notes || []).filter((n) => n.type === 'note');
+
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title={`Notes — ${doc.number}`}
+    >
+      <div className='flex flex-col gap-5'>
+        {/* Client context */}
+        <div className='text-xs text-muted flex items-center gap-1.5'>
+          <LuUser size={12} />
+          <Link to={`/clients/${doc.clientId}`} className='hover:text-accent hover:underline' onClick={onClose}>
+            {doc.clientName}
+          </Link>
+          <span>·</span>
+          <span className='badge-neutral text-[10px]'>{statusLabel(doc.status)}</span>
+          <span>·</span>
+          <span>{formatCurrency(doc.total)}</span>
+        </div>
+
+        {/* Add note form */}
+        <form onSubmit={handleSubmit} className='flex flex-col gap-2'>
+          <label className='label'>Nouvelle note</label>
+          <textarea
+            className='input'
+            rows={3}
+            placeholder="Ex: Relancé Jean par téléphone — intéressé, rappellera cette semaine…"
+            value={message}
+            onChange={(e) => setMessage(e.target.value)}
+            autoFocus
+          />
+          <div className='flex justify-end'>
+            <button type='submit' className='btn-primary' disabled={saving || !message.trim()}>
+              {saving ? 'Enregistrement…' : 'Enregistrer'}
+            </button>
+          </div>
+        </form>
+
+        {/* Existing notes */}
+        <div>
+          <p className='text-xs font-semibold text-muted uppercase tracking-wide mb-3'>
+            Historique des notes
+            {docNotes.length > 0 && <span className='ml-1 font-normal'>({docNotes.length})</span>}
+          </p>
+          {isLoading ? (
+            <div className='flex items-center gap-2 text-muted text-sm'>
+              <LuLoader size={14} className='animate-spin' />
+              Chargement…
+            </div>
+          ) : docNotes.length === 0 ? (
+            <p className='text-sm text-muted'>Aucune note pour ce document.</p>
+          ) : (
+            <ol className='space-y-3'>
+              {docNotes.map((n) => (
+                <li key={n.id} className='flex items-start gap-3 text-sm'>
+                  <div className='mt-0.5 shrink-0 w-6 h-6 rounded-full bg-canvas border border-line flex items-center justify-center text-muted'>
+                    <LuStickyNote size={12} />
+                  </div>
+                  <div className='flex-1 min-w-0'>
+                    <p className='text-ink leading-snug'>{n.message}</p>
+                    <p className='text-xs text-muted mt-0.5'>
+                      {formatDateTime(n.createdAt)}{n.userName ? ` · ${n.userName}` : ''}
+                    </p>
+                  </div>
+                </li>
+              ))}
+            </ol>
+          )}
+        </div>
+      </div>
+    </Modal>
+  );
 }
 
 // ─── Journal Tab ─────────────────────────────────────────────────────────────

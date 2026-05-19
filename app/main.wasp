@@ -768,7 +768,7 @@ query getDashboardStats {
 
 query getPipelineDocuments {
   fn: import { getPipelineDocuments } from "@src/app/pipeline/operations",
-  entities: [User, Document, Client]
+  entities: [User, Document, Client, ActivityLog]
 }
 
 query getActivityFeed {
