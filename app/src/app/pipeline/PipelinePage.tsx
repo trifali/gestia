@@ -6,6 +6,7 @@ import {
   addActivityNote,
   getCurrentCompany,
   getCompanyBrandAssets,
+  getProjects,
 } from 'wasp/client/operations';
 // @ts-ignore — generated after Wasp restart
 import { getDocumentById } from 'wasp/client/operations';
@@ -29,6 +30,7 @@ import {
 import { PageHeader, Modal } from '../../client/ui';
 import { formatCurrency, formatDate, formatDateTime } from '../../shared/format';
 import { SendDocumentEmailModal } from '../shared/SendDocumentEmailModal';
+import { DocumentForm } from '../shared/DocumentForm';
 import type { PipelineDocument, ActivityFeedItem } from './operations';
 
 // ─── Status definitions ────────────────────────────────────────────────────
@@ -235,6 +237,7 @@ function KanbanBoard({
 }) {
   const [noteDoc, setNoteDoc] = useState<PipelineDocument | null>(null);
   const [emailDocId, setEmailDocId] = useState<string | null>(null);
+  const [editDocId, setEditDocId] = useState<string | null>(null);
 
   const byStatus = new Map<string, PipelineDocument[]>();
   for (const col of columns) byStatus.set(col.status, []);
@@ -284,6 +287,7 @@ function KanbanBoard({
                         badgeCls={col.badgeCls}
                         onOpenNotes={() => setNoteDoc(doc)}
                         onOpenEmail={() => setEmailDocId(doc.id)}
+                        onEdit={() => setEditDocId(doc.id)}
                       />
                     ))
                   )}
@@ -301,6 +305,10 @@ function KanbanBoard({
       {emailDocId && (
         <DocumentEmailModal docId={emailDocId} onClose={() => setEmailDocId(null)} />
       )}
+
+      {editDocId && (
+        <DocumentEditModal docId={editDocId} onClose={() => setEditDocId(null)} />
+      )}
     </>
   );
 }
@@ -312,11 +320,13 @@ function PipelineCard({
   badgeCls,
   onOpenNotes,
   onOpenEmail,
+  onEdit,
 }: {
   doc: PipelineDocument;
   badgeCls: string;
   onOpenNotes: () => void;
   onOpenEmail: () => void;
+  onEdit: () => void;
 }) {
   const now = new Date();
   const due = doc.dueDate ? new Date(doc.dueDate) : null;
@@ -330,21 +340,27 @@ function PipelineCard({
     <div className='bg-white rounded-lg border border-line shadow-sm p-3 flex flex-col gap-2 hover:shadow-md transition-shadow'>
       {/* Header: number + status */}
       <div className='flex items-start justify-between gap-2'>
-        <Link
-          to={`/facturation?type=${doc.type === 'quote' ? 'quote' : 'invoice'}&search=${doc.number}`}
-          className='font-mono text-xs font-semibold text-ink hover:text-accent transition-colors leading-tight'
-        >
-          {doc.number}
-        </Link>
+        <div className='flex flex-col gap-0.5 min-w-0'>
+          <button
+            type='button'
+            onClick={onEdit}
+            className='font-mono text-xs font-semibold text-ink hover:text-accent transition-colors leading-tight text-left'
+          >
+            {doc.number}
+          </button>
+          {doc.title && (
+            <button
+              type='button'
+              onClick={onEdit}
+              className='text-xs text-muted hover:text-accent transition-colors leading-tight truncate text-left'
+              title={doc.title}
+            >
+              {doc.title}
+            </button>
+          )}
+        </div>
         <span className={`${badgeCls} text-[10px] shrink-0`}>{statusLabel(doc.status)}</span>
       </div>
-
-      {/* Title if present */}
-      {doc.title && (
-        <p className='text-xs text-muted leading-tight truncate' title={doc.title}>
-          {doc.title}
-        </p>
-      )}
 
       {/* Client */}
       <Link
@@ -460,6 +476,37 @@ function statusLabel(s: string): string {
     annulee: 'Annulée',
   };
   return map[s] || s;
+}
+
+// ─── Document Edit Modal ──────────────────────────────────────────────────
+
+function DocumentEditModal({ docId, onClose }: { docId: string; onClose: () => void }) {
+  const { data: doc, isLoading: docLoading } = useQuery(getDocumentById, { id: docId });
+  const { data: clients, isLoading: clientsLoading } = useQuery(getClients);
+  const { data: projects, isLoading: projectsLoading } = useQuery(getProjects);
+
+  const isLoading = docLoading || clientsLoading || projectsLoading;
+
+  if (isLoading || !doc) {
+    return (
+      <Modal open onClose={onClose} title='Modifier le document'>
+        <div className='flex items-center gap-2 text-muted text-sm py-4'>
+          <LuLoader size={16} className='animate-spin' />
+          Chargement…
+        </div>
+      </Modal>
+    );
+  }
+
+  return (
+    <DocumentForm
+      document={doc as any}
+      clients={clients as any}
+      projects={(projects as any) ?? []}
+      allowModeToggle={false}
+      onClose={onClose}
+    />
+  );
 }
 
 // ─── Document Email Modal ─────────────────────────────────────────────────
