@@ -10,6 +10,8 @@ import {
   updateDocumentStatus,
 } from 'wasp/client/operations';
 // @ts-ignore — generated after Wasp restart
+import { toggleDocumentStatusLock } from 'wasp/client/operations';
+// @ts-ignore — generated after Wasp restart
 import { getDocumentById } from 'wasp/client/operations';
 import { useState } from 'react';
 import { Link } from 'react-router';
@@ -29,6 +31,8 @@ import {
   LuUser,
   LuExternalLink,
   LuInfo,
+  LuLock,
+  LuLockOpen,
 } from 'react-icons/lu';
 import { PageHeader, Modal } from '../../client/ui';
 import { formatCurrency, formatDate, formatDateTime } from '../../shared/format';
@@ -50,6 +54,12 @@ const QUOTE_COLUMNS: { status: string; label: string; headerCls: string; badgeCl
     label: 'Envoyée',
     headerCls: 'bg-blue-50 border-blue-200',
     badgeCls: 'badge-info',
+  },
+  {
+    status: 'en_discussion',
+    label: 'En discussion',
+    headerCls: 'bg-violet-50 border-violet-200',
+    badgeCls: 'badge-accent',
   },
   {
     status: 'acceptee',
@@ -249,9 +259,14 @@ function KanbanBoard({
   // Optimistic local override so the card moves instantly before the server
   // confirms (reverted on error).
   const [optimisticStatus, setOptimisticStatus] = useState<Record<string, string>>({});
+  // Optimistic lock state: true/false overrides doc.statusLocked until next fetch
+  const [optimisticLocked, setOptimisticLocked] = useState<Record<string, boolean>>({});
 
   function effectiveStatus(doc: PipelineDocument): string {
     return optimisticStatus[doc.id] ?? doc.status;
+  }
+  function effectiveLocked(doc: PipelineDocument): boolean {
+    return optimisticLocked[doc.id] ?? doc.statusLocked;
   }
 
   const byStatus = new Map<string, PipelineDocument[]>();
@@ -259,6 +274,21 @@ function KanbanBoard({
   for (const doc of docs) {
     const s = effectiveStatus(doc);
     if (byStatus.has(s)) byStatus.get(s)!.push(doc);
+  }
+
+  async function handleToggleLock(docId: string) {
+    const doc = docs.find((d) => d.id === docId);
+    if (!doc) return;
+    const current = effectiveLocked(doc);
+    const next = !current;
+    setOptimisticLocked((prev) => ({ ...prev, [docId]: next }));
+    try {
+      await (toggleDocumentStatusLock as any)({ id: docId });
+      toast.success(next ? 'Statut verrouillé — la mise à jour automatique est désactivée' : 'Statut déverrouillé');
+    } catch (err: any) {
+      setOptimisticLocked((prev) => ({ ...prev, [docId]: current }));
+      toast.error(err?.message || 'Impossible de modifier le verrou');
+    }
   }
 
   async function handleDrop(targetStatus: string) {
@@ -345,7 +375,7 @@ function KanbanBoard({
                     cards.map((doc) => (
                       <PipelineCard
                         key={doc.id}
-                        doc={{ ...doc, status: effectiveStatus(doc) }}
+                        doc={{ ...doc, status: effectiveStatus(doc), statusLocked: effectiveLocked(doc) }}
                         badgeCls={col.badgeCls}
                         isDragging={draggingId === doc.id}
                         onDragStart={() => setDraggingId(doc.id)}
@@ -353,6 +383,7 @@ function KanbanBoard({
                         onOpenNotes={() => setNoteDoc(doc)}
                         onOpenEmail={() => setEmailDocId(doc.id)}
                         onEdit={() => setEditDocId(doc.id)}
+                        onToggleLock={() => handleToggleLock(doc.id)}
                       />
                     ))
                   )}
@@ -393,6 +424,7 @@ function PipelineCard({
   onOpenNotes,
   onOpenEmail,
   onEdit,
+  onToggleLock,
 }: {
   doc: PipelineDocument;
   badgeCls: string;
@@ -402,6 +434,7 @@ function PipelineCard({
   onOpenNotes: () => void;
   onOpenEmail: () => void;
   onEdit: () => void;
+  onToggleLock: () => void;
 }) {
   const now = new Date();
   const due = doc.dueDate ? new Date(doc.dueDate) : null;
@@ -546,6 +579,19 @@ function PipelineCard({
               </span>
             )}
           </button>
+          {/* Lock button — prevents cron from auto-changing status */}
+          <button
+            type='button'
+            onClick={(e) => { e.stopPropagation(); onToggleLock(); }}
+            title={doc.statusLocked ? 'Statut verrouillé (clic pour déverrouiller)' : 'Verrouiller le statut (protéger des mises à jour automatiques)'}
+            className={`flex items-center justify-center w-7 h-7 rounded-lg transition-colors shrink-0 ${
+              doc.statusLocked
+                ? 'text-amber-500 bg-amber-50 hover:bg-amber-100'
+                : 'text-muted hover:text-amber-500 hover:bg-canvas'
+            }`}
+          >
+            {doc.statusLocked ? <LuLock size={14} /> : <LuLockOpen size={14} />}
+          </button>
         </div>
       </div>
     </div>
@@ -556,6 +602,7 @@ function statusLabel(s: string): string {
   const map: Record<string, string> = {
     brouillon: 'Brouillon',
     envoyee: 'Envoyée',
+    en_discussion: 'En discussion',
     acceptee: 'Acceptée',
     refusee: 'Refusée',
     expiree: 'Expirée',

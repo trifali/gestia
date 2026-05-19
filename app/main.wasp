@@ -474,6 +474,10 @@ action updateDocumentStatus {
   fn: import { updateDocumentStatus } from "@src/app/documents/operations",
   entities: [User, Document, ActivityLog]
 }
+action toggleDocumentStatusLock {
+  fn: import { toggleDocumentStatusLock } from "@src/app/documents/operations",
+  entities: [User, Document]
+}
 action setDocumentType {
   fn: import { setDocumentType } from "@src/app/documents/operations",
   entities: [User, Document, ActivityLog]

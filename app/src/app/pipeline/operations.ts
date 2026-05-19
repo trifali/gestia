@@ -19,6 +19,7 @@ export type PipelineDocument = {
   title: string | null;
   type: string;
   status: string;
+  statusLocked: boolean;
   total: number;
   amountPaid: number;
   dueDate: Date | null;
@@ -79,6 +80,7 @@ export const getPipelineDocuments: GetPipelineDocuments<void, PipelineDocument[]
     title: d.title,
     type: d.type,
     status: d.status,
+    statusLocked: d.statusLocked ?? false,
     total: d.total,
     amountPaid: d.amountPaid,
     dueDate: d.dueDate,

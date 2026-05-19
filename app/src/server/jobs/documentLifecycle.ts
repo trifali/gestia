@@ -28,6 +28,7 @@ export const sweepDocumentLifecycles: DocumentLifecycleSweep<
       where: {
         type: 'quote',
         status: 'envoyee',
+        statusLocked: false,
         dueDate: { lt: now, not: null },
       },
       select: { id: true, companyId: true, clientId: true, number: true },

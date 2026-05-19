@@ -34,7 +34,7 @@ const PREFIX: Record<DocumentType, string> = { quote: 'S', invoice: 'F' };
 
 // Allowed statuses per document type. Used for client-side dropdowns and
 // server-side validation.
-export const QUOTE_STATUSES = ['brouillon', 'envoyee', 'acceptee', 'refusee', 'expiree'] as const;
+export const QUOTE_STATUSES = ['brouillon', 'envoyee', 'en_discussion', 'acceptee', 'refusee', 'expiree'] as const;
 export const INVOICE_STATUSES = [
   'brouillon',
   'envoyee',
@@ -191,6 +191,16 @@ export const updateDocumentStatus: UpdateDocumentStatus<{ id: string; status: st
     });
   }
   return updated;
+};
+
+export const toggleDocumentStatusLock = async ({ id }: { id: string }, context: any) => {
+  const companyId = ensureCompany(context.user);
+  const doc = await context.entities.Document.findUnique({ where: { id } });
+  if (!doc || doc.companyId !== companyId) throw new HttpError(404);
+  return context.entities.Document.update({
+    where: { id },
+    data: { statusLocked: !doc.statusLocked },
+  });
 };
 
 type UpdateDocumentArgs = {

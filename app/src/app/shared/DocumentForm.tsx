@@ -19,6 +19,7 @@ export type DocumentMode = 'quote' | 'invoice';
 const QUOTE_STATUSES = [
   { value: 'brouillon', label: 'Brouillon' },
   { value: 'envoyee', label: 'Envoyée' },
+  { value: 'en_discussion', label: 'En discussion' },
   { value: 'acceptee', label: 'Acceptée' },
   { value: 'refusee', label: 'Refusée' },
   { value: 'expiree', label: 'Expirée' },
