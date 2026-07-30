@@ -7,6 +7,7 @@ import type {
 } from 'wasp/server/operations';
 import type { Company } from 'wasp/entities';
 import { requireAdmin } from '../../server/tenant';
+import { getDefaultFromEmail } from '../../server/mail';
 
 export const getCurrentCompany: GetCurrentCompany<void, (Company & { _userRole: string }) | null> = async (
   _args,
@@ -17,6 +18,15 @@ export const getCurrentCompany: GetCurrentCompany<void, (Company & { _userRole: 
   const company = await context.entities.Company.findUnique({ where: { id: context.user.companyId } });
   if (!company) return null;
   return { ...company, _userRole: (context.user as any).role || 'client' };
+};
+
+/**
+ * The address outgoing mail is actually sent from. Lives on our own domain for
+ * SPF/DKIM, so email previews can show a truthful `From` header.
+ */
+export const getMailSenderAddress = async (_args: void, context: any): Promise<{ fromEmail: string }> => {
+  if (!context.user) throw new HttpError(401);
+  return { fromEmail: getDefaultFromEmail() };
 };
 
 type CreateCompanyArgs = { name: string };

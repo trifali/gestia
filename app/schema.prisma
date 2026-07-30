@@ -559,6 +559,10 @@ model LeadEmailLog {
   to         String
   cc         String?
   subject    String
+  body       String  @default("") // full message as sent, for preview
+  replyTo    String? // where the prospect's reply lands
+  fromName   String? // display name used in the From header
+  fromEmail  String? // address used in the From header
 
   @@index([companyId, identifier])
 }

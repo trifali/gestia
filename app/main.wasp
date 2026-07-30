@@ -207,6 +207,10 @@ query getCurrentCompany {
   fn: import { getCurrentCompany } from "@src/app/company/operations",
   entities: [User, Company]
 }
+query getMailSenderAddress {
+  fn: import { getMailSenderAddress } from "@src/app/company/operations",
+  entities: [User]
+}
 action updateCompany {
   fn: import { updateCompany } from "@src/app/company/operations",
   entities: [User, Company]
@@ -659,6 +663,10 @@ action deleteLeadNote {
 action sendProspectEmail {
   fn: import { sendProspectEmail } from "@src/app/leads/operations",
   entities: [User, Company, LeadEmailLog, LeadEmailDraft]
+}
+query getLeadEmailLogs {
+  fn: import { getLeadEmailLogs } from "@src/app/leads/operations",
+  entities: [User, LeadEmailLog]
 }
 query getLeadEmailDraft {
   fn: import { getLeadEmailDraft } from "@src/app/leads/operations",

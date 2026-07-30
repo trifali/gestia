@@ -1,6 +1,6 @@
 import { HttpError } from 'wasp/server';
 import { randomBytes } from 'crypto';
-import { sendEmailWithAttachment } from '../../server/mail';
+import { sendEmailWithAttachment, getDefaultFromEmail } from '../../server/mail';
 import type {
   GetLeadSearches,
   GetLeadSearchDetail,
@@ -663,13 +663,19 @@ export const sendProspectEmail = async (
     .replace(/>/g, '&gt;')
     .replace(/\n/g, '<br/>')}</div>`;
 
+  // The From address stays on our own domain (SPF/DKIM), so replies are routed
+  // back to the company via Reply-To instead.
+  const fromName = company?.name || 'Gestia';
+  const replyTo = company?.email?.trim() || undefined;
+
   await sendEmailWithAttachment({
     to,
     cc: args.cc?.trim() || undefined,
     subject: args.subject.trim(),
     text: args.body,
     html,
-    fromName: company?.name || 'Gestia',
+    fromName,
+    replyTo,
   });
 
   // Log the sent email
@@ -680,6 +686,10 @@ export const sendProspectEmail = async (
       to,
       cc: args.cc?.trim() || null,
       subject: args.subject.trim(),
+      body: args.body,
+      replyTo: replyTo ?? null,
+      fromName,
+      fromEmail: getDefaultFromEmail(),
     },
   });
 
@@ -689,6 +699,17 @@ export const sendProspectEmail = async (
   });
 
   return { ok: true };
+};
+
+export const getLeadEmailLogs = async (
+  { identifier }: { identifier: string },
+  context: any,
+): Promise<any[]> => {
+  const companyId = ensureCompany(context.user);
+  return (context.entities as any).LeadEmailLog.findMany({
+    where: { companyId, identifier },
+    orderBy: { createdAt: 'desc' },
+  });
 };
 
 export const getLeadEmailDraft = async (

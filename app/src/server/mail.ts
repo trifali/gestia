@@ -26,6 +26,11 @@ function getTransport(): any {
   return cached!;
 }
 
+/** The address every outgoing mail is sent from (our own SPF/DKIM-signed domain). */
+export function getDefaultFromEmail(): string {
+  return process.env.SMTP_USERNAME || 'no-reply@trifali.app';
+}
+
 export type Attachment = {
   filename: string;
   /** Base64-encoded content. */
@@ -46,7 +51,7 @@ export async function sendEmailWithAttachment(params: {
 }): Promise<void> {
   const transport = getTransport();
   const fromName = params.fromName || 'Gestia';
-  const fromEmail = params.fromEmail || process.env.SMTP_USERNAME || 'no-reply@trifali.app';
+  const fromEmail = params.fromEmail || getDefaultFromEmail();
   await transport.sendMail({
     from: `"${fromName}" <${fromEmail}>`,
     to: params.to,
