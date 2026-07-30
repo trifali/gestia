@@ -33,7 +33,8 @@ export default function ClientsPage() {
   const { ask, Dialog: ConfirmDialog } = useConfirm();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
-  const filterStatus = searchParams.get('status') ?? '';
+  // Par défaut on n'affiche que les clients actifs ; 'all' pour tous les statuts.
+  const filterStatus = searchParams.get('status') ?? 'actif';
   const [search, setSearch] = useState(() => searchParams.get('q') ?? '');
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
 
@@ -48,7 +49,7 @@ export default function ClientsPage() {
   const [creating, setCreating] = useState(false);
 
   const filtered = (clients || []).filter((c) => {
-    if (filterStatus && c.status !== filterStatus) return false;
+    if (filterStatus !== 'all' && c.status !== filterStatus) return false;
     if (search && !c.name.toLowerCase().includes(search.toLowerCase()) && !(c.email || '').toLowerCase().includes(search.toLowerCase()) && !(c.contactName || '').toLowerCase().includes(search.toLowerCase())) return false;
     return true;
   });
@@ -83,17 +84,17 @@ export default function ClientsPage() {
             const v = e.target.value;
             setSearchParams(prev => {
               const next = new URLSearchParams(prev);
-              if (v) next.set('status', v); else next.delete('status');
+              next.set('status', v);
               return next;
             }, { replace: true });
           }}
         >
-          <option value=''>Tous les statuts</option>
+          <option value='all'>Tous les statuts</option>
           {Object.entries(STATUS).map(([val, { label }]) => (
             <option key={val} value={val}>{label}</option>
           ))}
         </select>
-        {(search || filterStatus) && (
+        {(search || filterStatus !== 'actif') && (
           <button
             className='p-1.5 rounded-md text-muted hover:text-ink hover:bg-canvas transition-colors shrink-0'
             title='Réinitialiser les filtres'

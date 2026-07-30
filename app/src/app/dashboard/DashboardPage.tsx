@@ -2,7 +2,7 @@ import { useQuery, getDashboardStats, getCurrentCompany, createCompany } from 'w
 import { Link } from 'react-router';
 import { useState } from 'react';
 import toast from 'react-hot-toast';
-import { LuTriangleAlert, LuClock } from 'react-icons/lu';
+import { LuTriangleAlert, LuClock, LuChevronDown, LuChevronUp } from 'react-icons/lu';
 import { PageHeader, EmptyState } from '../../client/ui';
 import { MagicInput } from '../../client/magic';
 import { formatCurrency, formatDate, formatTime } from '../../shared/format';
@@ -87,42 +87,28 @@ export default function DashboardPage() {
               ) : (
                 <>
                   {stats.overdueInvoices.length > 0 && (
-                    <div className='rounded-xl border border-red-200 bg-red-50 overflow-hidden'>
-                      <div className='flex items-center gap-2 px-5 py-3 bg-red-100 border-b border-red-200'>
-                        <LuTriangleAlert className='text-red-600 shrink-0' size={18} />
-                        <h2 className='font-semibold text-red-800'>
-                          {stats.overdueInvoices.length} facture{stats.overdueInvoices.length > 1 ? 's' : ''} en retard
-                        </h2>
-                        <div className='ml-auto flex items-center gap-3 shrink-0'>
-                          <span className='text-xs text-red-600 hidden sm:inline'>La date d'échéance est dépassée — contactez le client</span>
-                          <Link to='/suivi' className='text-xs font-semibold text-red-700 hover:underline whitespace-nowrap'>Gérer dans le suivi →</Link>
-                        </div>
-                      </div>
-                      <ul className='divide-y divide-red-100'>
-                        {stats.overdueInvoices.map((doc) => (
-                          <AlertRow key={doc.id} doc={doc} clientLinkTo={`/clients/${doc.clientId}?tab=documents&type=invoice&status=en_retard`} amountValue={doc.total - doc.amountPaid} />
-                        ))}
-                      </ul>
-                    </div>
+                    <AlertCard
+                      tone='red'
+                      icon={LuTriangleAlert}
+                      title={`${stats.overdueInvoices.length} facture${stats.overdueInvoices.length > 1 ? 's' : ''} en retard`}
+                      hint="La date d'échéance est dépassée — contactez le client"
+                    >
+                      {stats.overdueInvoices.map((doc) => (
+                        <AlertRow key={doc.id} doc={doc} clientLinkTo={`/clients/${doc.clientId}?tab=documents&type=invoice&status=en_retard`} amountValue={doc.total - doc.amountPaid} />
+                      ))}
+                    </AlertCard>
                   )}
                   {stats.expiredQuotes.length > 0 && (
-                    <div className='rounded-xl border border-amber-200 bg-amber-50 overflow-hidden'>
-                      <div className='flex items-center gap-2 px-5 py-3 bg-amber-100 border-b border-amber-200'>
-                        <LuClock className='text-amber-600 shrink-0' size={18} />
-                        <h2 className='font-semibold text-amber-800'>
-                          {stats.expiredQuotes.length} soumission{stats.expiredQuotes.length > 1 ? 's' : ''} expirée{stats.expiredQuotes.length > 1 ? 's' : ''}
-                        </h2>
-                        <div className='ml-auto flex items-center gap-3 shrink-0'>
-                          <span className='text-xs text-amber-700 hidden sm:inline'>Date d'échéance dépassée — relancez ou fermez</span>
-                          <Link to='/suivi' className='text-xs font-semibold text-amber-800 hover:underline whitespace-nowrap'>Gérer dans le suivi →</Link>
-                        </div>
-                      </div>
-                      <ul className='divide-y divide-amber-100'>
-                        {stats.expiredQuotes.map((doc) => (
-                          <AlertRow key={doc.id} doc={doc} clientLinkTo={`/clients/${doc.clientId}?tab=documents&type=quote&status=expiree`} amountValue={doc.total} />
-                        ))}
-                      </ul>
-                    </div>
+                    <AlertCard
+                      tone='amber'
+                      icon={LuClock}
+                      title={`${stats.expiredQuotes.length} soumission${stats.expiredQuotes.length > 1 ? 's' : ''} expirée${stats.expiredQuotes.length > 1 ? 's' : ''}`}
+                      hint="Date d'échéance dépassée — relancez ou fermez"
+                    >
+                      {stats.expiredQuotes.map((doc) => (
+                        <AlertRow key={doc.id} doc={doc} clientLinkTo={`/clients/${doc.clientId}?tab=documents&type=quote&status=expiree`} amountValue={doc.total} />
+                      ))}
+                    </AlertCard>
                   )}
                 </>
               )}
@@ -221,6 +207,79 @@ export default function DashboardPage() {
         </>
       )}
     </>
+  );
+}
+
+const ALERT_TONES = {
+  red: {
+    card: 'border-red-200 bg-red-50',
+    header: 'bg-red-100 hover:bg-red-200/70',
+    border: 'border-red-200',
+    icon: 'text-red-600',
+    title: 'text-red-800',
+    hint: 'text-red-600',
+    link: 'text-red-700',
+    divide: 'divide-red-100',
+  },
+  amber: {
+    card: 'border-amber-200 bg-amber-50',
+    header: 'bg-amber-100 hover:bg-amber-200/70',
+    border: 'border-amber-200',
+    icon: 'text-amber-600',
+    title: 'text-amber-800',
+    hint: 'text-amber-700',
+    link: 'text-amber-800',
+    divide: 'divide-amber-100',
+  },
+} as const;
+
+/** Carte d'alerte repliée par défaut : seul l'entête (nombre + action) est visible. */
+function AlertCard({
+  tone,
+  icon: Icon,
+  title,
+  hint,
+  children,
+}: {
+  tone: keyof typeof ALERT_TONES;
+  icon: React.ComponentType<{ className?: string; size?: number }>;
+  title: string;
+  hint: string;
+  children: React.ReactNode;
+}) {
+  const [open, setOpen] = useState(false);
+  const t = ALERT_TONES[tone];
+  return (
+    <div className={`rounded-xl border overflow-hidden ${t.card}`}>
+      <div
+        role='button'
+        tabIndex={0}
+        aria-expanded={open}
+        onClick={() => setOpen((o) => !o)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            setOpen((o) => !o);
+          }
+        }}
+        className={`flex items-center gap-2 px-5 py-3 cursor-pointer transition-colors ${t.header} ${open ? `border-b ${t.border}` : ''}`}
+      >
+        <Icon className={`shrink-0 ${t.icon}`} size={18} />
+        <h2 className={`font-semibold ${t.title}`}>{title}</h2>
+        <div className='ml-auto flex items-center gap-3 shrink-0'>
+          <span className={`text-xs hidden sm:inline ${t.hint}`}>{hint}</span>
+          <Link
+            to='/suivi'
+            onClick={(e) => e.stopPropagation()}
+            className={`text-xs font-semibold hover:underline whitespace-nowrap ${t.link}`}
+          >
+            Gérer dans le suivi →
+          </Link>
+          {open ? <LuChevronUp className={t.icon} size={16} /> : <LuChevronDown className={t.icon} size={16} />}
+        </div>
+      </div>
+      {open && <ul className={`divide-y ${t.divide}`}>{children}</ul>}
+    </div>
   );
 }
 

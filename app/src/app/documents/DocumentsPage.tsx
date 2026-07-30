@@ -12,13 +12,15 @@ import { DocumentTable } from '../shared/DocumentTable';
 export default function DocumentsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const rawType = searchParams.get('type');
-  const initialType = rawType === 'quote' || rawType === 'invoice' ? rawType : '';
+  // Par défaut on affiche les factures ; 'all' dans l'URL pour tous les types.
+  const initialType =
+    rawType === 'quote' || rawType === 'invoice' ? rawType : rawType === 'all' ? '' : 'invoice';
   const initialStatus = searchParams.get('status') ?? '';
 
   const handleFiltersChange = useCallback((type: string, status: string) => {
     setSearchParams((prev) => {
       const next = new URLSearchParams(prev);
-      if (type) next.set('type', type); else next.delete('type');
+      next.set('type', type || 'all');
       if (status) next.set('status', status); else next.delete('status');
       return next;
     }, { replace: true });

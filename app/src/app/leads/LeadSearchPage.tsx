@@ -1939,7 +1939,7 @@ function LeadsTable({ searchId, onBack, onShowDetails }: { searchId: string; onB
       });
       toast.success(`${lead.name} ajouté comme client`);
       setConvertTarget(null);
-      navigate(`/clients?q=${encodeURIComponent(lead.name)}`);
+      navigate(`/clients?q=${encodeURIComponent(lead.name)}&status=prospect`);
     } catch (e: any) {
       toast.error(e?.message ?? 'Erreur lors de la création du client');
     } finally {
