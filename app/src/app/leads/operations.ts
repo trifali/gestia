@@ -140,7 +140,7 @@ export const getLeadSearchDetail: GetLeadSearchDetail<
   const companyId = ensureCompany(context.user);
   const search = await context.entities.LeadSearch.findUnique({
     where: { id: searchId },
-    include: { leads: { orderBy: { createdAt: 'asc' } } },
+    include: { leads: { orderBy: [{ order: 'asc' }, { createdAt: 'asc' }] } },
   });
   if (!search || search.companyId !== companyId) throw new HttpError(404);
 
@@ -368,9 +368,10 @@ export const searchLeads: SearchLeads<
       status: 'done',
       totalFound: rawLeads.length,
       leads: {
-        create: rawLeads.map(l => {
+        create: rawLeads.map((l, i) => {
           const saved = l.placeId ? statusMap.get(l.placeId) : undefined;
           return {
+            order: i,
             name: l.name,
             address: l.address ?? null,
             phone: l.phone ?? null,
@@ -390,7 +391,7 @@ export const searchLeads: SearchLeads<
         }),
       },
     },
-    include: { leads: { orderBy: { createdAt: 'asc' } } },
+    include: { leads: { orderBy: [{ order: 'asc' }, { createdAt: 'asc' }] } },
   });
 
   return savedSearch as any;
@@ -438,6 +439,53 @@ export const updateLead: UpdateLead<
   return updated;
 };
 
+// ─── Manual card order inside a kanban column ────────────────────────────────
+
+// Rewrites the `order` of one column. `orderedIds` is that column exactly as the
+// client displays it. Leads of the column that are missing from the list (hidden
+// by a search filter) keep the slots they already occupy, so reordering a
+// filtered board never shuffles the cards the user cannot see.
+async function applyLeadOrder(
+  entities: any,
+  searchId: string,
+  status: string,
+  orderedIds: string[],
+): Promise<void> {
+  const column: { id: string; order: number }[] = await entities.Lead.findMany({
+    where: { searchId, status },
+    orderBy: [{ order: 'asc' }, { createdAt: 'asc' }],
+    select: { id: true, order: true },
+  });
+
+  const present = new Set(column.map(c => c.id));
+  const moved = orderedIds.filter(id => present.has(id));
+  const slots = column.map((c, i) => (moved.includes(c.id) ? i : -1)).filter(i => i >= 0);
+
+  const final = column.map(c => c.id);
+  slots.forEach((slot, i) => {
+    final[slot] = moved[i];
+  });
+
+  const currentOrder = new Map(column.map(c => [c.id, c.order]));
+  await Promise.all(
+    final
+      .map((id, i) => (currentOrder.get(id) === i ? null : { id, order: i }))
+      .filter((u): u is { id: string; order: number } => u !== null)
+      .map(u => entities.Lead.update({ where: { id: u.id }, data: { order: u.order } })),
+  );
+}
+
+export const reorderLeads = async (
+  { searchId, status, orderedIds }: { searchId: string; status: string; orderedIds: string[] },
+  context: any,
+): Promise<{ ok: true }> => {
+  const companyId = ensureCompany(context.user);
+  const search = await context.entities.LeadSearch.findUnique({ where: { id: searchId } });
+  if (!search || search.companyId !== companyId) throw new HttpError(404);
+  await applyLeadOrder(context.entities, searchId, status, orderedIds);
+  return { ok: true };
+};
+
 export const deleteLeadSearch: DeleteLeadSearch<{ id: string }, { id: string }> = async (
   { id },
   context,
@@ -471,7 +519,7 @@ export const exportLeads: ExportLeads<{ searchId: string }, { csv: string }> = a
   const companyId = ensureCompany(context.user);
   const search = await context.entities.LeadSearch.findUnique({
     where: { id: searchId },
-    include: { leads: { orderBy: { createdAt: 'asc' } } },
+    include: { leads: { orderBy: [{ order: 'asc' }, { createdAt: 'asc' }] } },
   });
   if (!search || search.companyId !== companyId) throw new HttpError(404);
 
@@ -937,10 +985,17 @@ export const fetchMoreLeads = async (
   );
   rawLeads = rawLeads.map((l, i) => ({ ...l, email: emailResults[i] || null }));
 
-  // Insert new leads into existing search
+  // Insert new leads into existing search, after every lead already there.
+  const maxOrder = await context.entities.Lead.aggregate({
+    where: { searchId },
+    _max: { order: true },
+  });
+  const orderBase = (maxOrder._max.order ?? -1) + 1;
+
   await context.entities.Lead.createMany({
-    data: rawLeads.map(l => ({
+    data: rawLeads.map((l, i) => ({
       searchId,
+      order: orderBase + i,
       name: l.name,
       address: l.address ?? null,
       phone: l.phone ?? null,
@@ -1051,7 +1106,7 @@ export const getLeadSearchByToken = async (
   const shareToken = await validateShareToken(token, context.entities);
   const search = await context.entities.LeadSearch.findUnique({
     where: { id: shareToken.searchId },
-    include: { leads: { orderBy: { createdAt: 'asc' } } },
+    include: { leads: { orderBy: [{ order: 'asc' }, { createdAt: 'asc' }] } },
   });
   if (!search) throw new HttpError(404);
 
@@ -1115,6 +1170,17 @@ export const updateLeadByToken = async (
   if (rest.category !== undefined) updateData.category = rest.category || null;
 
   return context.entities.Lead.update({ where: { id: leadId }, data: updateData });
+};
+
+// ─── reorderLeadsByToken (public – no auth) ──────────────────────────────────
+
+export const reorderLeadsByToken = async (
+  { token, status, orderedIds }: { token: string; status: string; orderedIds: string[] },
+  context: any,
+): Promise<{ ok: true }> => {
+  const shareToken = await validateShareToken(token, context.entities);
+  await applyLeadOrder(context.entities, shareToken.searchId, status, orderedIds);
+  return { ok: true };
 };
 
 // ─── deleteLeadByToken (public – no auth) ────────────────────────────────────

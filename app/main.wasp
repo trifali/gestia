@@ -616,6 +616,10 @@ action updateLead {
   fn: import { updateLead } from "@src/app/leads/operations",
   entities: [User, LeadSearch, Lead, ProspectStatus]
 }
+action reorderLeads {
+  fn: import { reorderLeads } from "@src/app/leads/operations",
+  entities: [User, LeadSearch, Lead]
+}
 action deleteLeadSearch {
   fn: import { deleteLeadSearch } from "@src/app/leads/operations",
   entities: [User, LeadSearch]
@@ -718,6 +722,10 @@ query getLeadSearchByToken {
 }
 action updateLeadByToken {
   fn: import { updateLeadByToken } from "@src/app/leads/operations",
+  entities: [Lead, LeadSearch, LeadSearchShareToken]
+}
+action reorderLeadsByToken {
+  fn: import { reorderLeadsByToken } from "@src/app/leads/operations",
   entities: [Lead, LeadSearch, LeadSearchShareToken]
 }
 action deleteLeadByToken {

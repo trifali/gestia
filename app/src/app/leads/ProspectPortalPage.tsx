@@ -8,6 +8,8 @@ import {
   // @ts-ignore
   updateLeadByToken,
   // @ts-ignore
+  reorderLeadsByToken,
+  // @ts-ignore
   deleteLeadByToken,
   // @ts-ignore
   addLeadNoteByToken,
@@ -226,6 +228,10 @@ export default function ProspectPortalPage() {
     await (updateLeadByToken as any)({ token: token!, leadId, status: newStatus });
   }
 
+  async function reorder(status: string, orderedIds: string[]) {
+    await (reorderLeadsByToken as any)({ token: token!, status, orderedIds });
+  }
+
   async function handleDeleteLead() {
     if (!deleteTarget) return;
     setDeleting(true);
@@ -296,6 +302,7 @@ export default function ProspectPortalPage() {
         leads={filteredLeads}
         statusConfigs={statusConfigs}
         updateStatus={updateStatus}
+        reorder={reorder}
         refetch={refetch}
         cardActions={lead => (
           <div className='flex items-center gap-1'>

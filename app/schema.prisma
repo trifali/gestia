@@ -479,6 +479,7 @@ model Lead {
   notes           String?
   status          String    @default("nouveau") // nouveau | contacte | qualifie | rejete
   statusUpdatedAt DateTime?
+  order           Int       @default(0) // manual position inside its kanban column
 
   @@index([searchId])
 }

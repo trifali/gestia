@@ -494,6 +494,7 @@ export function LeadKanbanBoard({
   leads,
   statusConfigs,
   updateStatus,
+  reorder,
   refetch,
   cardActions,
   columnExtra,
@@ -508,6 +509,11 @@ export function LeadKanbanBoard({
   statusConfigs: any[];
   /** API call only — no toast, no refetch. Throws on error. */
   updateStatus: (leadId: string, newStatus: string) => Promise<void>;
+  /**
+   * Persists the manual card order of one column, `orderedIds` being the column
+   * exactly as displayed. API call only — no toast, no refetch. Throws on error.
+   */
+  reorder?: (status: string, orderedIds: string[]) => Promise<void>;
   refetch: () => void;
   /** Action buttons rendered inside each card's actions area. */
   cardActions: (lead: any) => ReactNode;
@@ -528,6 +534,10 @@ export function LeadKanbanBoard({
   // Stable refs so callbacks stay referentially stable across re-renders.
   const updateStatusRef = useRef(updateStatus);
   updateStatusRef.current = updateStatus;
+  const reorderRef = useRef(reorder);
+  reorderRef.current = reorder;
+  const leadsRef = useRef(leads);
+  leadsRef.current = leads;
   const refetchRef = useRef(refetch);
   refetchRef.current = refetch;
   const cardActionsRef = useRef(cardActions);
@@ -596,6 +606,14 @@ export function LeadKanbanBoard({
 
   async function handleDragStop(args: any) {
     if (!args?.data?.length) return;
+
+    // Syncfusion reports the slot the card was dropped into, counted among the
+    // target column's other cards. Captured before any await, since the board
+    // re-renders as soon as the status round-trip lands.
+    const targetStatus = args.data[0].status;
+    const movedIds = args.data.map((c: any) => c.id);
+    const dropIndex = typeof args.dropIndex === 'number' && args.dropIndex >= 0 ? args.dropIndex : null;
+
     for (const card of args.data) {
       try {
         await updateStatusRef.current(card.id, card.status);
@@ -605,6 +623,22 @@ export function LeadKanbanBoard({
         return;
       }
     }
+
+    // Without this the card would snap back to its stored position on the next
+    // refetch instead of staying where it was dropped.
+    if (reorderRef.current) {
+      const moved = new Set<string>(movedIds);
+      const columnIds = leadsRef.current
+        .filter((l: any) => l.status === targetStatus && !moved.has(l.id))
+        .map((l: any) => l.id);
+      columnIds.splice(dropIndex ?? columnIds.length, 0, ...movedIds);
+      try {
+        await reorderRef.current(targetStatus, columnIds);
+      } catch {
+        toast.error("Erreur lors de la mise à jour de l'ordre");
+      }
+    }
+
     refetchRef.current();
   }
 
