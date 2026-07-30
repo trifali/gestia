@@ -303,6 +303,13 @@ body {
   animation: shimmer-badge 3s linear infinite;
 }
 
+/* ─── Prospection kanban: card selected in the detail panel ───────────────── */
+.gestia-kanban .e-card.gestia-card-selected {
+  outline: 2px solid #ff6a3d;
+  outline-offset: -2px;
+  box-shadow: 0 4px 16px -4px rgb(10 10 11 / 0.18);
+}
+
 .feature-card {
   transition:
     transform 0.25s cubic-bezier(0.22, 1, 0.36, 1),

@@ -73,8 +73,10 @@ import {
   LeadCardInfo,
   LeadKanbanBoard,
   LeadDeleteConfirmModal,
+  CopyBtn,
   type LeadFormValues,
 } from './leads.shared';
+import { LeadDetailPanel } from './LeadDetailPanel';
 import {
   LuSearch,
   LuDownload,
@@ -267,26 +269,6 @@ function StatusDropdown({ lead, statusConfigs, onRefetch }: { lead: Lead; status
         </div>
       )}
     </div>
-  );
-}
-
-// ─── Copy button ──────────────────────────────────────────────────────────────
-
-function CopyBtn({ text }: { text: string }) {
-  const [copied, setCopied] = useState(false);
-  if (!text) return null;
-  return (
-    <button
-      title='Copier'
-      className='inline-flex items-center justify-center w-6 h-6 rounded hover:bg-canvas transition-colors text-muted hover:text-ink'
-      onClick={() => {
-        navigator.clipboard.writeText(text);
-        setCopied(true);
-        setTimeout(() => setCopied(false), 1500);
-      }}
-    >
-      {copied ? <LuCheck size={12} className='text-green-600' /> : <LuCopy size={12} />}
-    </button>
   );
 }
 
@@ -1486,10 +1468,11 @@ function LeadsKanban({
   searchTitle,
   searchPurpose,
   refetch,
-  onEdit,
   onNote,
   onEmail,
   onConvert,
+  onOpenDetail,
+  selectedLeadId,
   existingClientNames,
   searchQuery,
   setSearchQuery,
@@ -1504,10 +1487,11 @@ function LeadsKanban({
   searchTitle?: string;
   searchPurpose?: string;
   refetch: () => void;
-  onEdit: (lead: Lead) => void;
   onNote: (lead: Lead) => void;
   onEmail: (lead: Lead) => void;
   onConvert: (lead: Lead) => void;
+  onOpenDetail: (lead: Lead) => void;
+  selectedLeadId: string | null;
   existingClientNames: Set<string>;
   searchQuery: string;
   setSearchQuery: (v: string) => void;
@@ -1515,22 +1499,20 @@ function LeadsKanban({
   setActiveFilters: (fn: (prev: Set<string>) => Set<string>) => void;
   onResetFilters: () => void;
 }) {
-  const onEditRef = useRef(onEdit);
-  onEditRef.current = onEdit;
   const onNoteRef = useRef(onNote);
   onNoteRef.current = onNote;
   const onEmailRef = useRef(onEmail);
   onEmailRef.current = onEmail;
   const onConvertRef = useRef(onConvert);
   onConvertRef.current = onConvert;
+  const onOpenDetailRef = useRef(onOpenDetail);
+  onOpenDetailRef.current = onOpenDetail;
   const existingClientNamesRef = useRef(existingClientNames);
   existingClientNamesRef.current = existingClientNames;
   const [fetchingMore, setFetchingMore] = useState(false);
   const [fetchStatus, setFetchStatus] = useState<string>('');
   const [showFetchConfirm, setShowFetchConfirm] = useState(false);
   const [fetchExhausted, setFetchExhausted] = useState<{ nextExpandedRadiusKm: number; currentRadiusKm: number } | null>(null);
-  const [deleteTarget, setDeleteTarget] = useState<Lead | null>(null);
-  const [deleting, setDeleting] = useState(false);
 
   async function updateStatus(leadId: string, newStatus: string) {
     await updateLead({ id: leadId, status: newStatus });
@@ -1588,19 +1570,6 @@ function LeadsKanban({
     }
   }
 
-  async function handleDeleteLead(lead: Lead) {
-    setDeleting(true);
-    try {
-      await (deleteLead as any)({ leadId: lead.id });
-      setDeleteTarget(null);
-      refetch();
-    } catch (e: any) {
-      toast.error(e?.message ?? 'Erreur lors de la suppression');
-    } finally {
-      setDeleting(false);
-    }
-  }
-
   const filteredLeads = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
     return leads.filter(l => {
@@ -1644,20 +1613,6 @@ function LeadsKanban({
               {(l as any).noteCount > 0 ? (l as any).noteCount : ''}
             </span>
           )}
-        </button>
-        <button
-          className='w-6 h-6 rounded flex items-center justify-center hover:bg-canvas text-muted hover:text-ink transition-colors'
-          title='Modifier'
-          onClick={e => { e.stopPropagation(); onEditRef.current(l); }}
-        >
-          <LuPencil size={11} />
-        </button>
-        <button
-          className='w-6 h-6 rounded flex items-center justify-center hover:bg-red-50 text-muted hover:text-red-500 transition-colors'
-          title='Supprimer ce prospect'
-          onClick={e => { e.stopPropagation(); setDeleteTarget(l); }}
-        >
-          <LuTrash2 size={11} />
         </button>
         {(l as any).status === 'qualifie' && (
           existingClientNamesRef.current.has(l.name.toLowerCase()) ? (
@@ -1776,26 +1731,14 @@ function LeadsKanban({
         </div>
       </Modal>
 
-      {/* Delete confirmation modal */}
-      <Modal
-        open={deleteTarget !== null}
-        title={deleteTarget ? `Supprimer — ${deleteTarget.name}` : 'Supprimer'}
-        onClose={() => setDeleteTarget(null)}
-      >
-        <LeadDeleteConfirmModal
-          lead={deleteTarget}
-          onClose={() => setDeleteTarget(null)}
-          onConfirm={() => handleDeleteLead(deleteTarget!)}
-          deleting={deleting}
-        />
-      </Modal>
-
       <LeadKanbanBoard
         leads={filteredLeads}
         statusConfigs={statusConfigs}
         updateStatus={updateStatus}
         refetch={refetch}
         cardActions={cardActionsForLead}
+        onCardClick={lead => onOpenDetailRef.current(lead)}
+        selectedLeadId={selectedLeadId}
         columnExtra={keyField => keyField === 'nouveau' ? (
           <button
             className='w-5 h-5 rounded flex items-center justify-center text-muted hover:text-ink hover:bg-canvas transition-colors shrink-0'
@@ -1926,14 +1869,63 @@ function LeadsTable({ searchId, onBack, onShowDetails }: { searchId: string; onB
   function resetKanbanFilters() {
     setSearchParams(prev => { const p = new URLSearchParams(prev); p.delete('kf'); p.delete('kq'); return p; });
   }
+  // Lead shown in the right-side detail panel (kept in the URL so it survives
+  // a reload and can be shared).
+  const detailLeadId = searchParams.get('lead');
+  function setDetailLeadId(id: string | null) {
+    setSearchParams(prev => {
+      const next = new URLSearchParams(prev);
+      if (id) next.set('lead', id); else next.delete('lead');
+      return next;
+    }, { replace: true });
+  }
+  // The content is inset just enough to clear the panel. `main` is centred with
+  // its own padding, so the free space on the right is measured rather than
+  // assumed — otherwise the board would stop far short of the panel.
+  const contentRef = useRef<HTMLDivElement>(null);
+  const [panelInset, setPanelInset] = useState(0);
+  useEffect(() => {
+    function measure() {
+      const el = contentRef.current;
+      if (!el) return;
+      const panelWidth = window.innerWidth >= 1024 ? 420 : window.innerWidth >= 640 ? 380 : 0;
+      if (!detailLeadId || !panelWidth) {
+        setPanelInset(0);
+        return;
+      }
+      const free = window.innerWidth - el.getBoundingClientRect().right;
+      // +12 gap to the panel, +16 for the board's own `-mx-4` bleed.
+      setPanelInset(Math.max(0, panelWidth + 28 - free));
+    }
+    measure();
+    window.addEventListener('resize', measure);
+    return () => window.removeEventListener('resize', measure);
+  }, [detailLeadId]);
+
   const [noteTarget, setNoteTarget] = useState<Lead | null>(null);
   const [editTarget, setEditTarget] = useState<Lead | null>(null);
   const [emailTarget, setEmailTarget] = useState<Lead | null>(null);
   const [convertTarget, setConvertTarget] = useState<Lead | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<Lead | null>(null);
+  const [deleting, setDeleting] = useState(false);
   const [converting, setConverting] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [showEmailTemplate, setShowEmailTemplate] = useState(false);
   const [showShareModal, setShowShareModal] = useState(false);
+
+  async function handleDeleteLead(lead: Lead) {
+    setDeleting(true);
+    try {
+      await (deleteLead as any)({ leadId: lead.id });
+      setDeleteTarget(null);
+      if (detailLeadId === lead.id) setDetailLeadId(null);
+      refetch();
+    } catch (e: any) {
+      toast.error(e?.message ?? 'Erreur lors de la suppression');
+    } finally {
+      setDeleting(false);
+    }
+  }
 
   async function handleConvertToClient(lead: Lead) {
     setConverting(true);
@@ -1962,6 +1954,9 @@ function LeadsTable({ searchId, onBack, onShowDetails }: { searchId: string; onB
 
   const leads: Lead[] = (search as any).leads ?? [];
   const filters: any = (search as any).filters ?? {};
+  const detailLead: Lead | null = detailLeadId
+    ? leads.find(l => l.id === detailLeadId) ?? null
+    : null;
 
   const filtered = leads.filter(l => {
     if (statusFilter && l.status !== statusFilter) return false;
@@ -1999,6 +1994,33 @@ function LeadsTable({ searchId, onBack, onShowDetails }: { searchId: string; onB
   return (
     <>
       {ConfirmDialog}
+
+      {/* Right-side detail panel */}
+      <LeadDetailPanel
+        lead={detailLead}
+        statusConfigs={statusConfigs as LeadStatusConfig[]}
+        existingClientNames={existingClientNames}
+        onClose={() => setDetailLeadId(null)}
+        onRefetch={refetch}
+        onEmail={setEmailTarget}
+        onConvert={setConvertTarget}
+        onDelete={setDeleteTarget}
+      />
+
+      {/* Delete confirmation */}
+      <Modal
+        open={deleteTarget !== null}
+        title={deleteTarget ? `Supprimer — ${deleteTarget.name}` : 'Supprimer'}
+        onClose={() => setDeleteTarget(null)}
+      >
+        <LeadDeleteConfirmModal
+          lead={deleteTarget}
+          onClose={() => setDeleteTarget(null)}
+          onConfirm={() => handleDeleteLead(deleteTarget!)}
+          deleting={deleting}
+        />
+      </Modal>
+
       <Modal
         open={editTarget !== null}
         title={editTarget ? `Modifier — ${editTarget.name}` : 'Modifier'}
@@ -2084,6 +2106,17 @@ function LeadsTable({ searchId, onBack, onShowDetails }: { searchId: string; onB
         )}
       </Modal>
 
+      {/*
+        While the panel is open the content is inset so the board keeps its own
+        horizontal scroll and every column stays reachable instead of hiding
+        underneath the panel. The outer div is never inset — it's the reference
+        used to measure the free space on the right.
+      */}
+      <div ref={contentRef}>
+      <div
+        className='transition-[margin] duration-200'
+        style={panelInset ? { marginRight: panelInset } : undefined}
+      >
       {/* Header */}
       <div className='flex flex-col gap-3 mb-5'>
         {/* Top row: title + actions */}
@@ -2190,10 +2223,11 @@ function LeadsTable({ searchId, onBack, onShowDetails }: { searchId: string; onB
           searchTitle={search.title}
           searchPurpose={(search as any).purpose ?? undefined}
           refetch={refetch}
-          onEdit={setEditTarget}
           onNote={setNoteTarget}
           onEmail={setEmailTarget}
           onConvert={setConvertTarget}
+          onOpenDetail={lead => setDetailLeadId(lead.id)}
+          selectedLeadId={detailLeadId}
           existingClientNames={existingClientNames}
           searchQuery={kanbanQuery}
           setSearchQuery={setKanbanQuery}
@@ -2241,7 +2275,13 @@ function LeadsTable({ searchId, onBack, onShowDetails }: { searchId: string; onB
             <tbody className='divide-y divide-line'>
               {filtered.map(lead => {
                 return (
-                  <tr key={lead.id} className='hover:bg-canvas transition-colors'>
+                  <tr
+                    key={lead.id}
+                    className={`hover:bg-canvas transition-colors cursor-pointer ${
+                      detailLeadId === lead.id ? 'bg-accent-50' : ''
+                    }`}
+                    onClick={() => setDetailLeadId(lead.id)}
+                  >
                     {/* Name + address + category */}
                     <td className='px-4 py-3 w-56'>
                       <div className='font-medium break-words'>{lead.name}</div>
@@ -2263,7 +2303,7 @@ function LeadsTable({ searchId, onBack, onShowDetails }: { searchId: string; onB
                     </td>
 
                     {/* Phone + Email */}
-                    <td className='px-4 py-3'>
+                    <td className='px-4 py-3' onClick={e => e.stopPropagation()}>
                       <div className='flex flex-col gap-1'>
                         {lead.phone ? (
                           <div className='flex items-center gap-1'>
@@ -2287,7 +2327,7 @@ function LeadsTable({ searchId, onBack, onShowDetails }: { searchId: string; onB
                     </td>
 
                     {/* Website */}
-                    <td className='px-4 py-3 hidden xl:table-cell'>
+                    <td className='px-4 py-3 hidden xl:table-cell' onClick={e => e.stopPropagation()}>
                       {lead.website ? (
                         <div className='flex items-center gap-1'>
                           <LuGlobe size={12} className='text-muted shrink-0' />
@@ -2307,7 +2347,7 @@ function LeadsTable({ searchId, onBack, onShowDetails }: { searchId: string; onB
                     </td>
 
                     {/* Rating + Maps */}
-                    <td className='px-4 py-3 hidden md:table-cell'>
+                    <td className='px-4 py-3 hidden md:table-cell' onClick={e => e.stopPropagation()}>
                       <div>
                         {lead.mapsUrl ? (
                           <a href={lead.mapsUrl} target='_blank' rel='noopener noreferrer' className='hover:opacity-75 transition-opacity'>
@@ -2323,12 +2363,12 @@ function LeadsTable({ searchId, onBack, onShowDetails }: { searchId: string; onB
                     </td>
 
                     {/* Status */}
-                    <td className='px-4 py-3'>
+                    <td className='px-4 py-3' onClick={e => e.stopPropagation()}>
                       <StatusDropdown lead={lead} statusConfigs={statusConfigs as LeadStatusConfig[]} onRefetch={refetch} />
                     </td>
 
                     {/* Actions */}
-                    <td className='px-4 py-3'>
+                    <td className='px-4 py-3' onClick={e => e.stopPropagation()}>
                       <div className='flex items-center justify-end gap-1'>
                         <div className='relative'>
                           <IconBtn title='Envoyer un courriel' onClick={() => setEmailTarget(lead)}>
@@ -2365,6 +2405,8 @@ function LeadsTable({ searchId, onBack, onShowDetails }: { searchId: string; onB
       )}
       </>
     )}
+      </div>
+      </div>
     </>
   );
 }

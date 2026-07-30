@@ -18,6 +18,8 @@ import {
   LuLoader,
   LuSend,
   LuChevronDown,
+  LuCopy,
+  LuCheck,
 } from 'react-icons/lu';
 
 // ─── Time helper ──────────────────────────────────────────────────────────────
@@ -46,6 +48,8 @@ export function NoteThread({
   onDelete,
   saving,
   deletingId,
+  autoFocus = true,
+  scrollable = true,
 }: {
   notes: NoteItem[];
   text: string;
@@ -54,17 +58,31 @@ export function NoteThread({
   onDelete: (id: string) => void;
   saving: boolean;
   deletingId: string | null;
+  /** Disable when the thread is embedded in a panel that shouldn't steal focus. */
+  autoFocus?: boolean;
+  /** Disable the timeline's own scroll area when the container already scrolls. */
+  scrollable?: boolean;
 }) {
   const bottomRef = useRef<HTMLDivElement>(null);
+  const prevCount = useRef<number | null>(null);
 
+  // Scroll to the newest note when one is added — but not on the first render,
+  // which would drag an embedding panel down past its other sections.
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+    if (prevCount.current !== null && notes.length > prevCount.current) {
+      bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+    prevCount.current = notes.length;
   }, [notes.length]);
 
   return (
     <div className='flex flex-col gap-4'>
       {/* Timeline */}
-      <div className='flex flex-col gap-3 max-h-80 overflow-y-auto pr-1'>
+      <div
+        className={`flex flex-col gap-3 pr-1 ${
+          scrollable ? 'max-h-80 overflow-y-auto overscroll-contain' : ''
+        }`}
+      >
         {notes.length === 0 ? (
           <p className='text-sm text-muted text-center py-6'>Aucune note pour ce prospect.</p>
         ) : (
@@ -112,7 +130,7 @@ export function NoteThread({
               onSubmit(e as unknown as FormEvent);
             }
           }}
-          autoFocus
+          autoFocus={autoFocus}
         />
         <button
           type='submit'
@@ -123,6 +141,27 @@ export function NoteThread({
         </button>
       </form>
     </div>
+  );
+}
+
+// ─── Copy button ──────────────────────────────────────────────────────────────
+
+export function CopyBtn({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+  if (!text) return null;
+  return (
+    <button
+      title='Copier'
+      className='inline-flex items-center justify-center w-6 h-6 rounded hover:bg-canvas transition-colors text-muted hover:text-ink shrink-0'
+      onClick={e => {
+        e.stopPropagation();
+        navigator.clipboard.writeText(text);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 1500);
+      }}
+    >
+      {copied ? <LuCheck size={12} className='text-green-600' /> : <LuCopy size={12} />}
+    </button>
   );
 }
 
@@ -351,6 +390,39 @@ export function LeadCardInfo({
   );
 }
 
+// ─── Clickable card shell ─────────────────────────────────────────────────────
+// Wraps a card so a plain click opens the detail panel while a drag does not.
+// Inner buttons/links stop propagation, so they keep their own behaviour.
+
+function CardClickShell({
+  onClick,
+  children,
+}: {
+  onClick?: () => void;
+  children: ReactNode;
+}) {
+  const start = useRef<{ x: number; y: number } | null>(null);
+
+  if (!onClick) return <>{children}</>;
+
+  return (
+    <div
+      className='cursor-pointer'
+      onPointerDown={e => {
+        start.current = { x: e.clientX, y: e.clientY };
+      }}
+      onClick={e => {
+        const s = start.current;
+        // Ignore the click that ends a drag.
+        if (s && Math.hypot(e.clientX - s.x, e.clientY - s.y) > 6) return;
+        onClick();
+      }}
+    >
+      {children}
+    </div>
+  );
+}
+
 // ─── Kanban column header ─────────────────────────────────────────────────────
 // Color dot + label + count badge. Pass `extra` for additional controls
 // (e.g. the "fetch more" button in the authenticated view).
@@ -427,6 +499,8 @@ export function LeadKanbanBoard({
   columnExtra,
   mobileColumnExtra,
   searchBarSlot,
+  onCardClick,
+  selectedLeadId,
   cssClass = 'gestia-kanban',
 }: {
   /** Already-filtered leads to display. */
@@ -437,6 +511,10 @@ export function LeadKanbanBoard({
   refetch: () => void;
   /** Action buttons rendered inside each card's actions area. */
   cardActions: (lead: any) => ReactNode;
+  /** Opens the detail panel. Not fired when the pointer moved (i.e. a drag). */
+  onCardClick?: (lead: any) => void;
+  /** Highlights the card currently shown in the detail panel. */
+  selectedLeadId?: string | null;
   /** Extra element for desktop column headers (e.g. "fetch more" button). */
   columnExtra?: (keyField: string) => ReactNode;
   /** Extra element for mobile accordion column headers. */
@@ -456,6 +534,51 @@ export function LeadKanbanBoard({
   cardActionsRef.current = cardActions;
   const columnExtraRef = useRef(columnExtra);
   columnExtraRef.current = columnExtra;
+  const onCardClickRef = useRef(onCardClick);
+  onCardClickRef.current = onCardClick;
+  const boardRef = useRef<HTMLDivElement>(null);
+
+  // Syncfusion owns the card DOM, so the selected-card outline is toggled by
+  // class on the rendered `.e-card` rather than through the React template.
+  useEffect(() => {
+    const raf = requestAnimationFrame(() => {
+      const root = boardRef.current;
+      if (!root) return;
+      root
+        .querySelectorAll('.e-card.gestia-card-selected')
+        .forEach(el => el.classList.remove('gestia-card-selected'));
+      if (selectedLeadId) {
+        root
+          .querySelector(`.e-card[data-id="${CSS.escape(selectedLeadId)}"]`)
+          ?.classList.add('gestia-card-selected');
+      }
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [selectedLeadId, leads]);
+
+  // Kanban columns share the container width evenly, so insetting the board for
+  // the detail panel would squeeze them. Instead the board is pinned to the
+  // width it had before the panel opened and the viewport scrolls horizontally.
+  const panelOpen = !!selectedLeadId;
+  const panelOpenRef = useRef(panelOpen);
+  panelOpenRef.current = panelOpen;
+  const trackRef = useRef<HTMLDivElement>(null);
+  const naturalWidth = useRef<number | null>(null);
+  const [pinnedWidth, setPinnedWidth] = useState<number | null>(null);
+
+  useEffect(() => {
+    const el = trackRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(() => {
+      if (!panelOpenRef.current) naturalWidth.current = el.clientWidth;
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+
+  useEffect(() => {
+    setPinnedWidth(panelOpen ? naturalWidth.current : null);
+  }, [panelOpen]);
 
   function toggleSection(key: string) {
     setOpenSections(prev => {
@@ -487,7 +610,9 @@ export function LeadKanbanBoard({
 
   const cardTemplate = useCallback(
     (lead: any): React.ReactElement => (
-      <LeadCardInfo lead={lead} actions={cardActionsRef.current(lead)} />
+      <CardClickShell onClick={onCardClickRef.current ? () => onCardClickRef.current!(lead) : undefined}>
+        <LeadCardInfo lead={lead} actions={cardActionsRef.current(lead)} />
+      </CardClickShell>
     ),
     [],
   );
@@ -551,7 +676,16 @@ export function LeadKanbanBoard({
                     </div>
                   ) : (
                     colLeads.map((lead: any) => (
-                      <LeadCardInfo key={lead.id} lead={lead} actions={cardActions(lead)} />
+                      <div
+                        key={lead.id}
+                        className={selectedLeadId === lead.id ? 'bg-accent-50' : undefined}
+                      >
+                        <CardClickShell
+                          onClick={onCardClick ? () => onCardClick(lead) : undefined}
+                        >
+                          <LeadCardInfo lead={lead} actions={cardActions(lead)} />
+                        </CardClickShell>
+                      </div>
                     ))
                   )}
                 </div>
@@ -562,25 +696,27 @@ export function LeadKanbanBoard({
       </div>
 
       {/* Desktop kanban */}
-      <div className='hidden sm:block overflow-x-auto -mx-4 px-4'>
-        <KanbanComponent
-          keyField='status'
-          dataSource={kanbanData}
-          cardSettings={{ headerField: 'id', template: cardTemplate, showHeader: false }}
-          dragStop={handleDragStop}
-          cssClass={cssClass}
-        >
-          <ColumnsDirective>
-            {statusConfigs.map((col: any) => (
-              <ColumnDirective
-                key={col.key}
-                headerText={col.label}
-                keyField={col.key}
-                template={columnHeaderTemplate}
-              />
-            ))}
-          </ColumnsDirective>
-        </KanbanComponent>
+      <div ref={boardRef} className='hidden sm:block overflow-x-auto -mx-4 px-4'>
+        <div ref={trackRef} style={pinnedWidth ? { minWidth: pinnedWidth } : undefined}>
+          <KanbanComponent
+            keyField='status'
+            dataSource={kanbanData}
+            cardSettings={{ headerField: 'id', template: cardTemplate, showHeader: false }}
+            dragStop={handleDragStop}
+            cssClass={cssClass}
+          >
+            <ColumnsDirective>
+              {statusConfigs.map((col: any) => (
+                <ColumnDirective
+                  key={col.key}
+                  headerText={col.label}
+                  keyField={col.key}
+                  template={columnHeaderTemplate}
+                />
+              ))}
+            </ColumnsDirective>
+          </KanbanComponent>
+        </div>
       </div>
     </>
   );
