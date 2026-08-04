@@ -490,6 +490,47 @@ export function LeadDeleteConfirmModal({
 // Shared layout for both the authenticated view and the public portal.
 // The parent provides pre-filtered leads, action buttons, and status update ops.
 
+// While a drag is in flight Syncfusion keeps the dragged card in its original
+// slot (marked `e-kanban-dragged-card`), leaves a floating ghost copy at the end
+// of the source column (`e-cloned-card`) and marks the slot the card would land
+// in with a placeholder (`e-target-dropped-clone`). `dragStop` fires while the
+// board is still in that state, so walking the target column then gives the
+// exact order the user is about to see.
+const DROP_SLOT_CLASS = 'e-target-dropped-clone';
+
+/**
+ * The target column's card ids in their post-drop order, or null when the drop
+ * placeholder is gone — Syncfusion removes it when the card is released outside
+ * a valid slot (typically right back onto its own position) and then applies no
+ * change of its own, so nothing must be persisted either.
+ */
+function readDroppedColumnOrder(
+  root: HTMLElement | null,
+  status: string,
+  movedIds: string[],
+): string[] | null {
+  const cell = root?.querySelector(
+    `.e-content-row:not(.e-swimlane-row) .e-content-cells[data-key="${CSS.escape(status)}"]`,
+  );
+  const wrapper = cell?.querySelector('.e-card-wrapper');
+  if (!wrapper?.querySelector(`.${DROP_SLOT_CLASS}`)) return null;
+
+  const moved = new Set(movedIds);
+  const ids: string[] = [];
+  for (const el of Array.from(wrapper.children)) {
+    if (el.classList.contains(DROP_SLOT_CLASS)) {
+      ids.push(...movedIds);
+      continue;
+    }
+    if (!el.classList.contains('e-card') || el.classList.contains('e-cloned-card')) continue;
+    const id = el.getAttribute('data-id');
+    // The dragged cards keep their old slot in the DOM; the placeholder above is
+    // where they actually end up.
+    if (id && !moved.has(id)) ids.push(id);
+  }
+  return ids;
+}
+
 export function LeadKanbanBoard({
   leads,
   statusConfigs,
@@ -604,42 +645,58 @@ export function LeadKanbanBoard({
     [leads],
   );
 
-  async function handleDragStop(args: any) {
+  // Drops are persisted one after another: each one reads the column back from
+  // the server, so overlapping round-trips would race on a stale order.
+  const persistQueue = useRef<Promise<void>>(Promise.resolve());
+
+  // Stays synchronous — the board DOM is read before Syncfusion applies the drop
+  // and tears the placeholders down, which it does as soon as this returns.
+  function handleDragStop(args: any) {
     if (!args?.data?.length) return;
 
-    // Syncfusion reports the slot the card was dropped into, counted among the
-    // target column's other cards. Captured before any await, since the board
-    // re-renders as soon as the status round-trip lands.
     const targetStatus = args.data[0].status;
     const movedIds = args.data.map((c: any) => c.id);
-    const dropIndex = typeof args.dropIndex === 'number' && args.dropIndex >= 0 ? args.dropIndex : null;
+    const columnIds = readDroppedColumnOrder(boardRef.current, targetStatus, movedIds);
+    if (!columnIds) return;
 
-    for (const card of args.data) {
-      try {
-        await updateStatusRef.current(card.id, card.status);
-      } catch {
-        toast.error('Erreur lors de la mise à jour du statut');
-        refetchRef.current();
-        return;
+    const statusChanges = args.data.filter(
+      (c: any) => leadsRef.current.find((l: any) => l.id === c.id)?.status !== c.status,
+    );
+
+    // Dropping a card back where it came from changes nothing — writing anyway
+    // would make the board flicker through a refetch for no reason.
+    const currentIds = leadsRef.current
+      .filter((l: any) => l.status === targetStatus)
+      .map((l: any) => l.id);
+    const sameOrder =
+      currentIds.length === columnIds.length && currentIds.every((id, i) => id === columnIds[i]);
+    if (statusChanges.length === 0 && sameOrder) return;
+
+    persistQueue.current = persistQueue.current.then(async () => {
+      for (const card of statusChanges) {
+        try {
+          await updateStatusRef.current(card.id, card.status);
+        } catch {
+          toast.error('Erreur lors de la mise à jour du statut');
+          refetchRef.current();
+          return;
+        }
       }
-    }
 
-    // Without this the card would snap back to its stored position on the next
-    // refetch instead of staying where it was dropped.
-    if (reorderRef.current) {
-      const moved = new Set<string>(movedIds);
-      const columnIds = leadsRef.current
-        .filter((l: any) => l.status === targetStatus && !moved.has(l.id))
-        .map((l: any) => l.id);
-      columnIds.splice(dropIndex ?? columnIds.length, 0, ...movedIds);
-      try {
-        await reorderRef.current(targetStatus, columnIds);
-      } catch {
-        toast.error("Erreur lors de la mise à jour de l'ordre");
+      // Without this the card would snap back to its stored position on the next
+      // refetch instead of staying where it was dropped.
+      if (reorderRef.current) {
+        try {
+          await reorderRef.current(targetStatus, columnIds);
+        } catch {
+          toast.error("Erreur lors de la mise à jour de l'ordre");
+        }
       }
-    }
 
-    refetchRef.current();
+      refetchRef.current();
+    })
+    // An unexpected throw must not leave the queue rejected for later drops.
+    .catch(() => {});
   }
 
   const cardTemplate = useCallback(
