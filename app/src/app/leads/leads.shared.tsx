@@ -498,6 +498,59 @@ export function LeadDeleteConfirmModal({
 // exact order the user is about to see.
 const DROP_SLOT_CLASS = 'e-target-dropped-clone';
 
+function isDroppableCard(el: Element): boolean {
+  return (
+    el.classList.contains('e-card') &&
+    !el.classList.contains('e-cloned-card') &&
+    !el.classList.contains('e-kanban-dragged-card')
+  );
+}
+
+/** Viewport Y of the pointer behind a Kanban drag event, mouse or touch. */
+function dragClientY(args: any): number | null {
+  const e = args?.event;
+  const src = e?.event?.changedTouches?.[0] ?? e?.changedTouches?.[0] ?? e?.event ?? e;
+  return typeof src?.clientY === 'number' ? src.clientY : null;
+}
+
+/**
+ * Syncfusion always drops the placeholder *after* the card under the pointer and
+ * only tests the pointer against a card's midpoint for the first card of a
+ * column (`insertClone` is hard-set to `'afterend'` in its `drag` handler), so
+ * hovering the top half of any other card still lands the card below it. This
+ * re-places the placeholder against every card's midpoint. It runs on the `drag`
+ * event, which fires right after Syncfusion positioned the placeholder and
+ * before the browser paints, so the correction is invisible.
+ */
+function realignDropSlot(root: HTMLElement | null, clientY: number | null): void {
+  if (clientY === null) return;
+  const slot = root?.querySelector(`.${DROP_SLOT_CLASS}`);
+  const wrapper = slot?.parentElement;
+  if (!slot || !wrapper) return;
+
+  const cards: Element[] = [];
+  let slotIndex = 0;
+  for (const el of Array.from(wrapper.children)) {
+    if (el === slot) slotIndex = cards.length;
+    else if (isDroppableCard(el)) cards.push(el);
+  }
+
+  // The placeholder takes up room, so the cards it pushed aside already sit
+  // where they would land once the card is released. Measuring against those
+  // shifted midpoints gives a card-height of hysteresis, which keeps the slot
+  // from flipping back and forth around a boundary.
+  let index = 0;
+  while (index < cards.length) {
+    const rect = cards[index].getBoundingClientRect();
+    if (rect.top + rect.height / 2 >= clientY) break;
+    index++;
+  }
+  if (index === slotIndex) return;
+
+  if (index < cards.length) wrapper.insertBefore(slot, cards[index]);
+  else cards[cards.length - 1].insertAdjacentElement('afterend', slot);
+}
+
 /**
  * The target column's card ids in their post-drop order, or null when the drop
  * placeholder is gone — Syncfusion removes it when the card is released outside
@@ -522,10 +575,10 @@ function readDroppedColumnOrder(
       ids.push(...movedIds);
       continue;
     }
-    if (!el.classList.contains('e-card') || el.classList.contains('e-cloned-card')) continue;
-    const id = el.getAttribute('data-id');
     // The dragged cards keep their old slot in the DOM; the placeholder above is
     // where they actually end up.
+    if (!isDroppableCard(el)) continue;
+    const id = el.getAttribute('data-id');
     if (id && !moved.has(id)) ids.push(id);
   }
   return ids;
@@ -648,6 +701,10 @@ export function LeadKanbanBoard({
   // Drops are persisted one after another: each one reads the column back from
   // the server, so overlapping round-trips would race on a stale order.
   const persistQueue = useRef<Promise<void>>(Promise.resolve());
+
+  function handleDrag(args: any) {
+    realignDropSlot(boardRef.current, dragClientY(args));
+  }
 
   // Stays synchronous — the board DOM is read before Syncfusion applies the drop
   // and tears the placeholders down, which it does as soon as this returns.
@@ -793,6 +850,7 @@ export function LeadKanbanBoard({
             keyField='status'
             dataSource={kanbanData}
             cardSettings={{ headerField: 'id', template: cardTemplate, showHeader: false }}
+            drag={handleDrag}
             dragStop={handleDragStop}
             cssClass={cssClass}
           >
