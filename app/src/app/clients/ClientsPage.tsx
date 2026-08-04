@@ -1,4 +1,4 @@
-import { Fragment, useState } from 'react';
+import { Fragment, useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router';
 import { LuChevronDown, LuChevronUp, LuArrowRight, LuX } from 'react-icons/lu';
 import toast from 'react-hot-toast';
@@ -36,6 +36,17 @@ export default function ClientsPage() {
   // Par défaut on n'affiche que les clients actifs ; 'all' pour tous les statuts.
   const filterStatus = searchParams.get('status') ?? 'actif';
   const [search, setSearch] = useState(() => searchParams.get('q') ?? '');
+
+  // Rend le filtre par défaut visible dans l'URL (ex. /clients -> /clients?status=actif).
+  useEffect(() => {
+    if (searchParams.get('status')) return;
+    setSearchParams(prev => {
+      const next = new URLSearchParams(prev);
+      next.set('status', 'actif');
+      return next;
+    }, { replace: true });
+  }, [searchParams, setSearchParams]);
+
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
 
   function toggleNote(id: string) {
@@ -98,7 +109,7 @@ export default function ClientsPage() {
           <button
             className='p-1.5 rounded-md text-muted hover:text-ink hover:bg-canvas transition-colors shrink-0'
             title='Réinitialiser les filtres'
-            onClick={() => { setSearch(''); setSearchParams({}, { replace: true }); }}
+            onClick={() => { setSearch(''); setSearchParams({ status: 'actif' }, { replace: true }); }}
           >
             <LuX size={15} />
           </button>
