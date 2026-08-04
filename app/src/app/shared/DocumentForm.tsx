@@ -1,6 +1,15 @@
 import { useMemo, useState, useRef, useEffect } from 'react';
 import toast from 'react-hot-toast';
-import { createDocument, updateDocument, updateDocumentStatus, useQuery, getPriceItems, createPriceItem } from 'wasp/client/operations';
+import { LuWand, LuX } from 'react-icons/lu';
+import {
+  createDocument,
+  updateDocument,
+  updateDocumentStatus,
+  useQuery,
+  getPriceItems,
+  createPriceItem,
+  generateDocumentDraft,
+} from 'wasp/client/operations';
 import { Modal } from '../../client/ui';
 import { MagicInput, MagicTextarea } from '../../client/magic';
 import {
@@ -133,6 +142,36 @@ export function DocumentForm({
   const [error, setError] = useState<string | null>(null);
   const errorRef = useRef<HTMLDivElement>(null);
 
+  // AI title/description drafting popover
+  const [aiOpen, setAiOpen] = useState(false);
+  const [aiPrompt, setAiPrompt] = useState('');
+  const [aiLoading, setAiLoading] = useState(false);
+
+  const handleGenerate = async () => {
+    if (!aiPrompt.trim() || aiLoading) return;
+    setAiLoading(true);
+    try {
+      const res = await generateDocumentDraft({
+        input: aiPrompt.trim(),
+        type: mode,
+        clientId: clientId || null,
+        projectId: projectId || null,
+        itemLabels: items.map((i) => i.description).filter(Boolean),
+        currentTitle: title || null,
+        currentDescription: description || null,
+      }) as { title: string; description: string };
+      if (res.title) setTitle(res.title);
+      if (res.description) setDescription(res.description);
+      setAiOpen(false);
+      setAiPrompt('');
+      toast.success('Titre et description générés');
+    } catch (e: any) {
+      toast.error(e?.message || 'Erreur de génération IA');
+    } finally {
+      setAiLoading(false);
+    }
+  };
+
   useEffect(() => {
     if (error) errorRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
   }, [error]);
@@ -263,24 +302,81 @@ export function DocumentForm({
             </select>
           </div>
 
-          <div className='col-span-2'>
-            <label className='label'>Titre <span className='text-danger'>*</span></label>
-            <MagicInput
-              className='input'
-              required
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              placeholder='Ex. Refonte du site web'
-            />
-          </div>
-          <div className='col-span-2'>
-            <label className='label'>Description</label>
-            <MagicTextarea
-              className='input'
-              rows={2}
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-            />
+          <div className='col-span-2 relative space-y-4'>
+            <div>
+              <div className='flex items-center justify-between gap-2'>
+                <label className='label mb-0'>Titre <span className='text-danger'>*</span></label>
+                <button
+                  type='button'
+                  onClick={() => setAiOpen((v) => !v)}
+                  title="Rédiger le titre et la description avec l'IA"
+                  className='flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-500 text-white text-[11px] font-semibold hover:bg-amber-600 transition-colors'
+                >
+                  <LuWand size={11} /> IA
+                </button>
+              </div>
+              <MagicInput
+                className='input mt-1'
+                required
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+                placeholder='Ex. Refonte du site web'
+              />
+            </div>
+            <div>
+              <label className='label'>Description</label>
+              <MagicTextarea
+                className='input'
+                rows={2}
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+              />
+            </div>
+
+            {aiOpen && (
+              <div className='absolute top-7 right-0 z-30 w-80 bg-white rounded-xl shadow-2xl border border-line p-4 flex flex-col gap-3'>
+                <div className='flex items-center justify-between'>
+                  <div className='flex items-center gap-1.5'>
+                    <LuWand size={14} className='text-amber-500' />
+                    <p className='text-sm font-semibold'>Rédiger avec l’IA</p>
+                  </div>
+                  <button type='button' onClick={() => setAiOpen(false)} className='text-muted hover:text-ink'>
+                    <LuX size={14} />
+                  </button>
+                </div>
+                <p className='text-xs text-muted'>
+                  Décrivez le travail en quelques mots. L’IA rédige le titre et la description.
+                </p>
+                <textarea
+                  className='border border-line rounded-lg p-2.5 text-sm resize-none h-24 outline-none focus:ring-2 focus:ring-amber-400 focus:border-amber-400'
+                  placeholder='Ex : refonte du site web + hébergement 1 an'
+                  value={aiPrompt}
+                  onChange={(e) => setAiPrompt(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+                      e.preventDefault();
+                      void handleGenerate();
+                    }
+                  }}
+                  autoFocus
+                />
+                <div className='flex justify-end gap-2'>
+                  <button type='button' className='btn-ghost text-xs' onClick={() => setAiOpen(false)}>Annuler</button>
+                  <button
+                    type='button'
+                    className='flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-500 text-white text-xs font-semibold hover:bg-amber-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors'
+                    onClick={handleGenerate}
+                    disabled={aiLoading || !aiPrompt.trim()}
+                  >
+                    {aiLoading ? (
+                      <><span className='animate-spin inline-block w-3 h-3 border-2 border-white/40 border-t-white rounded-full' /> Génération…</>
+                    ) : (
+                      <><LuWand size={12} /> Générer</>
+                    )}
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
           <div>
             <label className='label'>Date d'échéance</label>

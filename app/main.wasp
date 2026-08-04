@@ -831,6 +831,10 @@ action generateProspectEmailTemplate {
   fn: import { generateProspectEmailTemplate } from "@src/app/ai/operations",
   entities: [User, Company, LeadSearch]
 }
+action generateDocumentDraft {
+  fn: import { generateDocumentDraft } from "@src/app/ai/operations",
+  entities: [User, Company, Client, Project]
+}
 
 // Hourly background sweep that advances document statuses based on time
 // (quotes → expiree after validUntil, invoices → en_retard after dueDate).

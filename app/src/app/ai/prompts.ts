@@ -230,6 +230,86 @@ export function buildProspectEmailPrompts(ctx: ProspectEmailContext): { system: 
   return { system, user };
 }
 
+// ─── generateDocumentDraft ───────────────────────────────────────────────────
+
+export type DocumentDraftContext = {
+  /** 'quote' → soumission, 'invoice' → facture */
+  docType: 'quote' | 'invoice';
+  companyName?: string | null;
+  companyTagline?: string | null;
+  companyDescription?: string | null;
+  clientName?: string | null;
+  projectName?: string | null;
+  /** Line item labels already entered in the form, used as extra context. */
+  itemLabels?: string[];
+  currentTitle?: string | null;
+  currentDescription?: string | null;
+  /** Free-form text the user typed in the magic popover. */
+  input: string;
+};
+
+export function buildDocumentDraftPrompts(ctx: DocumentDraftContext): { system: string; user: string } {
+  const docLabel = ctx.docType === 'invoice' ? 'facture' : 'soumission';
+  const isRewriting = !!(ctx.currentTitle?.trim() || ctx.currentDescription?.trim());
+
+  const system = [
+    `Tu rédiges le titre et la description d'une ${docLabel} pour une entreprise de services au Québec.`,
+    ``,
+    `FORMAT DE RÉPONSE OBLIGATOIRE — exactement deux lignes, rien d'autre :`,
+    `TITRE: [titre]`,
+    `DESCRIPTION: [description]`,
+    ``,
+    `RÈGLES DU TITRE :`,
+    `1. Court et concret : 3 à 8 mots, 60 caractères maximum.`,
+    `2. Nomme le travail, pas le document — jamais « Soumission pour… » ni « Facture de… ».`,
+    `3. Pas de guillemets, pas de point final, pas de numéro de document, pas de date.`,
+    ``,
+    `RÈGLES DE LA DESCRIPTION :`,
+    `4. 1 à 3 phrases sur une seule ligne, qui résument ce qui est livré au client.`,
+    `5. Ton professionnel, neutre et factuel. Pas de superlatif, pas d'exclamation, pas de formule de politesse.`,
+    `6. N'invente aucun prix, montant, taxe, délai, date ni garantie qui ne soit pas fourni dans le contexte.`,
+    `7. Ne répète pas le nom du client ni le nom de l'entreprise dans la description.`,
+    ``,
+    `RÈGLES GÉNÉRALES :`,
+    `8. Réponds en FRANÇAIS uniquement.`,
+    `9. Aucun préambule, aucun commentaire, aucune explication, aucune liste à puces.`,
+    isRewriting
+      ? `10. Un titre et/ou une description existent déjà : améliore-les en tenant compte des précisions de l'utilisateur, sans changer le sens du travail décrit.`
+      : `10. Base-toi uniquement sur les informations fournies ; reste vague plutôt que d'inventer des détails.`,
+  ].join('\n');
+
+  const companyLine = [
+    ctx.companyName,
+    ctx.companyTagline ? `« ${ctx.companyTagline} »` : null,
+  ].filter(Boolean).join(' — ');
+
+  const contextLines = [
+    `Type de document : ${docLabel}`,
+    companyLine ? `Mon entreprise : ${companyLine}` : null,
+    ctx.companyDescription ? `Ce que fait mon entreprise : ${ctx.companyDescription}` : null,
+    ctx.clientName ? `Client : ${ctx.clientName}` : null,
+    ctx.projectName ? `Projet : ${ctx.projectName}` : null,
+    ctx.itemLabels?.length ? `Items déjà saisis :\n${ctx.itemLabels.map((l) => `- ${l}`).join('\n')}` : null,
+    ctx.currentTitle?.trim() ? `Titre actuel : ${ctx.currentTitle.trim()}` : null,
+    ctx.currentDescription?.trim() ? `Description actuelle : ${ctx.currentDescription.trim()}` : null,
+  ].filter(Boolean).join('\n');
+
+  const user = [
+    isRewriting
+      ? `Améliore le titre et la description de cette ${docLabel} à partir des précisions suivantes :`
+      : `Rédige le titre et la description de cette ${docLabel} à partir des notes suivantes :`,
+    ``,
+    ctx.input.trim(),
+    ``,
+    `Contexte :`,
+    contextLines,
+    ``,
+    `Réponds au format TITRE: / DESCRIPTION:.`,
+  ].join('\n');
+
+  return { system, user };
+}
+
 // ─── generateProspectEmailTemplate ───────────────────────────────────────────
 
 /** Available variable tokens the model may use in the email template. */

@@ -1,5 +1,5 @@
 import { HttpError } from 'wasp/server';
-import type { MagicCorrect, GenerateTemplateContent } from 'wasp/server/operations';
+import type { MagicCorrect, GenerateTemplateContent, GenerateDocumentDraft } from 'wasp/server/operations';
 import {
   MAGIC_CORRECT_SYSTEM_PROMPT,
   TEMPLATE_TYPE_LABELS,
@@ -8,6 +8,7 @@ import {
   buildTemplateUserPrompt,
   buildProspectEmailPrompts,
   buildProspectEmailTemplatePrompts,
+  buildDocumentDraftPrompts,
 } from './prompts';
 
 // ─── magicCorrect ─────────────────────────────────────────────────────────────
@@ -269,6 +270,129 @@ export const generateTemplateContent: GenerateTemplateContent<GenerateArgs, Gene
 
   if (!markdown) throw new HttpError(502, "La génération n'a pas retourné de contenu.");
   return { markdown };
+};
+
+// ─── generateDocumentDraft ───────────────────────────────────────────────────
+
+const DOC_DRAFT_MODEL = 'meta/meta-llama-3-70b-instruct';
+const DOC_DRAFT_URL = `https://api.replicate.com/v1/models/${DOC_DRAFT_MODEL}/predictions`;
+
+const MAX_DRAFT_INPUT_CHARS = 2000;
+const MAX_DRAFT_TITLE_CHARS = 120;
+
+type DocumentDraftArgs = {
+  /** Free-form notes typed by the user in the magic popover. */
+  input: string;
+  type: 'quote' | 'invoice';
+  clientId?: string | null;
+  projectId?: string | null;
+  /** Line item descriptions already entered in the form. */
+  itemLabels?: string[];
+  currentTitle?: string | null;
+  currentDescription?: string | null;
+};
+type DocumentDraftResult = { title: string; description: string };
+
+export const generateDocumentDraft: GenerateDocumentDraft<DocumentDraftArgs, DocumentDraftResult> = async (
+  args,
+  context,
+) => {
+  if (!context.user) throw new HttpError(401);
+  const companyId: string = (context.user as any).companyId;
+  if (!companyId) throw new HttpError(403, 'Aucune entreprise associée');
+
+  const input = (args.input ?? '').toString().trim();
+  if (!input) throw new HttpError(400, 'Décrivez le document en quelques mots.');
+  if (input.length > MAX_DRAFT_INPUT_CHARS) {
+    throw new HttpError(400, 'Texte trop long pour la génération.');
+  }
+
+  const token = process.env.REPLICATE_API_TOKEN;
+  if (!token) throw new HttpError(500, 'REPLICATE_API_TOKEN manquant.');
+
+  // Names are resolved server-side and scoped to the company so the client
+  // can't inject arbitrary context through the prompt.
+  const [company, client, project] = await Promise.all([
+    (context.entities as any).Company.findUnique({
+      where: { id: companyId },
+      select: { name: true, brandTagline: true, brandDescription: true },
+    }),
+    args.clientId
+      ? (context.entities as any).Client.findFirst({
+          where: { id: args.clientId, companyId },
+          select: { name: true },
+        })
+      : Promise.resolve(null),
+    args.projectId
+      ? (context.entities as any).Project.findFirst({
+          where: { id: args.projectId, companyId },
+          select: { name: true },
+        })
+      : Promise.resolve(null),
+  ]);
+
+  if (!company) throw new HttpError(404, 'Entreprise introuvable');
+
+  const { system, user: userPrompt } = buildDocumentDraftPrompts({
+    docType: args.type === 'invoice' ? 'invoice' : 'quote',
+    companyName: company.name,
+    companyTagline: company.brandTagline,
+    companyDescription: company.brandDescription,
+    clientName: client?.name ?? null,
+    projectName: project?.name ?? null,
+    itemLabels: (args.itemLabels ?? [])
+      .map((l) => (l ?? '').toString().trim())
+      .filter(Boolean)
+      .slice(0, 20),
+    currentTitle: args.currentTitle,
+    currentDescription: args.currentDescription,
+    input,
+  });
+
+  let res: Response;
+  try {
+    res = await fetch(DOC_DRAFT_URL, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+        Prefer: 'wait=45',
+      },
+      body: JSON.stringify({
+        input: { prompt: userPrompt, system_prompt: system, max_tokens: 400, temperature: 0.4, top_p: 0.9 },
+      }),
+    });
+  } catch {
+    throw new HttpError(502, 'Service IA indisponible.');
+  }
+
+  if (!res.ok) {
+    const errBody = await res.text().catch(() => '');
+    throw new HttpError(502, `Replicate ${res.status}: ${errBody.slice(0, 200)}`);
+  }
+
+  const json = (await res.json()) as { output?: string | string[]; error?: string | null; status?: string };
+  if (json.error) throw new HttpError(502, json.error);
+  if (json.status && json.status !== 'succeeded') throw new HttpError(504, 'Génération expirée, réessayez.');
+
+  const raw = Array.isArray(json.output) ? json.output.join('') : (json.output ?? '');
+
+  // Drop any preamble before the first TITRE:/DESCRIPTION: marker.
+  const lines = raw.split('\n');
+  const firstMarker = lines.findIndex((l) => /^(TITRE|DESCRIPTION)\s*:/i.test(l.trim()));
+  const text = (firstMarker >= 0 ? lines.slice(firstMarker).join('\n') : raw).trim();
+
+  const titleMatch = text.match(/^TITRE\s*:\s*(.+)$/im);
+  // Description runs to the end so multi-line output is preserved.
+  const descMatch = text.match(/^DESCRIPTION\s*:\s*([\s\S]+)$/im);
+
+  const title = cleanModelOutput(titleMatch?.[1] ?? '').slice(0, MAX_DRAFT_TITLE_CHARS);
+  const description = cleanModelOutput(descMatch?.[1] ?? '')
+    .replace(/^TITRE\s*:.*(\n|$)/gim, '')
+    .trim();
+
+  if (!title && !description) throw new HttpError(502, "La génération n'a pas retourné de contenu.");
+  return { title, description };
 };
 
 // ─── generateProspectEmailTemplate ───────────────────────────────────────────
