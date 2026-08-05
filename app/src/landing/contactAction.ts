@@ -1,5 +1,5 @@
 import { HttpError } from 'wasp/server';
-import { sendEmailWithAttachment } from '../server/mail';
+import { sendEmailWithAttachment, platformSmtp } from '../server/mail';
 
 type ContactFormArgs = {
   name: string;
@@ -52,7 +52,13 @@ export const sendContactEmail = async (
     </div>
   `;
 
+  // The public contact form has no company context, so it always goes through
+  // the platform SMTP configuration.
+  const smtp = platformSmtp();
+  if (!smtp) throw new HttpError(500, 'Configuration SMTP de la plateforme manquante.');
+
   await sendEmailWithAttachment({
+    smtp,
     to: 'info@trifali.com',
     replyTo: email,
     subject,

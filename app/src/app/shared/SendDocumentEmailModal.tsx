@@ -7,6 +7,7 @@ import { MagicInput, MagicTextarea } from '../../client/magic';
 import { buildDocumentPdfFilename, getDocumentPdfBase64 } from '../documents/pdf';
 import type { DocForPdf, CompanyForPdf, BrandAssets } from '../documents/pdf';
 import { PdfPreviewModal } from './PdfPreviewModal';
+import { useEmailCapability } from '../../client/capabilities';
 
 type SentActivity = {
   createdAt: string | Date;
@@ -57,6 +58,7 @@ function buildDefaults(args: {
 }
 
 export function SendDocumentEmailModal({ doc, company, brand, activities, onClose }: Props) {
+  const { canSend: emailCanSend, reason: emailReason } = useEmailCapability();
   const docAny = doc as any;
   const initialType: DocType = doc.type === 'invoice' ? 'invoice' : 'quote';
 
@@ -239,7 +241,12 @@ export function SendDocumentEmailModal({ doc, company, brand, activities, onClos
               {isHistoryTab ? 'Fermer' : 'Annuler'}
             </button>
             {isCurrentType && !isHistoryTab && (
-              <button className='btn-primary' disabled={sending} onClick={submit}>
+              <button
+                className='btn-primary'
+                disabled={sending || !emailCanSend}
+                title={!emailCanSend ? (emailReason ?? '') : undefined}
+                onClick={submit}
+              >
                 {sending ? 'Envoi…' : activeLastSent ? 'Renvoyer' : 'Envoyer'}
               </button>
             )}

@@ -35,6 +35,27 @@ export function formatMontrealTime(date: string | Date): string {
   }).format(new Date(date));
 }
 
+// ─── Lead provenance ──────────────────────────────────────────────────────────
+// Where a prospect came from. `google_maps` is the default for everything the
+// Google Maps search brings in; the rest are picked by hand.
+
+export const LEAD_SOURCES = [
+  { key: 'google_maps', label: 'Google Maps' },
+  { key: 'manual', label: 'Ajout manuel' },
+  { key: 'facebook', label: 'Facebook' },
+  { key: 'instagram', label: 'Instagram' },
+  { key: 'linkedin', label: 'LinkedIn' },
+  { key: 'referral', label: 'Référence' },
+  { key: 'website', label: 'Site web' },
+  { key: 'other', label: 'Autre' },
+] as const;
+
+export type LeadSourceKey = (typeof LEAD_SOURCES)[number]['key'];
+
+export function leadSourceLabel(source: string | null | undefined): string {
+  return LEAD_SOURCES.find(s => s.key === source)?.label ?? source ?? 'Inconnue';
+}
+
 // ─── SMS length helper ────────────────────────────────────────────────────────
 // A GSM-7 message fits 160 characters per part, but a single character outside
 // that alphabet (an emoji, a curly quote) switches the whole message to UCS-2
@@ -331,6 +352,7 @@ export function LeadCardInfo({
     rating?: number | null;
     mapsUrl?: string | null;
     statusUpdatedAt?: string | Date | null;
+    source?: string | null;
   };
   /** Optional button row rendered below contact info. */
   actions?: ReactNode;
@@ -350,15 +372,23 @@ export function LeadCardInfo({
         {selection}
         <div className='font-semibold text-sm leading-tight flex-1 min-w-0'>{lead.name}</div>
       </div>
-      {movedLabel && (
-        <div
-          className='flex items-center gap-1 text-[10px] text-muted'
-          title={`Déplacé le ${movedLabel}`}
+      <div className='flex items-center gap-1.5 flex-wrap'>
+        {movedLabel && (
+          <div
+            className='flex items-center gap-1 text-[10px] text-muted'
+            title={`Déplacé le ${movedLabel}`}
+          >
+            <LuClock size={9} className='shrink-0' />
+            <span>{movedLabel}</span>
+          </div>
+        )}
+        <span
+          className='text-[9px] leading-none px-1 py-[1px] rounded bg-canvas border border-line text-muted whitespace-nowrap'
+          title={`Provenance : ${leadSourceLabel(lead.source)}`}
         >
-          <LuClock size={9} className='shrink-0' />
-          <span>{movedLabel}</span>
-        </div>
-      )}
+          {leadSourceLabel(lead.source)}
+        </span>
+      </div>
       <div className='space-y-0.5'>
         {lead.website && (
           <div className='flex items-center gap-1.5 text-xs'>
@@ -831,12 +861,16 @@ export function LeadKanbanBoard({
   function handleDragStop(args: any) {
     if (!args?.data?.length) return;
 
-    const targetStatus = args.data[0].status;
-    const movedIds = args.data.map((c: any) => c.id);
+    // One card per drag, always. Syncfusion drags every `e-selection` card of
+    // the row at once, so should one ever slip through, only the card that was
+    // actually dropped is persisted and the refetch snaps the others back.
+    const dragged = args.data.slice(0, 1);
+    const targetStatus = dragged[0].status;
+    const movedIds = dragged.map((c: any) => c.id);
     const columnIds = readDroppedColumnOrder(boardRef.current, targetStatus, movedIds);
     if (!columnIds) return;
 
-    const statusChanges = args.data.filter(
+    const statusChanges = dragged.filter(
       (c: any) => leadsRef.current.find((l: any) => l.id === c.id)?.status !== c.status,
     );
 
@@ -983,15 +1017,19 @@ export function LeadKanbanBoard({
           <KanbanComponent
             keyField='status'
             dataSource={kanbanData}
-            // `Single` selection keeps a drag to exactly one card: Syncfusion
-            // only drags a group when several cards are selected at once, which
-            // `Multiple` would allow. Ticking checkboxes is our own selection
-            // and never feeds Syncfusion's.
+            // Syncfusion's own card selection is switched off entirely, which is
+            // what keeps a drag to a single card. On dragStart it drags *every*
+            // card carrying `e-selection` in the row (all columns included), and
+            // its layout re-applies that class on each re-render from a list of
+            // remembered ids — with the board refetching as often as it does, a
+            // stale id there was enough to pick up a second card. `None` means
+            // the class is never added, so there is nothing to drag along.
+            // Selecting cards is done with our own checkboxes anyway.
             cardSettings={{
               headerField: 'id',
               template: cardTemplate,
               showHeader: false,
-              selectionType: 'Single',
+              selectionType: 'None',
             }}
             drag={handleDrag}
             dragStop={handleDragStop}

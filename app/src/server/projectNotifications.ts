@@ -1,4 +1,8 @@
-import { sendEmailWithAttachment } from './mail';
+import { sendEmailWithAttachment, type SmtpConfig } from './mail';
+
+// NOTE: neither helper below currently has a caller — the batched
+// `sendProjectNotifications` job superseded them. Kept in sync so they still
+// compile if reinstated.
 
 function escapeHtml(str: string): string {
   return str
@@ -14,6 +18,7 @@ function truncate(str: string, max = 120): string {
 }
 
 export async function notifyAdminOfClientActivity({
+  smtp,
   companyEmail,
   companyName,
   projectName,
@@ -21,6 +26,7 @@ export async function notifyAdminOfClientActivity({
   actorName,
   detail,
 }: {
+  smtp: SmtpConfig;
   companyEmail: string;
   companyName: string;
   projectName: string;
@@ -41,6 +47,7 @@ export async function notifyAdminOfClientActivity({
     `.trim();
 
     await sendEmailWithAttachment({
+      smtp,
       to: companyEmail,
       subject,
       text: `[${projectName}] ${typeLabel} par ${actor} : ${truncate(detail)}`,
@@ -53,12 +60,14 @@ export async function notifyAdminOfClientActivity({
 }
 
 export async function notifyClientOfActivity({
+  smtp,
   clientEmail,
   companyName,
   projectName,
   activityType,
   detail,
 }: {
+  smtp: SmtpConfig;
   clientEmail: string;
   companyName: string;
   projectName: string;
@@ -82,6 +91,7 @@ export async function notifyClientOfActivity({
     `.trim();
 
     await sendEmailWithAttachment({
+      smtp,
       to: clientEmail,
       subject,
       text: `[${projectName}] ${typeLabel} : ${truncate(detail)}`,

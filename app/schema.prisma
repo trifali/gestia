@@ -61,6 +61,35 @@ model Company {
   brandDescription    String? // Short description of services, shown in prospection emails
   brandEmailSignature String?
 
+  // Courriel sortant (SMTP) — per-company, managed in Paramètres → Intégrations.
+  // smtpPassword is a secret: never returned to the client. When these are empty
+  // the platform SMTP_* environment config is used instead. Wasp's own auth mails
+  // (vérification, réinitialisation) always use the platform config.
+  smtpHost      String?
+  smtpPort      Int?
+  smtpUsername  String?
+  smtpPassword  String?
+  smtpFromName  String?
+  smtpFromEmail String?
+
+  // Every client-facing email carries Reply-To: `email` above, so replies land in
+  // the company inbox rather than on the sending mailbox or the user's account.
+  // When true, that same address is also put in Cci of each client send, giving
+  // the company the exact message as the client received it.
+  copySentEmailsToCompany Boolean @default(false)
+
+  // SMS (Telnyx) — per-company credentials, managed in Paramètres → Intégrations.
+  // telnyxApiKey and telnyxPublicKey are secrets: never returned to the client.
+  // The phone number is unique so an inbound webhook maps to exactly one company.
+  telnyxPhoneNumber String? @unique
+  telnyxApiKey      String?
+  telnyxPublicKey   String?
+
+  // Who gets told about an incoming prospect SMS reply. Only the company's own
+  // `email` / `phone` above are ever notified — never individual user accounts.
+  notifySmsReplyByEmail Boolean @default(true)
+  notifySmsReplyBySms   Boolean @default(false)
+
   // Modalités (business terms & payment conditions)
   modalityDownpaymentPercent Float?
   modalityPaymentMethods     String? // JSON array: ["interac","virement","stripe","cheque","cash","financement"]
@@ -479,6 +508,10 @@ model Lead {
   isOpen          Boolean?
   notes           String?
   status          String    @default("nouveau") // nouveau | contacte | qualifie | rejete
+  // Where the prospect came from: google_maps | manual | facebook | instagram |
+  // linkedin | referral | website | other. Existing rows predate manual entry,
+  // so they all came from the Google Maps search.
+  source          String    @default("google_maps")
   statusUpdatedAt DateTime?
   order           Int       @default(0) // manual position inside its kanban column
 
@@ -582,7 +615,8 @@ model LeadEmailLog {
   @@index([companyId, identifier])
 }
 
-// Sent SMS log for a prospect (append-only, keyed by identifier)
+// SMS conversation with a prospect, keyed by identifier. Holds both directions:
+// outbound rows are written when we send, inbound rows by the Telnyx webhook.
 model LeadSmsLog {
   id        String   @id @default(uuid())
   createdAt DateTime @default(now())
@@ -594,9 +628,30 @@ model LeadSmsLog {
   to         String // E.164 number the message was sent to
   fromNumber String // Telnyx number it was sent from
   body       String @default("")
-  providerId String? // Telnyx message id, for support lookups
+  providerId String? @unique // Telnyx message id — also the webhook idempotency key
+
+  direction String    @default("outbound") // "outbound" | "inbound"
+  status    String? // Telnyx delivery state: queued | sent | delivered | sending_failed | delivery_failed | received
+  errorCode String? // Telnyx error code when a send fails
+  readAt    DateTime? // inbound only: when someone opened the thread
 
   @@index([companyId, identifier])
+  // Attribution lookup: match an inbound number back to the last outbound message.
+  @@index([to, direction, createdAt])
+}
+
+// Inbound SMS from a number we have no outbound history with, so it can't be
+// attributed to a prospect. Kept rather than dropped so replies are never lost.
+model SmsInboundUnmatched {
+  id        String   @id @default(uuid())
+  createdAt DateTime @default(now())
+
+  providerId String? @unique
+  fromNumber String // E.164 number that texted us
+  to         String // our Telnyx number it arrived on
+  body       String  @default("")
+
+  @@index([createdAt])
 }
 
 // Shareable link token for an employee to access prospect details (no login)

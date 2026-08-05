@@ -1,16 +1,81 @@
-// Outgoing SMS through Telnyx, sent from the company's own Telnyx number.
+// Outgoing SMS through Telnyx, sent from each company's own Telnyx number.
 // Uses the plain Messages API over fetch — the Telnyx SDK would be the only
 // dependency added for a single POST.
+//
+// Credentials live on the Company row (Paramètres → Intégrations) and nowhere
+// else. There are no TELNYX_* environment variables.
 
-const TELNYX_MESSAGES_URL = 'https://api.telnyx.com/v2/messages';
+import { createPublicKey } from 'crypto';
 
-/** The Telnyx number every prospect SMS is sent from. */
-export function getSmsFromNumber(): string {
-  return (process.env.TELNYX_PHONE_NUMBER || '').trim();
+const TELNYX_API_BASE = 'https://api.telnyx.com/v2';
+const TELNYX_MESSAGES_URL = `${TELNYX_API_BASE}/messages`;
+
+/** Webhook paths, shared with main.wasp so the settings UI can show real URLs. */
+export const SMS_WEBHOOK_PATH = '/webhooks/telnyx/sms';
+export const SMS_WEBHOOK_FAILOVER_PATH = '/webhooks/telnyx/sms-failover';
+
+/** The subset of Company this module needs. */
+export type SmsCompany = {
+  telnyxPhoneNumber?: string | null;
+  telnyxApiKey?: string | null;
+};
+
+export type SmsCredentials = { apiKey: string; from: string };
+
+/**
+ * Resolves the credentials to send with, from the company's own settings only.
+ * There is deliberately no environment fallback: a misconfigured company must
+ * fail loudly rather than silently borrow another number's credentials.
+ */
+export function resolveSmsCredentials(company: SmsCompany | null | undefined): SmsCredentials | null {
+  const apiKey = (company?.telnyxApiKey || '').trim();
+  const from = (company?.telnyxPhoneNumber || '').trim();
+  if (!apiKey || !from) return null;
+  return { apiKey, from };
 }
 
-export function isSmsConfigured(): boolean {
-  return !!(process.env.TELNYX_API_KEY?.trim() && getSmsFromNumber());
+/** The Ed25519 key inbound webhook signatures are checked against. */
+export function resolveSmsPublicKey(company: { telnyxPublicKey?: string | null } | null | undefined): string | null {
+  const key = (company?.telnyxPublicKey || '').trim();
+  return key || null;
+}
+
+/**
+ * Telnyx hands out the webhook signing key as base64 of a raw 32-byte Ed25519
+ * key. Checking that at save time turns a silent "replies never arrive" into an
+ * immediate error on the form.
+ */
+export function isValidTelnyxPublicKey(raw: string): boolean {
+  const trimmed = (raw ?? '').trim();
+  if (!trimmed) return false;
+  try {
+    if (Buffer.from(trimmed, 'base64').length !== 32) return false;
+    const x = trimmed.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+    createPublicKey({ key: { kty: 'OKP', crv: 'Ed25519', x }, format: 'jwk' } as any);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Confirms an API key is accepted by Telnyx without sending anything. Listing
+ * messaging profiles is a read-only call, so this costs nothing and never texts
+ * a prospect. Returns 'unknown' when Telnyx is unreachable — a network blip must
+ * not be reported to the user as a bad key.
+ */
+export async function verifyTelnyxApiKey(apiKey: string): Promise<'ok' | 'invalid' | 'unknown'> {
+  let res: Response;
+  try {
+    res = await fetch(`${TELNYX_API_BASE}/messaging_profiles?page[size]=1`, {
+      headers: { Authorization: `Bearer ${apiKey}` },
+    });
+  } catch {
+    return 'unknown';
+  }
+  if (res.ok) return 'ok';
+  if (res.status === 401 || res.status === 403) return 'invalid';
+  return 'unknown';
 }
 
 /**
@@ -31,11 +96,12 @@ export function toE164(raw: string): string | null {
   return null;
 }
 
-export async function sendSms(params: { to: string; text: string }): Promise<{ id: string | null }> {
-  const apiKey = process.env.TELNYX_API_KEY?.trim();
-  const from = getSmsFromNumber();
-  if (!apiKey) throw new Error('TELNYX_API_KEY manquant.');
-  if (!from) throw new Error('TELNYX_PHONE_NUMBER manquant.');
+export async function sendSms(params: {
+  to: string;
+  text: string;
+  credentials: SmsCredentials;
+}): Promise<{ id: string | null }> {
+  const { apiKey, from } = params.credentials;
 
   let res: Response;
   try {

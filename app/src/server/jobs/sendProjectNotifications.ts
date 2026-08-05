@@ -1,4 +1,4 @@
-import { sendEmailWithAttachment } from '../mail';
+import { sendEmailWithAttachment, companySmtp } from '../mail';
 
 function escapeHtml(str: string): string {
   return str
@@ -88,7 +88,24 @@ export const sendProjectNotifications = async (_args: unknown, context: any) => 
       const html = `<p>Bonjour,</p><p>${greeting}</p><ul style="padding-left:1.2em">${lines}</ul>${cta}<p>— ${escapeHtml(fromName)}</p>`;
       const text = entries.map((e: any) => `• ${e.message}`).join('\n');
 
-      await sendEmailWithAttachment({ to: toEmail, subject, text, html, fromName });
+      const smtp = companySmtp(proj.company);
+      if (!smtp) {
+        console.error(`[cron] sendProjectNotifications: aucune configuration SMTP pour ${proj.company?.name ?? 'entreprise inconnue'}`);
+        continue; // leave unnotified so a later run retries once SMTP is set up
+      }
+
+      await sendEmailWithAttachment({
+        smtp,
+        to: toEmail,
+        subject,
+        text,
+        html,
+        // The admin digest is internal: it keeps the "Gestia Notifications" name
+        // and needs no copy. The client one goes out under the company's own
+        // configured sender, answers to the company inbox, and is copied there
+        // when that option is on.
+        ...(recipientType === 'admin' ? { fromName } : { clientFacing: true as const }),
+      });
       sentIds.push(...entries.map((e: any) => e.id));
     } catch (err) {
       console.error(`[cron] sendProjectNotifications failed for group ${key}:`, err);

@@ -1,7 +1,7 @@
 import { HttpError } from 'wasp/server';
 import { randomBytes } from 'crypto';
-import { sendEmailWithAttachment, getDefaultFromEmail } from '../../server/mail';
-import { sendSms, toE164, isSmsConfigured, getSmsFromNumber } from '../../server/sms';
+import { sendEmailWithAttachment, companySmtp } from '../../server/mail';
+import { sendSms, toE164, resolveSmsCredentials } from '../../server/sms';
 import type {
   GetLeadSearches,
   GetLeadSearchDetail,
@@ -176,7 +176,7 @@ export const getLeadSearchDetail: GetLeadSearchDetail<
 
   // Attach note count + email flags (per placeId or lead.id)
   const identifiers = search.leads.map(l => l.placeId ?? l.id);
-  const [noteCounts, emailedIdentifiers, draftIdentifiers, smsedIdentifiers] = identifiers.length
+  const [noteCounts, emailedIdentifiers, draftIdentifiers, smsedIdentifiers, smsUnread] = identifiers.length
     ? await Promise.all([
         (context.entities as any).LeadNote.groupBy({
           by: ['identifier'],
@@ -193,16 +193,29 @@ export const getLeadSearchDetail: GetLeadSearchDetail<
           select: { identifier: true },
         }),
         (context.entities as any).LeadSmsLog.findMany({
-          where: { companyId, identifier: { in: identifiers } },
+          where: { companyId, identifier: { in: identifiers }, direction: 'outbound' },
           select: { identifier: true },
           distinct: ['identifier'],
         }),
+        (context.entities as any).LeadSmsLog.groupBy({
+          by: ['identifier'],
+          where: {
+            companyId,
+            identifier: { in: identifiers },
+            direction: 'inbound',
+            readAt: null,
+          },
+          _count: { id: true },
+        }),
       ])
-    : [[], [], [], []];
+    : [[], [], [], [], []];
   const noteCountMap = new Map<string, number>((noteCounts as any[]).map((n: any) => [n.identifier, n._count.id]));
   const emailSet = new Set<string>(emailedIdentifiers.map((e: any) => e.identifier));
   const draftSet = new Set<string>(draftIdentifiers.map((d: any) => d.identifier));
   const smsSet = new Set<string>((smsedIdentifiers as any[]).map((s: any) => s.identifier));
+  const smsUnreadMap = new Map<string, number>(
+    (smsUnread as any[]).map((s: any) => [s.identifier, s._count.id]),
+  );
 
   const leadsWithFlags = leadsWithDups.map(l => ({
     ...l,
@@ -211,6 +224,7 @@ export const getLeadSearchDetail: GetLeadSearchDetail<
     hasEmailSent: emailSet.has(l.placeId ?? l.id),
     hasEmailDraft: draftSet.has(l.placeId ?? l.id),
     hasSmsSent: smsSet.has(l.placeId ?? l.id),
+    smsUnreadCount: smsUnreadMap.get(l.placeId ?? l.id) ?? 0,
   }));
 
   return { ...search, leads: leadsWithFlags } as any;
@@ -380,6 +394,7 @@ export const searchLeads: SearchLeads<
           const saved = l.placeId ? statusMap.get(l.placeId) : undefined;
           return {
             order: i,
+            source: 'google_maps',
             name: l.name,
             address: l.address ?? null,
             phone: l.phone ?? null,
@@ -406,9 +421,9 @@ export const searchLeads: SearchLeads<
 };
 
 export const updateLead: UpdateLead<
-  { id: string; status?: string; notes?: string; email?: string; name?: string; phone?: string; website?: string; address?: string; category?: string },
+  { id: string; status?: string; notes?: string; email?: string; name?: string; phone?: string; website?: string; address?: string; category?: string; source?: string },
   Lead
-> = async ({ id, status, notes, email, name, phone, website, address, category }, context) => {
+> = async ({ id, status, notes, email, name, phone, website, address, category, source }, context) => {
   const companyId = ensureCompany(context.user);
   const lead = await context.entities.Lead.findUnique({
     where: { id },
@@ -427,6 +442,7 @@ export const updateLead: UpdateLead<
       ...(website !== undefined && { website }),
       ...(address !== undefined && { address }),
       ...(category !== undefined && { category }),
+      ...(source !== undefined && { source }),
     },
   });
 
@@ -531,7 +547,7 @@ export const exportLeads: ExportLeads<{ searchId: string }, { csv: string }> = a
   });
   if (!search || search.companyId !== companyId) throw new HttpError(404);
 
-  const headers = ['Nom', 'Catégorie', 'Adresse', 'Téléphone', 'Courriel', 'Site web', 'Note', 'Avis', 'Statut', 'Notes', 'Google Maps'];
+  const headers = ['Nom', 'Catégorie', 'Adresse', 'Téléphone', 'Courriel', 'Site web', 'Note', 'Avis', 'Statut', 'Provenance', 'Notes', 'Google Maps'];
   const rows = (search.leads as Lead[]).map(l => [
     l.name,
     l.category ?? '',
@@ -542,6 +558,7 @@ export const exportLeads: ExportLeads<{ searchId: string }, { csv: string }> = a
     l.rating?.toString() ?? '',
     l.reviewCount?.toString() ?? '',
     l.status,
+    (l as any).source ?? '',
     l.notes ?? '',
     l.mapsUrl ?? '',
   ]);
@@ -710,8 +727,14 @@ export const sendProspectEmail = async (
 
   const company = await (context.entities as any).Company.findUnique({
     where: { id: companyId },
-    select: { name: true, email: true },
+    select: {
+      name: true, email: true,
+      smtpHost: true, smtpPort: true, smtpUsername: true, smtpPassword: true,
+      smtpFromName: true, smtpFromEmail: true, copySentEmailsToCompany: true,
+    },
   });
+  const smtp = companySmtp(company);
+  if (!smtp) throw new HttpError(400, 'Courriel non configuré. Ajoutez votre propre serveur SMTP dans Paramètres → Intégrations.');
 
   const html = `<div style="font-family: Arial, sans-serif; font-size: 14px; color:#1a1a1a; white-space: pre-wrap;">${args.body
     .replace(/&/g, '&amp;')
@@ -719,19 +742,20 @@ export const sendProspectEmail = async (
     .replace(/>/g, '&gt;')
     .replace(/\n/g, '<br/>')}</div>`;
 
-  // The From address stays on our own domain (SPF/DKIM), so replies are routed
-  // back to the company via Reply-To instead.
-  const fromName = company?.name || 'Gestia';
-  const replyTo = company?.email?.trim() || undefined;
+  // Sender name/address, Reply-To and the optional Cci copy all come from the
+  // company's SMTP configuration — the prospect answers to the company inbox,
+  // never to the mailbox the message happened to be sent through.
+  const fromName = smtp.fromName;
+  const replyTo = smtp.replyTo ?? undefined;
 
   await sendEmailWithAttachment({
+    smtp,
     to,
     cc: args.cc?.trim() || undefined,
     subject: args.subject.trim(),
     text: args.body,
     html,
-    fromName,
-    replyTo,
+    clientFacing: true,
   });
 
   // Log the sent email
@@ -745,7 +769,7 @@ export const sendProspectEmail = async (
       body: args.body,
       replyTo: replyTo ?? null,
       fromName,
-      fromEmail: getDefaultFromEmail(),
+      fromEmail: smtp.fromEmail,
     },
   });
 
@@ -930,13 +954,19 @@ export const sendProspectSms = async (
 
   const to = toE164(args.to ?? '');
   if (!to) throw new HttpError(400, 'Numéro de téléphone invalide');
-  if (!isSmsConfigured()) {
-    throw new HttpError(500, 'SMS non configuré (TELNYX_API_KEY / TELNYX_PHONE_NUMBER).');
+
+  const company = await context.entities.Company.findUnique({
+    where: { id: companyId },
+    select: { telnyxPhoneNumber: true, telnyxApiKey: true },
+  });
+  const credentials = resolveSmsCredentials(company);
+  if (!credentials) {
+    throw new HttpError(400, 'SMS non configuré. Ajoutez votre numéro et votre clé API Telnyx dans Paramètres → Intégrations.');
   }
 
   let providerId: string | null = null;
   try {
-    ({ id: providerId } = await sendSms({ to, text }));
+    ({ id: providerId } = await sendSms({ to, text, credentials }));
   } catch (e: any) {
     throw new HttpError(502, e?.message ?? "Erreur lors de l'envoi du SMS");
   }
@@ -946,15 +976,19 @@ export const sendProspectSms = async (
       companyId,
       identifier: args.identifier,
       to,
-      fromNumber: getSmsFromNumber(),
+      fromNumber: credentials.from,
       body: text,
       providerId,
+      direction: 'outbound',
+      // Telnyx accepted it; the real state arrives later via the webhook.
+      status: 'queued',
     },
   });
 
   return { ok: true };
 };
 
+// Chronological, so the modal can render it as a conversation.
 export const getLeadSmsLogs = async (
   { identifier }: { identifier: string },
   context: any,
@@ -962,17 +996,75 @@ export const getLeadSmsLogs = async (
   const companyId = ensureCompany(context.user);
   return (context.entities as any).LeadSmsLog.findMany({
     where: { companyId, identifier },
-    orderBy: { createdAt: 'desc' },
+    orderBy: { createdAt: 'asc' },
   });
 };
 
+// Resets the "SMS sent" flag. Inbound replies are deliberately spared — they are
+// the prospect's messages, not a status we own.
 export const clearLeadSmsSent = async (
   { identifier }: { identifier: string },
   context: any,
 ): Promise<{ ok: true }> => {
   const companyId = ensureCompany(context.user);
   await (context.entities as any).LeadSmsLog.deleteMany({
-    where: { companyId, identifier },
+    where: { companyId, identifier, direction: 'outbound' },
+  });
+  return { ok: true };
+};
+
+/**
+ * Company-wide count of unread SMS replies, plus a per-search breakdown so the
+ * sidebar can flag "Prospection" and each search card can flag itself. Without
+ * this, an unread reply is only visible inside the one search it belongs to.
+ */
+export const getSmsReplyAlerts = async (
+  _args: void,
+  context: any,
+): Promise<{ total: number; bySearch: Record<string, number> }> => {
+  const companyId = ensureCompany(context.user);
+
+  const unread = await (context.entities as any).LeadSmsLog.groupBy({
+    by: ['identifier'],
+    where: { companyId, direction: 'inbound', readAt: null },
+    _count: { id: true },
+  });
+  if (!unread.length) return { total: 0, bySearch: {} };
+
+  // identifier is the placeId when Google Maps supplied one, else the lead's id.
+  const identifiers = (unread as any[]).map((u: any) => u.identifier);
+  const leads = await context.entities.Lead.findMany({
+    where: {
+      search: { companyId },
+      OR: [{ placeId: { in: identifiers } }, { id: { in: identifiers } }],
+    },
+    select: { id: true, placeId: true, searchId: true },
+  });
+  const searchByIdentifier = new Map<string, string>(
+    (leads as any[]).map((l: any) => [l.placeId ?? l.id, l.searchId]),
+  );
+
+  const bySearch: Record<string, number> = {};
+  let total = 0;
+  for (const u of unread as any[]) {
+    total += u._count.id;
+    const searchId = searchByIdentifier.get(u.identifier);
+    // A reply whose lead was since deleted still counts in the total, so it
+    // cannot silently vanish — it just has no card to attach to.
+    if (searchId) bySearch[searchId] = (bySearch[searchId] ?? 0) + u._count.id;
+  }
+  return { total, bySearch };
+};
+
+/** Clears the unread badge once someone has actually opened the thread. */
+export const markLeadSmsRead = async (
+  { identifier }: { identifier: string },
+  context: any,
+): Promise<{ ok: true }> => {
+  const companyId = ensureCompany(context.user);
+  await (context.entities as any).LeadSmsLog.updateMany({
+    where: { companyId, identifier, direction: 'inbound', readAt: null },
+    data: { readAt: new Date() },
   });
   return { ok: true };
 };
@@ -1111,17 +1203,19 @@ export const fetchMoreLeads = async (
   );
   rawLeads = rawLeads.map((l, i) => ({ ...l, email: emailResults[i] || null }));
 
-  // Insert new leads into existing search, after every lead already there.
-  const maxOrder = await context.entities.Lead.aggregate({
-    where: { searchId },
-    _max: { order: true },
+  // Insert the batch on top of the Nouveau column — where they all land — while
+  // keeping the order Google returned them in.
+  const minOrder = await context.entities.Lead.aggregate({
+    where: { searchId, status: 'nouveau' },
+    _min: { order: true },
   });
-  const orderBase = (maxOrder._max.order ?? -1) + 1;
+  const orderBase = (minOrder._min.order ?? 0) - rawLeads.length;
 
   await context.entities.Lead.createMany({
     data: rawLeads.map((l, i) => ({
       searchId,
       order: orderBase + i,
+      source: 'google_maps',
       name: l.name,
       address: l.address ?? null,
       phone: l.phone ?? null,
@@ -1161,6 +1255,7 @@ export const createLead = async (
     address?: string;
     category?: string;
     status?: string;
+    source?: string;
   },
   context: any,
 ): Promise<any> => {
@@ -1177,11 +1272,12 @@ export const createLead = async (
     return t ? t : null;
   };
 
-  // Land at the bottom of its column instead of jumping to the top, which is
-  // where a manually added prospect is expected to appear.
-  const last = await context.entities.Lead.findFirst({
+  // Land on top of its column so a freshly added prospect is the first thing
+  // seen. Orders are re-normalised to 0..n-1 by applyLeadOrder on the next
+  // drag, so going negative here is safe.
+  const first = await context.entities.Lead.findFirst({
     where: { searchId: args.searchId, status },
-    orderBy: { order: 'desc' },
+    orderBy: { order: 'asc' },
     select: { order: true },
   });
 
@@ -1195,8 +1291,9 @@ export const createLead = async (
       address: clean(args.address),
       category: clean(args.category),
       status,
+      source: args.source?.trim() || 'manual',
       statusUpdatedAt: new Date(),
-      order: (last?.order ?? -1) + 1,
+      order: (first?.order ?? 0) - 1,
     },
   });
 };

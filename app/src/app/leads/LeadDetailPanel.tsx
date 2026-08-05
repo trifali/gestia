@@ -18,6 +18,7 @@ import {
   deleteLeadNote,
 } from 'wasp/client/operations';
 import type { Lead, LeadStatusConfig } from 'wasp/entities';
+import { useSmsCapability, useEmailCapability } from '../../client/capabilities';
 import {
   LuX,
   LuPhone,
@@ -43,6 +44,7 @@ import {
   LeadEditForm,
   CopyBtn,
   formatMontrealTime,
+  LEAD_SOURCES,
   type LeadFormValues,
 } from './leads.shared';
 
@@ -96,6 +98,7 @@ export function LeadDetailPanel({
 }) {
   const [editing, setEditing] = useState(false);
   const [savingStatus, setSavingStatus] = useState<string | null>(null);
+  const [savingSource, setSavingSource] = useState(false);
   const [noteText, setNoteText] = useState('');
   const [savingNote, setSavingNote] = useState(false);
   const [deletingNoteId, setDeletingNoteId] = useState<string | null>(null);
@@ -110,6 +113,11 @@ export function LeadDetailPanel({
     { identifier },
     { enabled: !!identifier } as any,
   );
+
+  // Must stay above the `if (!lead) return null` below: hooks cannot be called
+  // conditionally, and this component renders with lead === null while closed.
+  const { canSend: smsCanSend, reason: smsReason } = useSmsCapability();
+  const { canSend: emailCanSend, reason: emailReason } = useEmailCapability();
 
   // Keep the rendered lead in sync with fresh data from the board.
   useEffect(() => {
@@ -171,6 +179,19 @@ export function LeadDetailPanel({
       toast.error('Erreur lors de la mise à jour du statut');
     } finally {
       setSavingStatus(null);
+    }
+  }
+
+  async function handleSource(source: string) {
+    if (source === (lead as any)!.source) return;
+    setSavingSource(true);
+    try {
+      await updateLead({ id: lead!.id, source } as any);
+      onRefetch();
+    } catch {
+      toast.error('Erreur lors de la mise à jour de la provenance');
+    } finally {
+      setSavingSource(false);
     }
   }
 
@@ -287,6 +308,25 @@ export function LeadDetailPanel({
                     </button>
                   );
                 })}
+            </div>
+          </div>
+
+          {/* Provenance */}
+          <div className='mt-3'>
+            <div className='text-[11px] uppercase tracking-wide text-muted mb-1.5'>Provenance</div>
+            <div className='flex items-center gap-2'>
+              <select
+                className='input py-1 text-xs w-auto'
+                value={(l.source as string) ?? 'google_maps'}
+                onChange={e => handleSource(e.target.value)}
+                disabled={savingSource}
+                title="D'où vient ce prospect"
+              >
+                {LEAD_SOURCES.map(s => (
+                  <option key={s.key} value={s.key}>{s.label}</option>
+                ))}
+              </select>
+              {savingSource && <LuLoader size={12} className='animate-spin text-muted' />}
             </div>
           </div>
         </div>
@@ -430,23 +470,56 @@ export function LeadDetailPanel({
 
         {/* Footer actions */}
         <div className='sticky bottom-0 z-10 shrink-0 px-5 py-3 border-t border-line bg-canvas-100 flex items-center gap-2'>
+          {/* Like the SMS button: the label stays put and the state shows in the
+              colour — green once sent, amber while a draft is waiting. */}
           <button
-            className='btn-primary gap-1.5 text-sm flex-1 justify-center'
+            className={`gap-1.5 text-sm flex-1 justify-center ${
+              !emailCanSend
+                ? 'btn-secondary'
+                : l.hasEmailSent
+                  ? 'btn-secondary text-success'
+                  : l.hasEmailDraft
+                    ? 'btn-secondary text-amber-600'
+                    : 'btn-primary'
+            }`}
             onClick={() => onEmail(lead)}
-            disabled={!lead.email}
-            title={lead.email ? undefined : 'Aucun courriel pour ce prospect'}
+            disabled={!lead.email || !emailCanSend}
+            title={
+              !emailCanSend
+                ? (emailReason ?? '')
+                : !lead.email
+                  ? 'Aucun courriel pour ce prospect'
+                  : l.hasEmailSent
+                    ? 'Courriel déjà envoyé — cliquer pour renvoyer'
+                    : l.hasEmailDraft
+                      ? 'Brouillon en cours — cliquer pour reprendre'
+                      : 'Envoyer un courriel'
+            }
           >
             <LuSend size={14} />
-            {l.hasEmailSent ? 'Réenvoyer' : l.hasEmailDraft ? 'Brouillon' : 'Courriel'}
+            Courriel
           </button>
           <button
-            className={`btn-secondary gap-1.5 text-sm ${l.hasSmsSent ? 'text-success' : ''}`}
+            className={`btn-secondary gap-1.5 text-sm relative ${l.hasSmsSent && smsCanSend ? 'text-success' : ''}`}
             onClick={() => onSms(lead)}
-            disabled={!lead.phone}
-            title={lead.phone ? (l.hasSmsSent ? 'Renvoyer un SMS' : 'Envoyer un SMS') : 'Aucun téléphone pour ce prospect'}
+            disabled={!lead.phone || !smsCanSend}
+            title={
+              !smsCanSend
+                ? (smsReason ?? '')
+                : !lead.phone
+                  ? 'Aucun téléphone pour ce prospect'
+                  : l.smsUnreadCount
+                    ? `${l.smsUnreadCount} réponse(s) non lue(s)`
+                    : l.hasSmsSent ? 'Renvoyer un SMS' : 'Envoyer un SMS'
+            }
           >
             <LuMessageSquare size={14} />
             SMS
+            {smsCanSend && l.smsUnreadCount > 0 && (
+              <span className='ml-0.5 min-w-[16px] h-4 px-1 rounded-full bg-accent-500 text-white text-[10px] font-semibold flex items-center justify-center'>
+                {l.smsUnreadCount}
+              </span>
+            )}
           </button>
           {lead.status === 'qualifie' &&
             (alreadyClient ? (

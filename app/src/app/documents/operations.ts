@@ -13,7 +13,7 @@ import type {
 import type { Document, DocumentItem, Client, Project, Payment } from 'wasp/entities';
 import { computeTotals, nextDocNumber } from '../../server/tenant';
 import { logActivity } from '../activity/operations';
-import { sendEmailWithAttachment } from '../../server/mail';
+import { sendEmailWithAttachment, companySmtp } from '../../server/mail';
 
 function ensureCompany(user: any): string {
   if (!user) throw new HttpError(401);
@@ -368,7 +368,14 @@ export const sendDocumentEmail: SendDocumentEmail<SendDocumentEmailArgs, { ok: t
   const companyId = ensureCompany(context.user);
   const [doc, company] = await Promise.all([
     context.entities.Document.findUnique({ where: { id: args.id }, include: { client: true } }),
-    (context.entities as any).Company.findUnique({ where: { id: companyId }, select: { name: true } }),
+    (context.entities as any).Company.findUnique({
+      where: { id: companyId },
+      select: {
+        name: true, email: true,
+        smtpHost: true, smtpPort: true, smtpUsername: true, smtpPassword: true,
+        smtpFromName: true, smtpFromEmail: true, copySentEmailsToCompany: true,
+      },
+    }),
   ]);
   if (!doc || (doc as any).companyId !== companyId) throw new HttpError(404);
 
@@ -384,14 +391,20 @@ export const sendDocumentEmail: SendDocumentEmail<SendDocumentEmailArgs, { ok: t
     .replace(/>/g, '&gt;')
     .replace(/\n/g, '<br/>')}</div>`;
 
+  const smtp = companySmtp(company);
+  if (!smtp) throw new HttpError(400, 'Courriel non configuré. Ajoutez votre propre serveur SMTP dans Paramètres → Intégrations.');
+
   await sendEmailWithAttachment({
+    smtp,
     to,
     cc: args.cc?.trim() || undefined,
     subject: args.subject,
     text: message,
     html,
-    fromName: company?.name ? `${company.name} via Gestia` : 'Gestia',
-    replyTo: context.user?.email || undefined,
+    // Sender name, Reply-To and the optional Cci copy all come from the company's
+    // configuration (Paramètres → Intégrations); a client answering the invoice
+    // must reach the company, not the individual account that pressed "Envoyer".
+    clientFacing: true,
     attachments: [
       {
         filename: args.filename || `${doc.number}.pdf`,

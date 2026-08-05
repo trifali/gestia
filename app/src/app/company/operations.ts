@@ -7,9 +7,12 @@ import type {
 } from 'wasp/server/operations';
 import type { Company } from 'wasp/entities';
 import { requireAdmin } from '../../server/tenant';
-import { getDefaultFromEmail } from '../../server/mail';
+import { companySmtp } from '../../server/mail';
 
-export const getCurrentCompany: GetCurrentCompany<void, (Company & { _userRole: string }) | null> = async (
+/** Company row minus the credentials no browser should ever receive. */
+export type SafeCompany = Omit<Company, 'telnyxApiKey' | 'telnyxPublicKey' | 'smtpPassword'> & { _userRole: string };
+
+export const getCurrentCompany: GetCurrentCompany<void, SafeCompany | null> = async (
   _args,
   context
 ) => {
@@ -17,16 +20,39 @@ export const getCurrentCompany: GetCurrentCompany<void, (Company & { _userRole: 
   if (!context.user.companyId) return null;
   const company = await context.entities.Company.findUnique({ where: { id: context.user.companyId } });
   if (!company) return null;
-  return { ...company, _userRole: (context.user as any).role || 'client' };
+  // This query is readable by every member of the company, including `client`
+  // role users, so the Telnyx secrets are stripped here rather than relying on
+  // callers to avoid them. `getSmsSettings` exposes masked previews to admins.
+  const { telnyxApiKey: _k, telnyxPublicKey: _p, smtpPassword: _s, ...safe } = company;
+  return { ...safe, _userRole: (context.user as any).role || 'client' };
 };
 
 /**
- * The address outgoing mail is actually sent from. Lives on our own domain for
- * SPF/DKIM, so email previews can show a truthful `From` header.
+ * How outgoing mail will actually be addressed, so email previews can show a
+ * truthful `From` / `Répondre à` instead of guessing.
  */
-export const getMailSenderAddress = async (_args: void, context: any): Promise<{ fromEmail: string }> => {
+export const getMailSenderAddress = async (
+  _args: void,
+  context: any,
+): Promise<{ fromEmail: string; fromName: string; replyTo: string }> => {
   if (!context.user) throw new HttpError(401);
-  return { fromEmail: getDefaultFromEmail() };
+  const companyId = (context.user as any).companyId;
+  const company = companyId
+    ? await context.entities.Company.findUnique({
+        where: { id: companyId },
+        select: {
+          name: true, email: true,
+          smtpHost: true, smtpPort: true, smtpUsername: true, smtpPassword: true,
+          smtpFromName: true, smtpFromEmail: true,
+        },
+      })
+    : null;
+  const smtp = companySmtp(company);
+  return {
+    fromEmail: smtp?.fromEmail ?? '',
+    fromName: smtp?.fromName ?? '',
+    replyTo: smtp?.replyTo ?? '',
+  };
 };
 
 type CreateCompanyArgs = { name: string };
