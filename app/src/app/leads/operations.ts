@@ -1,6 +1,7 @@
 import { HttpError } from 'wasp/server';
 import { randomBytes } from 'crypto';
 import { sendEmailWithAttachment, getDefaultFromEmail } from '../../server/mail';
+import { sendSms, toE164, isSmsConfigured, getSmsFromNumber } from '../../server/sms';
 import type {
   GetLeadSearches,
   GetLeadSearchDetail,
@@ -175,7 +176,7 @@ export const getLeadSearchDetail: GetLeadSearchDetail<
 
   // Attach note count + email flags (per placeId or lead.id)
   const identifiers = search.leads.map(l => l.placeId ?? l.id);
-  const [noteCounts, emailedIdentifiers, draftIdentifiers] = identifiers.length
+  const [noteCounts, emailedIdentifiers, draftIdentifiers, smsedIdentifiers] = identifiers.length
     ? await Promise.all([
         (context.entities as any).LeadNote.groupBy({
           by: ['identifier'],
@@ -191,11 +192,17 @@ export const getLeadSearchDetail: GetLeadSearchDetail<
           where: { companyId, identifier: { in: identifiers } },
           select: { identifier: true },
         }),
+        (context.entities as any).LeadSmsLog.findMany({
+          where: { companyId, identifier: { in: identifiers } },
+          select: { identifier: true },
+          distinct: ['identifier'],
+        }),
       ])
-    : [[], [], []];
+    : [[], [], [], []];
   const noteCountMap = new Map<string, number>((noteCounts as any[]).map((n: any) => [n.identifier, n._count.id]));
   const emailSet = new Set<string>(emailedIdentifiers.map((e: any) => e.identifier));
   const draftSet = new Set<string>(draftIdentifiers.map((d: any) => d.identifier));
+  const smsSet = new Set<string>((smsedIdentifiers as any[]).map((s: any) => s.identifier));
 
   const leadsWithFlags = leadsWithDups.map(l => ({
     ...l,
@@ -203,6 +210,7 @@ export const getLeadSearchDetail: GetLeadSearchDetail<
     hasNotes: noteCountMap.has(l.placeId ?? l.id),
     hasEmailSent: emailSet.has(l.placeId ?? l.id),
     hasEmailDraft: draftSet.has(l.placeId ?? l.id),
+    hasSmsSent: smsSet.has(l.placeId ?? l.id),
   }));
 
   return { ...search, leads: leadsWithFlags } as any;
@@ -806,49 +814,167 @@ export const clearLeadEmailSent = async (
   return { ok: true };
 };
 
-// ─── getProspectEmailTemplate ─────────────────────────────────────────────────
+// ─── Prospect message templates (email + sms) ────────────────────────────────
 
-export const getProspectEmailTemplate = async (
+type TemplateChannel = 'email' | 'sms';
+
+function normalizeChannel(channel?: string | null): TemplateChannel {
+  return channel === 'sms' ? 'sms' : 'email';
+}
+
+async function ensureOwnedSearch(searchId: string, companyId: string, entities: any) {
+  const search = await entities.LeadSearch.findUnique({ where: { id: searchId } });
+  if (!search || search.companyId !== companyId) throw new HttpError(404);
+  return search;
+}
+
+export const getProspectTemplates = async (
   { searchId }: { searchId: string },
   context: any,
-) => {
+): Promise<any[]> => {
   const companyId = ensureCompany(context.user);
-  const search = await context.entities.LeadSearch.findUnique({ where: { id: searchId } });
-  if (!search || search.companyId !== companyId) throw new HttpError(404);
-  return (context.entities as any).ProspectEmailTemplate.findUnique({
+  await ensureOwnedSearch(searchId, companyId, context.entities);
+  return (context.entities as any).ProspectTemplate.findMany({
     where: { searchId },
+    orderBy: [{ channel: 'asc' }, { createdAt: 'asc' }],
   });
 };
 
-// ─── upsertProspectEmailTemplate ─────────────────────────────────────────────
-
-export const upsertProspectEmailTemplate = async (
-  { searchId, subject, body }: { searchId: string; subject: string; body: string },
+export const upsertProspectTemplate = async (
+  args: {
+    id?: string | null;
+    searchId: string;
+    channel?: string;
+    name: string;
+    subject?: string;
+    body: string;
+    defaultStatus?: string | null;
+  },
   context: any,
-) => {
+): Promise<any> => {
   const companyId = ensureCompany(context.user);
-  const search = await context.entities.LeadSearch.findUnique({ where: { id: searchId } });
-  if (!search || search.companyId !== companyId) throw new HttpError(404);
-  return (context.entities as any).ProspectEmailTemplate.upsert({
-    where: { searchId },
-    create: { searchId, companyId, subject: subject.trim(), body },
-    update: { subject: subject.trim(), body },
-  });
+  await ensureOwnedSearch(args.searchId, companyId, context.entities);
+
+  const channel = normalizeChannel(args.channel);
+  const name = args.name?.trim() || (channel === 'sms' ? 'Modèle SMS' : 'Modèle courriel');
+  if (!args.body?.trim()) throw new HttpError(400, 'Le message ne peut pas être vide');
+  const defaultStatus = args.defaultStatus?.trim() || null;
+
+  const data = {
+    name,
+    channel,
+    // A text message has no subject line, so it is never stored for sms.
+    subject: channel === 'sms' ? '' : (args.subject ?? '').trim(),
+    body: args.body,
+    defaultStatus,
+  };
+
+  let template: any;
+  if (args.id) {
+    const existing = await (context.entities as any).ProspectTemplate.findUnique({ where: { id: args.id } });
+    if (!existing || existing.companyId !== companyId) throw new HttpError(404);
+    template = await (context.entities as any).ProspectTemplate.update({
+      where: { id: args.id },
+      data,
+    });
+  } else {
+    template = await (context.entities as any).ProspectTemplate.create({
+      data: { ...data, searchId: args.searchId, companyId },
+    });
+  }
+
+  // A status can only propose one model per channel, so the previous holder
+  // gives it up rather than the send modal having to pick between two.
+  if (defaultStatus) {
+    await (context.entities as any).ProspectTemplate.updateMany({
+      where: {
+        searchId: args.searchId,
+        channel,
+        defaultStatus,
+        id: { not: template.id },
+      },
+      data: { defaultStatus: null },
+    });
+  }
+
+  return template;
 };
 
-// ─── deleteProspectEmailTemplate ─────────────────────────────────────────────
-
-export const deleteProspectEmailTemplate = async (
-  { searchId }: { searchId: string },
+export const deleteProspectTemplate = async (
+  { id }: { id: string },
   context: any,
 ): Promise<{ deleted: boolean }> => {
   const companyId = ensureCompany(context.user);
-  const search = await context.entities.LeadSearch.findUnique({ where: { id: searchId } });
-  if (!search || search.companyId !== companyId) throw new HttpError(404);
-  const tmpl = await (context.entities as any).ProspectEmailTemplate.findUnique({ where: { searchId } });
-  if (!tmpl) return { deleted: false };
-  await (context.entities as any).ProspectEmailTemplate.delete({ where: { searchId } });
+  const tmpl = await (context.entities as any).ProspectTemplate.findUnique({ where: { id } });
+  if (!tmpl || tmpl.companyId !== companyId) throw new HttpError(404);
+  await (context.entities as any).ProspectTemplate.delete({ where: { id } });
   return { deleted: true };
+};
+
+// ─── Prospect SMS ─────────────────────────────────────────────────────────────
+
+export const sendProspectSms = async (
+  args: { identifier: string; leadId: string; to: string; body: string },
+  context: any,
+): Promise<{ ok: true }> => {
+  const companyId = ensureCompany(context.user);
+
+  const lead = await context.entities.Lead.findUnique({
+    where: { id: args.leadId },
+    include: { search: { select: { companyId: true } } },
+  });
+  if (!lead || (lead as any).search.companyId !== companyId) throw new HttpError(404);
+
+  const text = (args.body ?? '').trim();
+  if (!text) throw new HttpError(400, 'Message requis');
+
+  const to = toE164(args.to ?? '');
+  if (!to) throw new HttpError(400, 'Numéro de téléphone invalide');
+  if (!isSmsConfigured()) {
+    throw new HttpError(500, 'SMS non configuré (TELNYX_API_KEY / TELNYX_PHONE_NUMBER).');
+  }
+
+  let providerId: string | null = null;
+  try {
+    ({ id: providerId } = await sendSms({ to, text }));
+  } catch (e: any) {
+    throw new HttpError(502, e?.message ?? "Erreur lors de l'envoi du SMS");
+  }
+
+  await (context.entities as any).LeadSmsLog.create({
+    data: {
+      companyId,
+      identifier: args.identifier,
+      to,
+      fromNumber: getSmsFromNumber(),
+      body: text,
+      providerId,
+    },
+  });
+
+  return { ok: true };
+};
+
+export const getLeadSmsLogs = async (
+  { identifier }: { identifier: string },
+  context: any,
+): Promise<any[]> => {
+  const companyId = ensureCompany(context.user);
+  return (context.entities as any).LeadSmsLog.findMany({
+    where: { companyId, identifier },
+    orderBy: { createdAt: 'desc' },
+  });
+};
+
+export const clearLeadSmsSent = async (
+  { identifier }: { identifier: string },
+  context: any,
+): Promise<{ ok: true }> => {
+  const companyId = ensureCompany(context.user);
+  await (context.entities as any).LeadSmsLog.deleteMany({
+    where: { companyId, identifier },
+  });
+  return { ok: true };
 };
 
 // ─── fetchMoreLeads ───────────────────────────────────────────────────────────
@@ -1021,6 +1147,58 @@ export const fetchMoreLeads = async (
   });
 
   return { added: rawLeads.length, exhausted: false, nextExpandedRadiusKm: nextExpandedM / 1000 };
+};
+
+// ─── createLead (manual entry) ────────────────────────────────────────────────
+
+export const createLead = async (
+  args: {
+    searchId: string;
+    name: string;
+    phone?: string;
+    email?: string;
+    website?: string;
+    address?: string;
+    category?: string;
+    status?: string;
+  },
+  context: any,
+): Promise<any> => {
+  const companyId = ensureCompany(context.user);
+  const search = await context.entities.LeadSearch.findUnique({ where: { id: args.searchId } });
+  if (!search || search.companyId !== companyId) throw new HttpError(404);
+
+  const name = args.name?.trim();
+  if (!name) throw new HttpError(400, "Le nom de l'entreprise est requis");
+
+  const status = args.status?.trim() || 'nouveau';
+  const clean = (v?: string) => {
+    const t = v?.trim();
+    return t ? t : null;
+  };
+
+  // Land at the bottom of its column instead of jumping to the top, which is
+  // where a manually added prospect is expected to appear.
+  const last = await context.entities.Lead.findFirst({
+    where: { searchId: args.searchId, status },
+    orderBy: { order: 'desc' },
+    select: { order: true },
+  });
+
+  return context.entities.Lead.create({
+    data: {
+      searchId: args.searchId,
+      name,
+      phone: clean(args.phone),
+      email: clean(args.email),
+      website: clean(args.website),
+      address: clean(args.address),
+      category: clean(args.category),
+      status,
+      statusUpdatedAt: new Date(),
+      order: (last?.order ?? -1) + 1,
+    },
+  });
 };
 
 // ─── deleteLead ───────────────────────────────────────────────────────────────

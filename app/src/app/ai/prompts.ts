@@ -402,3 +402,49 @@ export function buildProspectEmailTemplatePrompts(ctx: ProspectEmailTemplateCont
 
   return { system, user };
 }
+
+// ─── Prospect SMS template ────────────────────────────────────────────────────
+// Same context as the email template, but a text message has no subject and
+// has to stay inside a couple of SMS segments to remain cheap and readable.
+
+export function buildProspectSmsTemplatePrompts(
+  ctx: ProspectEmailTemplateContext,
+): { system: string; user: string } {
+  const isEditing = !!ctx.currentBody?.trim();
+
+  const companyLine = [
+    ctx.companyName,
+    ctx.companyTagline ? `« ${ctx.companyTagline} »` : null,
+  ].filter(Boolean).join(' — ');
+
+  const system =
+    'Tu rédiges des MODÈLES de SMS de prospection en FRANÇAIS (Québec).\n' +
+    'Un modèle utilise des variables dynamiques — les tokens {{...}} restent LITTÉRALEMENT dans le texte retourné, ils ne sont PAS remplacés.\n\n' +
+    'RÈGLES ABSOLUES :\n' +
+    '1. MAXIMUM 300 caractères, variables comprises. Vise 2 ou 3 phrases courtes.\n' +
+    '2. Commence par le nom de mon entreprise pour que le prospect sache qui écrit.\n' +
+    '3. Ton direct et poli, vouvoiement, aucune familiarité excessive.\n' +
+    '4. Une seule question ou un seul appel à l\'action à la fin.\n' +
+    '5. PAS d\'objet, PAS de signature, PAS d\'émoji, PAS de lien raccourci inventé.\n' +
+    '6. Réponds UNIQUEMENT avec le texte du SMS — aucun préambule, aucun guillemet autour.\n\n' +
+    EMAIL_TEMPLATE_VARS_DOC;
+
+  const contextBlock =
+    `Mon entreprise : ${companyLine}\n` +
+    (ctx.companyDescription ? `Ce que fait notre entreprise : ${ctx.companyDescription}\n` : '') +
+    `Expéditeur : ${ctx.senderName ?? ctx.companyName}\n` +
+    `Contexte de la prospection : ${ctx.searchTitle}` +
+    (ctx.purpose?.trim() ? `\nObjectif : ${ctx.purpose.trim()}` : '');
+
+  const user = isEditing
+    ? `Améliore ce modèle de SMS en respectant STRICTEMENT les règles du système.\n\n` +
+      contextBlock + '\n\n' +
+      `Modèle actuel :\n${ctx.currentBody}\n\n` +
+      `Retourne uniquement le texte du SMS amélioré.`
+    : `Génère un modèle de SMS de prospection en respectant STRICTEMENT les règles du système.\n\n` +
+      contextBlock + '\n\n' +
+      `Utilise {{lead.name}} pour nommer le prospect et {{company.name}} pour mon entreprise.\n` +
+      `Retourne uniquement le texte du SMS.`;
+
+  return { system, user };
+}

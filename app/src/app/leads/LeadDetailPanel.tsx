@@ -36,6 +36,7 @@ import {
   LuLoader,
   LuCheck,
   LuNotebook,
+  LuMessageSquare,
 } from 'react-icons/lu';
 import {
   NoteThread,
@@ -79,6 +80,7 @@ export function LeadDetailPanel({
   onClose,
   onRefetch,
   onEmail,
+  onSms,
   onConvert,
   onDelete,
 }: {
@@ -88,6 +90,7 @@ export function LeadDetailPanel({
   onClose: () => void;
   onRefetch: () => void;
   onEmail: (lead: Lead) => void;
+  onSms: (lead: Lead) => void;
   onConvert: (lead: Lead) => void;
   onDelete: (lead: Lead) => void;
 }) {
@@ -435,6 +438,15 @@ export function LeadDetailPanel({
           >
             <LuSend size={14} />
             {l.hasEmailSent ? 'Réenvoyer' : l.hasEmailDraft ? 'Brouillon' : 'Courriel'}
+          </button>
+          <button
+            className={`btn-secondary gap-1.5 text-sm ${l.hasSmsSent ? 'text-success' : ''}`}
+            onClick={() => onSms(lead)}
+            disabled={!lead.phone}
+            title={lead.phone ? (l.hasSmsSent ? 'Renvoyer un SMS' : 'Envoyer un SMS') : 'Aucun téléphone pour ce prospect'}
+          >
+            <LuMessageSquare size={14} />
+            SMS
           </button>
           {lead.status === 'qualifie' &&
             (alreadyClient ? (

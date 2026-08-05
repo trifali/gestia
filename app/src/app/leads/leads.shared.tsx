@@ -35,6 +35,28 @@ export function formatMontrealTime(date: string | Date): string {
   }).format(new Date(date));
 }
 
+// ─── SMS length helper ────────────────────────────────────────────────────────
+// A GSM-7 message fits 160 characters per part, but a single character outside
+// that alphabet (an emoji, a curly quote) switches the whole message to UCS-2
+// and drops it to 70 — which is why the composer shows both numbers.
+
+const GSM7 =
+  "@£$¥èéùìòÇ\nØø\rÅåΔ_ΦΓΛΩΠΨΣΘΞÆæßÉ !\"#¤%&'()*+,-./0123456789:;<=>?" +
+  '¡ABCDEFGHIJKLMNOPQRSTUVWXYZÄÖÑÜ§¿abcdefghijklmnopqrstuvwxyzäöñüà';
+const GSM7_EXTENDED = '^{}\\[~]|€';
+
+export function smsSegments(text: string): { chars: number; segments: number; unicode: boolean } {
+  const unicode = [...text].some(c => !GSM7.includes(c) && !GSM7_EXTENDED.includes(c));
+  // Extended characters cost two septets each.
+  const chars = unicode
+    ? [...text].length
+    : [...text].reduce((n, c) => n + (GSM7_EXTENDED.includes(c) ? 2 : 1), 0);
+  const single = unicode ? 70 : 160;
+  const multi = unicode ? 67 : 153;
+  const segments = chars === 0 ? 0 : chars <= single ? 1 : Math.ceil(chars / multi);
+  return { chars, segments, unicode };
+}
+
 // ─── Note thread (timeline + composer) ───────────────────────────────────────
 // Used in NoteModal for both the authenticated page and the public portal.
 
@@ -182,11 +204,18 @@ export function LeadEditForm({
   initialValues,
   onSave,
   onCancel,
+  extraFields,
+  submitLabel = 'Sauvegarder',
+  savingLabel = 'Sauvegarde…',
 }: {
   initialValues: LeadFormValues;
   /** Called with trimmed values; should handle saving and call onCancel on success. */
   onSave: (values: LeadFormValues) => Promise<void>;
   onCancel: () => void;
+  /** Extra cell(s) appended to the field grid, e.g. a status picker on creation. */
+  extraFields?: ReactNode;
+  submitLabel?: string;
+  savingLabel?: string;
 }) {
   const [form, setForm] = useState<LeadFormValues>(initialValues);
   const [saving, setSaving] = useState(false);
@@ -270,13 +299,14 @@ export function LeadEditForm({
             placeholder='—'
           />
         </div>
+        {extraFields}
       </div>
       <div className='flex justify-end gap-2 pt-1'>
         <button className='btn-secondary' onClick={onCancel} disabled={saving}>
           Annuler
         </button>
         <button className='btn-primary' onClick={handleSave} disabled={saving}>
-          {saving ? 'Sauvegarde…' : 'Sauvegarder'}
+          {saving ? savingLabel : submitLabel}
         </button>
       </div>
     </div>

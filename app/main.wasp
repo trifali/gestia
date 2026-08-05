@@ -606,7 +606,7 @@ query getLeadSearches {
 }
 query getLeadSearchDetail {
   fn: import { getLeadSearchDetail } from "@src/app/leads/operations",
-  entities: [User, LeadSearch, Lead, LeadNote, LeadEmailLog, LeadEmailDraft]
+  entities: [User, LeadSearch, Lead, LeadNote, LeadEmailLog, LeadEmailDraft, LeadSmsLog]
 }
 action searchLeads {
   fn: import { searchLeads } from "@src/app/leads/operations",
@@ -684,20 +684,36 @@ action clearLeadEmailSent {
   fn: import { clearLeadEmailSent } from "@src/app/leads/operations",
   entities: [User, LeadEmailLog]
 }
-query getProspectEmailTemplate {
-  fn: import { getProspectEmailTemplate } from "@src/app/leads/operations",
-  entities: [User, LeadSearch, ProspectEmailTemplate]
+query getProspectTemplates {
+  fn: import { getProspectTemplates } from "@src/app/leads/operations",
+  entities: [User, LeadSearch, ProspectTemplate]
 }
-action upsertProspectEmailTemplate {
-  fn: import { upsertProspectEmailTemplate } from "@src/app/leads/operations",
-  entities: [User, LeadSearch, ProspectEmailTemplate]
+action upsertProspectTemplate {
+  fn: import { upsertProspectTemplate } from "@src/app/leads/operations",
+  entities: [User, LeadSearch, ProspectTemplate]
 }
-action deleteProspectEmailTemplate {
-  fn: import { deleteProspectEmailTemplate } from "@src/app/leads/operations",
-  entities: [User, LeadSearch, ProspectEmailTemplate]
+action deleteProspectTemplate {
+  fn: import { deleteProspectTemplate } from "@src/app/leads/operations",
+  entities: [User, LeadSearch, ProspectTemplate]
+}
+action sendProspectSms {
+  fn: import { sendProspectSms } from "@src/app/leads/operations",
+  entities: [User, Company, Lead, LeadSmsLog]
+}
+query getLeadSmsLogs {
+  fn: import { getLeadSmsLogs } from "@src/app/leads/operations",
+  entities: [User, LeadSmsLog]
+}
+action clearLeadSmsSent {
+  fn: import { clearLeadSmsSent } from "@src/app/leads/operations",
+  entities: [User, LeadSmsLog]
 }
 action fetchMoreLeads {
   fn: import { fetchMoreLeads } from "@src/app/leads/operations",
+  entities: [User, LeadSearch, Lead]
+}
+action createLead {
+  fn: import { createLead } from "@src/app/leads/operations",
   entities: [User, LeadSearch, Lead]
 }
 action deleteLead {

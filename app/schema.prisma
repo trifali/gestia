@@ -89,7 +89,8 @@ model Company {
   leadNotes              LeadNote[]
   leadEmailLogs          LeadEmailLog[]
   leadEmailDrafts        LeadEmailDraft[]
-  prospectEmailTemplates ProspectEmailTemplate[]
+  leadSmsLogs            LeadSmsLog[]
+  prospectTemplates      ProspectTemplate[]
   leadShareTokens        LeadSearchShareToken[]
 }
 
@@ -449,9 +450,9 @@ model LeadSearch {
   errorMsg    String?
   totalFound  Int     @default(0)
 
-  leads         Lead[]
-  emailTemplate ProspectEmailTemplate?
-  shareToken    LeadSearchShareToken?
+  leads      Lead[]
+  templates  ProspectTemplate[]
+  shareToken LeadSearchShareToken?
 
   @@index([companyId])
 }
@@ -484,7 +485,10 @@ model Lead {
   @@index([searchId])
 }
 
-model ProspectEmailTemplate {
+// A reusable message model of a prospection search. Kept on the original
+// `ProspectEmailTemplate` table (hence the @@map) since it started life as the
+// single email template each search had.
+model ProspectTemplate {
   id        String   @id @default(uuid())
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -493,12 +497,22 @@ model ProspectEmailTemplate {
   companyId String
 
   search   LeadSearch @relation(fields: [searchId], references: [id], onDelete: Cascade)
-  searchId String     @unique
+  searchId String
 
-  subject String @default("")
+  // ASCII default on purpose: the wasp prisma pipeline garbles accents in
+  // default values, and existing rows inherit this name on migration.
+  name    String @default("Courriel")
+  channel String @default("email") // email | sms
+  subject String @default("") // unused for sms
   body    String @default("")
 
+  // Status key this model is proposed for by default, e.g. "nouveau".
+  // At most one model per search + channel + status.
+  defaultStatus String?
+
   @@index([companyId])
+  @@index([searchId, channel])
+  @@map("ProspectEmailTemplate")
 }
 
 model LeadStatusConfig {
@@ -564,6 +578,23 @@ model LeadEmailLog {
   replyTo    String? // where the prospect's reply lands
   fromName   String? // display name used in the From header
   fromEmail  String? // address used in the From header
+
+  @@index([companyId, identifier])
+}
+
+// Sent SMS log for a prospect (append-only, keyed by identifier)
+model LeadSmsLog {
+  id        String   @id @default(uuid())
+  createdAt DateTime @default(now())
+
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  companyId String
+
+  identifier String // placeId when available, else lead.id
+  to         String // E.164 number the message was sent to
+  fromNumber String // Telnyx number it was sent from
+  body       String @default("")
+  providerId String? // Telnyx message id, for support lookups
 
   @@index([companyId, identifier])
 }

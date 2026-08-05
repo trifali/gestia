@@ -8,6 +8,7 @@ import {
   buildTemplateUserPrompt,
   buildProspectEmailPrompts,
   buildProspectEmailTemplatePrompts,
+  buildProspectSmsTemplatePrompts,
   buildDocumentDraftPrompts,
 } from './prompts';
 
@@ -402,6 +403,8 @@ const EMAIL_TMPL_URL = `https://api.replicate.com/v1/models/${EMAIL_TMPL_MODEL}/
 
 type EmailTmplArgs = {
   searchId: string;
+  /** 'email' (default) or 'sms' — an SMS model is a single short body. */
+  channel?: 'email' | 'sms';
   currentSubject?: string | null;
   currentBody?: string | null;
 };
@@ -432,7 +435,8 @@ export const generateProspectEmailTemplate = async (
   const token = process.env.REPLICATE_API_TOKEN;
   if (!token) throw new HttpError(500, 'REPLICATE_API_TOKEN manquant.');
 
-  const { system, user: userPrompt } = buildProspectEmailTemplatePrompts({
+  const isSms = args.channel === 'sms';
+  const promptCtx = {
     companyName: company.name,
     companyTagline: company.brandTagline,
     companyDescription: (company as any).brandDescription,
@@ -443,7 +447,10 @@ export const generateProspectEmailTemplate = async (
     purpose: search.purpose,
     currentSubject: args.currentSubject,
     currentBody: args.currentBody,
-  });
+  };
+  const { system, user: userPrompt } = isSms
+    ? buildProspectSmsTemplatePrompts(promptCtx)
+    : buildProspectEmailTemplatePrompts(promptCtx);
 
   let res: Response;
   try {
@@ -473,6 +480,18 @@ export const generateProspectEmailTemplate = async (
 
   const raw = Array.isArray(json.output) ? json.output.join('') : (json.output ?? '');
   const text = raw.trim();
+
+  // An SMS is one block of text: strip the markers the model may add out of
+  // habit, plus the quotes it likes to wrap the message in.
+  if (isSms) {
+    const smsBody = text
+      .replace(/^(OBJET|CORPS|SMS)\s*:.*(\n|$)/gim, '')
+      .trim()
+      .replace(/^["«»']+|["«»']+$/g, '')
+      .trim();
+    if (!smsBody) throw new HttpError(502, "La génération n'a pas retourné de contenu.");
+    return { subject: '', body: smsBody };
+  }
 
   // Parse OBJET: / CORPS:
   const objMatch = text.match(/^OBJET\s*:\s*(.+)$/im);
