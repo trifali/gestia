@@ -209,7 +209,7 @@ query getCurrentCompany {
 }
 query getMailSenderAddress {
   fn: import { getMailSenderAddress } from "@src/app/company/operations",
-  entities: [User]
+  entities: [User, Company]
 }
 action updateCompany {
   fn: import { updateCompany } from "@src/app/company/operations",
