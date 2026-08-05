@@ -1039,6 +1039,23 @@ export const deleteLead = async (
   return { deleted: true };
 };
 
+// ─── deleteLeads (bulk) ───────────────────────────────────────────────────────
+
+export const deleteLeads = async (
+  { leadIds }: { leadIds: string[] },
+  context: any,
+): Promise<{ deleted: number }> => {
+  const companyId = ensureCompany(context.user);
+  const ids = [...new Set(leadIds ?? [])];
+  if (ids.length === 0) return { deleted: 0 };
+  // The company scope lives on the parent search, so it is part of the filter —
+  // ids belonging to another company are simply never matched.
+  const { count } = await context.entities.Lead.deleteMany({
+    where: { id: { in: ids }, search: { companyId } },
+  });
+  return { deleted: count };
+};
+
 // ─── Share token helpers ──────────────────────────────────────────────────────
 
 function generateShareToken(): string {

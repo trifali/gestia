@@ -310,6 +310,11 @@ body {
   box-shadow: 0 4px 16px -4px rgb(10 10 11 / 0.18);
 }
 
+/* ─── Prospection kanban: card ticked for a bulk action ───────────────────── */
+.gestia-kanban .e-card.gestia-card-checked {
+  background-color: #fff1eb;
+}
+
 .feature-card {
   transition:
     transform 0.25s cubic-bezier(0.22, 1, 0.36, 1),

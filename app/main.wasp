@@ -704,6 +704,10 @@ action deleteLead {
   fn: import { deleteLead } from "@src/app/leads/operations",
   entities: [User, LeadSearch, Lead]
 }
+action deleteLeads {
+  fn: import { deleteLeads } from "@src/app/leads/operations",
+  entities: [User, LeadSearch, Lead]
+}
 query getLeadShareToken {
   fn: import { getLeadShareToken } from "@src/app/leads/operations",
   entities: [User, LeadSearch, LeadSearchShareToken]

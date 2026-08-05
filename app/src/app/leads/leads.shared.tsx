@@ -291,6 +291,7 @@ export function LeadEditForm({
 export function LeadCardInfo({
   lead,
   actions,
+  selection,
 }: {
   lead: {
     name: string;
@@ -303,6 +304,8 @@ export function LeadCardInfo({
   };
   /** Optional button row rendered below contact info. */
   actions?: ReactNode;
+  /** Optional selection checkbox rendered next to the name. */
+  selection?: ReactNode;
 }) {
   const movedAt = lead.statusUpdatedAt ? new Date(lead.statusUpdatedAt) : null;
   const movedLabel = movedAt
@@ -313,7 +316,10 @@ export function LeadCardInfo({
 
   return (
     <div className='p-3 space-y-2'>
-      <div className='font-semibold text-sm leading-tight'>{lead.name}</div>
+      <div className='flex items-start gap-2'>
+        {selection}
+        <div className='font-semibold text-sm leading-tight flex-1 min-w-0'>{lead.name}</div>
+      </div>
       {movedLabel && (
         <div
           className='flex items-center gap-1 text-[10px] text-muted'
@@ -432,14 +438,18 @@ export function KanbanColumnHeader({
   color,
   count,
   extra,
+  selection,
 }: {
   label: string;
   color: string;
   count: number;
   extra?: ReactNode;
+  /** Optional checkbox selecting every card of the column. */
+  selection?: ReactNode;
 }) {
   return (
     <div className='flex items-center gap-2 px-1 py-0.5'>
+      {selection}
       <div className='w-3 h-3 rounded-full shrink-0' style={{ backgroundColor: color }} />
       <span className='font-semibold text-sm'>{label}</span>
       <span className='text-xs text-muted ml-auto bg-canvas px-1.5 py-0.5 rounded-full'>
@@ -596,6 +606,9 @@ export function LeadKanbanBoard({
   searchBarSlot,
   onCardClick,
   selectedLeadId,
+  selectedIds,
+  onToggleSelect,
+  onSelectMany,
   cssClass = 'gestia-kanban',
 }: {
   /** Already-filtered leads to display. */
@@ -615,6 +628,11 @@ export function LeadKanbanBoard({
   onCardClick?: (lead: any) => void;
   /** Highlights the card currently shown in the detail panel. */
   selectedLeadId?: string | null;
+  /** Ids ticked for a bulk action. Cards only get a checkbox when `onToggleSelect` is passed. */
+  selectedIds?: Set<string>;
+  onToggleSelect?: (leadId: string) => void;
+  /** Ticks/unticks a whole column at once. Adds a checkbox to the column header. */
+  onSelectMany?: (leadIds: string[], selected: boolean) => void;
   /** Extra element for desktop column headers (e.g. "fetch more" button). */
   columnExtra?: (keyField: string) => ReactNode;
   /** Extra element for mobile accordion column headers. */
@@ -640,7 +658,79 @@ export function LeadKanbanBoard({
   columnExtraRef.current = columnExtra;
   const onCardClickRef = useRef(onCardClick);
   onCardClickRef.current = onCardClick;
+  const selectedIdsRef = useRef(selectedIds);
+  selectedIdsRef.current = selectedIds;
+  const onToggleSelectRef = useRef(onToggleSelect);
+  onToggleSelectRef.current = onToggleSelect;
+  const onSelectManyRef = useRef(onSelectMany);
+  onSelectManyRef.current = onSelectMany;
   const boardRef = useRef<HTMLDivElement>(null);
+  const rootRef = useRef<HTMLDivElement>(null);
+
+  // Same constraint as the selected-card outline below: Syncfusion re-renders
+  // cards on its own schedule, so the checkbox is uncontrolled (its initial
+  // state read from the ref at mount) and the current selection is pushed back
+  // onto the DOM by the effect underneath.
+  const renderSelection = useCallback((lead: any): ReactNode => {
+    if (!onToggleSelectRef.current) return null;
+    return (
+      <input
+        type='checkbox'
+        data-lead-select={lead.id}
+        className='w-3.5 h-3.5 mt-0.5 rounded accent-accent-600 shrink-0 cursor-pointer'
+        title='Sélectionner'
+        defaultChecked={!!selectedIdsRef.current?.has(lead.id)}
+        onClick={e => e.stopPropagation()}
+        onChange={() => onToggleSelectRef.current?.(lead.id)}
+      />
+    );
+  }, []);
+
+  // Ids of the cards a column header checkbox stands for.
+  const columnIdsOf = useCallback(
+    (status: string) => leadsRef.current.filter((l: any) => l.status === status).map((l: any) => l.id),
+    [],
+  );
+
+  const renderColumnSelection = useCallback((status: string): ReactNode => {
+    if (!onSelectManyRef.current) return null;
+    return (
+      <input
+        type='checkbox'
+        data-column-select={status}
+        className='w-3.5 h-3.5 rounded accent-accent-600 shrink-0 cursor-pointer'
+        title='Sélectionner tous les prospects de cette colonne'
+        onClick={e => e.stopPropagation()}
+        onKeyDown={e => e.stopPropagation()}
+        onChange={e => onSelectManyRef.current?.(columnIdsOf(status), e.target.checked)}
+      />
+    );
+  }, [columnIdsOf]);
+
+  useEffect(() => {
+    if (!onToggleSelect && !onSelectMany) return;
+    const raf = requestAnimationFrame(() => {
+      const root = rootRef.current;
+      if (!root) return;
+      root.querySelectorAll<HTMLInputElement>('input[data-lead-select]').forEach(el => {
+        const id = el.dataset.leadSelect;
+        const checked = !!(id && selectedIds?.has(id));
+        el.checked = checked;
+        el.closest('.e-card')?.classList.toggle('gestia-card-checked', checked);
+      });
+      root.querySelectorAll<HTMLInputElement>('input[data-column-select]').forEach(el => {
+        const status = el.dataset.columnSelect;
+        const ids = status ? leads.filter((l: any) => l.status === status).map((l: any) => l.id) : [];
+        const picked = ids.filter(id => selectedIds?.has(id)).length;
+        el.checked = ids.length > 0 && picked === ids.length;
+        el.indeterminate = picked > 0 && picked < ids.length;
+        el.disabled = ids.length === 0;
+      });
+    });
+    return () => cancelAnimationFrame(raf);
+    // `openSections` is a dependency because the mobile accordion mounts its
+    // checkboxes on expand, after the selection they need to reflect is set.
+  }, [selectedIds, leads, openSections, onToggleSelect, onSelectMany]);
 
   // Syncfusion owns the card DOM, so the selected-card outline is toggled by
   // class on the rendered `.e-card` rather than through the React template.
@@ -759,10 +849,14 @@ export function LeadKanbanBoard({
   const cardTemplate = useCallback(
     (lead: any): React.ReactElement => (
       <CardClickShell onClick={onCardClickRef.current ? () => onCardClickRef.current!(lead) : undefined}>
-        <LeadCardInfo lead={lead} actions={cardActionsRef.current(lead)} />
+        <LeadCardInfo
+          lead={lead}
+          actions={cardActionsRef.current(lead)}
+          selection={renderSelection(lead)}
+        />
       </CardClickShell>
     ),
-    [],
+    [renderSelection],
   );
 
   const columnHeaderTemplate = useCallback(
@@ -774,10 +868,11 @@ export function LeadKanbanBoard({
           color={config?.color ?? '#6366f1'}
           count={props.count ?? 0}
           extra={columnExtraRef.current?.(props.keyField)}
+          selection={renderColumnSelection(props.keyField)}
         />
       );
     },
-    [statusConfigs],
+    [statusConfigs, renderColumnSelection],
   );
 
   if (statusConfigs.length === 0) {
@@ -785,7 +880,7 @@ export function LeadKanbanBoard({
   }
 
   return (
-    <>
+    <div ref={rootRef}>
       {searchBarSlot}
 
       {/* Mobile accordion */}
@@ -802,6 +897,7 @@ export function LeadKanbanBoard({
                 tabIndex={0}
                 onKeyDown={e => (e.key === 'Enter' || e.key === ' ') && toggleSection(col.key)}
               >
+                {renderColumnSelection(col.key)}
                 <div
                   className='w-3 h-3 rounded-full shrink-0'
                   style={{ backgroundColor: col.color ?? '#6366f1' }}
@@ -826,12 +922,20 @@ export function LeadKanbanBoard({
                     colLeads.map((lead: any) => (
                       <div
                         key={lead.id}
-                        className={selectedLeadId === lead.id ? 'bg-accent-50' : undefined}
+                        className={
+                          selectedLeadId === lead.id || selectedIds?.has(lead.id)
+                            ? 'bg-accent-50'
+                            : undefined
+                        }
                       >
                         <CardClickShell
                           onClick={onCardClick ? () => onCardClick(lead) : undefined}
                         >
-                          <LeadCardInfo lead={lead} actions={cardActions(lead)} />
+                          <LeadCardInfo
+                            lead={lead}
+                            actions={cardActions(lead)}
+                            selection={renderSelection(lead)}
+                          />
                         </CardClickShell>
                       </div>
                     ))
@@ -849,7 +953,16 @@ export function LeadKanbanBoard({
           <KanbanComponent
             keyField='status'
             dataSource={kanbanData}
-            cardSettings={{ headerField: 'id', template: cardTemplate, showHeader: false }}
+            // `Single` selection keeps a drag to exactly one card: Syncfusion
+            // only drags a group when several cards are selected at once, which
+            // `Multiple` would allow. Ticking checkboxes is our own selection
+            // and never feeds Syncfusion's.
+            cardSettings={{
+              headerField: 'id',
+              template: cardTemplate,
+              showHeader: false,
+              selectionType: 'Single',
+            }}
             drag={handleDrag}
             dragStop={handleDragStop}
             cssClass={cssClass}
@@ -867,6 +980,6 @@ export function LeadKanbanBoard({
           </KanbanComponent>
         </div>
       </div>
-    </>
+    </div>
   );
 }
