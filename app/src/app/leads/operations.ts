@@ -176,7 +176,7 @@ export const getLeadSearchDetail: GetLeadSearchDetail<
 
   // Attach note count + email flags (per placeId or lead.id)
   const identifiers = search.leads.map(l => l.placeId ?? l.id);
-  const [noteCounts, emailedIdentifiers, draftIdentifiers, smsedIdentifiers, smsUnread] = identifiers.length
+  const [noteCounts, emailedIdentifiers, draftIdentifiers, smsedIdentifiers, smsUnread, smsRepliedIdentifiers] = identifiers.length
     ? await Promise.all([
         (context.entities as any).LeadNote.groupBy({
           by: ['identifier'],
@@ -207,8 +207,15 @@ export const getLeadSearchDetail: GetLeadSearchDetail<
           },
           _count: { id: true },
         }),
+        // Any reply at all, read or not — the unread count above empties as soon
+        // as a thread is opened, so it can't answer "who has answered us?".
+        (context.entities as any).LeadSmsLog.findMany({
+          where: { companyId, identifier: { in: identifiers }, direction: 'inbound' },
+          select: { identifier: true },
+          distinct: ['identifier'],
+        }),
       ])
-    : [[], [], [], [], []];
+    : [[], [], [], [], [], []];
   const noteCountMap = new Map<string, number>((noteCounts as any[]).map((n: any) => [n.identifier, n._count.id]));
   const emailSet = new Set<string>(emailedIdentifiers.map((e: any) => e.identifier));
   const draftSet = new Set<string>(draftIdentifiers.map((d: any) => d.identifier));
@@ -216,6 +223,7 @@ export const getLeadSearchDetail: GetLeadSearchDetail<
   const smsUnreadMap = new Map<string, number>(
     (smsUnread as any[]).map((s: any) => [s.identifier, s._count.id]),
   );
+  const smsRepliedSet = new Set<string>((smsRepliedIdentifiers as any[]).map((s: any) => s.identifier));
 
   const leadsWithFlags = leadsWithDups.map(l => ({
     ...l,
@@ -225,6 +233,7 @@ export const getLeadSearchDetail: GetLeadSearchDetail<
     hasEmailDraft: draftSet.has(l.placeId ?? l.id),
     hasSmsSent: smsSet.has(l.placeId ?? l.id),
     smsUnreadCount: smsUnreadMap.get(l.placeId ?? l.id) ?? 0,
+    hasSmsReply: smsRepliedSet.has(l.placeId ?? l.id),
   }));
 
   return { ...search, leads: leadsWithFlags } as any;
