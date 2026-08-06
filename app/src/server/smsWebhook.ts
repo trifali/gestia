@@ -20,7 +20,15 @@ import express from 'express';
 import type { Request, Response } from 'express';
 import { config } from 'wasp/server';
 import type { MiddlewareConfigFn } from 'wasp/server';
-import { toE164, sendSms, resolveSmsCredentials, resolveSmsPublicKey } from './sms';
+import {
+  toE164,
+  sendSms,
+  resolveSmsCredentials,
+  resolveSmsPublicKey,
+  directIdentifier,
+  isDirectIdentifier,
+} from './sms';
+import { resolveDisplayName } from './smsDirectory';
 import { sendEmailWithAttachment, companySmtp } from './mail';
 
 /** Telnyx signs `${timestamp}|${rawBody}`; anything older than this is a replay. */
@@ -185,57 +193,83 @@ async function notifyCompanyOfReply(
   }
 }
 
+/**
+ * Enregistre un SMS entrant et alerte l'entreprise.
+ *
+ * Attribution : le fil retenu est celui **depuis lequel l'entreprise a écrit à ce
+ * numéro le plus récemment**, quel que soit son identifiant — rien dans une
+ * charge utile entrante n'identifie l'interlocuteur. Un numéro qui est aussi
+ * celui d'un prospect répond donc dans le fil du prospect ; après un envoi
+ * direct vers ce même numéro, la réponse suivante ira dans le fil direct.
+ * Déterministe, et sans code d'arbitrage.
+ *
+ * Faute d'historique, on ouvre une conversation autonome `tel:+…` sous
+ * l'entreprise propriétaire du numéro Telnyx destinataire : un inconnu qui
+ * écrit est un message à traiter, pas une anomalie à mettre en quarantaine.
+ */
 async function handleInbound(payload: any, company: any, entities: any): Promise<void> {
   const providerId: string | null = payload?.id ?? null;
-  const from = toE164(payload?.from?.phone_number ?? '');
+  const fromRaw: string = (payload?.from?.phone_number ?? '').trim();
+  const from = toE164(fromRaw);
+  // Un code court (« 12345 ») ou un expéditeur alphanumérique n'est pas en
+  // E.164 : on garde la valeur brute plutôt que de perdre le message.
+  const fromKey = from ?? (fromRaw || null);
+  if (!fromKey) return;
+
   const arrivedOn = toE164(firstRecipientNumber(payload) ?? '') ?? company.telnyxPhoneNumber ?? '';
   const body: string = payload?.text ?? '';
-  if (!from) return;
 
-  // Attribute by the last message this company sent to that number — nothing in
-  // an inbound payload identifies the prospect. Scoping to the company (known
-  // from the Telnyx number the reply arrived on) keeps companies that happen to
-  // share a prospect from stealing each other's replies.
+  // Scoping to the company (known from the Telnyx number the reply arrived on)
+  // keeps companies that happen to share a prospect from stealing each other's
+  // replies.
   const lastOutbound = await entities.LeadSmsLog.findFirst({
-    where: { companyId: company.id, to: from, direction: 'outbound' },
+    where: { companyId: company.id, to: fromKey, direction: 'outbound' },
     orderBy: { createdAt: 'desc' },
-    select: { companyId: true, identifier: true },
+    select: { identifier: true },
   });
+  const identifier: string = lastOutbound?.identifier ?? directIdentifier(fromKey);
 
-  if (!lastOutbound) {
-    await entities.SmsInboundUnmatched.create({
-      data: { providerId, fromNumber: from, to: arrivedOn, body },
-    });
-    return;
-  }
-
-  await entities.LeadSmsLog.create({
+  // Écrit avant toute notification : une relivraison Telnyx casse ici sur
+  // providerId @unique (P2002 → 200 plus bas) et ne peut donc pas produire une
+  // seconde alerte.
+  const created = await entities.LeadSmsLog.create({
     data: {
-      companyId: lastOutbound.companyId,
-      identifier: lastOutbound.identifier,
-      // `to`/`fromNumber` stay literal: the reply came *from* the prospect *to* us.
+      companyId: company.id,
+      identifier,
+      // `to`/`fromNumber` stay literal: the reply came *from* them *to* us.
       to: arrivedOn,
-      fromNumber: from,
+      fromNumber: fromKey,
       body,
       providerId,
       direction: 'inbound',
       status: 'received',
     },
+    select: { id: true },
   });
 
-  // `identifier` is the placeId when Google Maps gave us one, else the lead's id.
-  const lead = await entities.Lead.findFirst({
-    where: {
-      search: { companyId: lastOutbound.companyId },
-      OR: [{ placeId: lastOutbound.identifier }, { id: lastOutbound.identifier }],
-    },
-    select: { name: true },
-  });
+  // Sur un fil autonome, une seule alerte tant qu'il n'est pas lu : une réponse
+  // de prospect est attendue et mérite chaque notification, mais un flot de
+  // pourriel venant d'un inconnu ne doit pas devenir autant de courriels — et
+  // autant de SMS facturés quand notifySmsReplyBySms est actif.
+  if (isDirectIdentifier(identifier)) {
+    const priorUnread = await entities.LeadSmsLog.count({
+      where: {
+        companyId: company.id,
+        identifier,
+        direction: 'inbound',
+        readAt: null,
+        id: { not: created.id },
+      },
+    });
+    if (priorUnread > 0) return;
+  }
+
+  const prospectName = await resolveDisplayName(entities, company.id, from, identifier);
 
   await notifyCompanyOfReply(company, {
-    prospectNumber: from,
+    prospectNumber: from ?? fromKey,
     body,
-    prospectName: lead?.name ?? null,
+    prospectName,
   });
 }
 

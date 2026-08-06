@@ -40,6 +40,25 @@ export function useSmsCapability(): Capability {
   return normalise(data, 'SMS non configuré dans Paramètres → Intégrations.');
 }
 
+export type SmsInboxCapability = Capability & { inboxEnabled: boolean };
+
+/**
+ * Comme `useSmsCapability`, plus l'état de la messagerie flottante — `normalise`
+ * laisse tomber les champs qu'il ne connaît pas, d'où ce hook séparé. Même clé
+ * de requête, donc aucun appel réseau supplémentaire.
+ *
+ * Pessimiste pendant le chargement, à l'inverse de `canSend` : mieux vaut une
+ * bulle qui arrive 200 ms trop tard qu'une bulle qui clignote chez ceux qui ont
+ * désactivé la messagerie.
+ */
+export function useSmsInbox(): SmsInboxCapability {
+  const { data } = useQuery(getSmsCapability);
+  return {
+    ...normalise(data, 'SMS non configuré dans Paramètres → Intégrations.'),
+    inboxEnabled: (data as any)?.inboxEnabled === true,
+  };
+}
+
 export function useEmailCapability(): Capability {
   const { data } = useQuery(getEmailCapability);
   return normalise(data, 'Courriel non configuré dans Paramètres → Intégrations.');

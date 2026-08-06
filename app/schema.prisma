@@ -90,6 +90,11 @@ model Company {
   notifySmsReplyByEmail Boolean @default(true)
   notifySmsReplyBySms   Boolean @default(false)
 
+  // Boîte SMS universelle : la bulle flottante qui réunit tous les fils, y
+  // compris ceux qui ne sont rattachés à aucun prospect. Opt-in — une entreprise
+  // qui n'utilise Telnyx que pour la prospection n'en veut pas.
+  smsInboxEnabled Boolean @default(false)
+
   // Modalités (business terms & payment conditions)
   modalityDownpaymentPercent Float?
   modalityPaymentMethods     String? // JSON array: ["interac","virement","stripe","cheque","cash","financement"]
@@ -119,6 +124,7 @@ model Company {
   leadEmailLogs          LeadEmailLog[]
   leadEmailDrafts        LeadEmailDraft[]
   leadSmsLogs            LeadSmsLog[]
+  smsContacts            SmsContact[]
   prospectTemplates      ProspectTemplate[]
   leadShareTokens        LeadSearchShareToken[]
 }
@@ -624,7 +630,9 @@ model LeadSmsLog {
   company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
   companyId String
 
-  identifier String // placeId when available, else lead.id
+  // placeId when available, else lead.id — or `tel:+15145550100` for a thread
+  // with a number that belongs to no prospect (see directIdentifier in server/sms.ts).
+  identifier String
   to         String // E.164 number the message was sent to
   fromNumber String // Telnyx number it was sent from
   body       String @default("")
@@ -635,13 +643,37 @@ model LeadSmsLog {
   errorCode String? // Telnyx error code when a send fails
   readAt    DateTime? // inbound only: when someone opened the thread
 
-  @@index([companyId, identifier])
+  // Covers the plain (companyId, identifier) prefix too; createdAt is what the
+  // inbox needs to pick each thread's last message.
+  @@index([companyId, identifier, createdAt])
   // Attribution lookup: match an inbound number back to the last outbound message.
   @@index([to, direction, createdAt])
 }
 
-// Inbound SMS from a number we have no outbound history with, so it can't be
-// attributed to a prospect. Kept rather than dropped so replies are never lost.
+// Lightweight directory: puts a name on a number that is neither a client nor a
+// prospect, so the inbox shows "Jean Tremblay" rather than a raw +1…
+// Deliberately no foreign key to LeadSmsLog — threads are keyed by an opaque
+// string and outlive the contact.
+model SmsContact {
+  id        String   @id @default(uuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  companyId String
+
+  phone String // E.164 only — normalised through toE164 before it is written
+  name  String
+  note  String?
+
+  @@unique([companyId, phone])
+  @@index([companyId, name])
+}
+
+// OBSOLÈTE depuis la boîte SMS universelle : un entrant non attribué crée
+// désormais une vraie conversation `tel:+…`. Table conservée en archive — ses
+// lignes ont été reversées dans LeadSmsLog par la migration sms_inbox. Plus
+// aucune écriture. À supprimer dans une migration ultérieure.
 model SmsInboundUnmatched {
   id        String   @id @default(uuid())
   createdAt DateTime @default(now())

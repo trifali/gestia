@@ -714,7 +714,31 @@ action markLeadSmsRead {
 }
 query getSmsReplyAlerts {
   fn: import { getSmsReplyAlerts } from "@src/app/leads/operations",
-  entities: [User, Lead, LeadSmsLog]
+  entities: [User, Company, Lead, LeadSmsLog]
+}
+
+// ─── Boîte SMS universelle ────────────────────────────────────────────────────
+// Conversations avec n'importe quel numéro, au-dessus de LeadSmsLog et de son
+// identifiant `tel:+…`. Opt-in via Company.smsInboxEnabled.
+query getSmsConversations {
+  fn: import { getSmsConversations } from "@src/app/sms/operations",
+  entities: [User, Company, LeadSmsLog, SmsContact, Client, Lead]
+}
+action sendDirectSms {
+  fn: import { sendDirectSms } from "@src/app/sms/operations",
+  entities: [User, Company, LeadSmsLog]
+}
+query searchSmsRecipients {
+  fn: import { searchSmsRecipients } from "@src/app/sms/operations",
+  entities: [User, Company, SmsContact, Client, Lead, LeadSmsLog]
+}
+action upsertSmsContact {
+  fn: import { upsertSmsContact } from "@src/app/sms/operations",
+  entities: [User, SmsContact]
+}
+action deleteSmsContact {
+  fn: import { deleteSmsContact } from "@src/app/sms/operations",
+  entities: [User, SmsContact]
 }
 
 // Per-company Telnyx credentials + reply-notification toggles.
@@ -921,14 +945,14 @@ apiNamespace telnyxWebhooks {
 api telnyxSmsWebhook {
   fn: import { telnyxSmsWebhook } from "@src/server/smsWebhook",
   httpRoute: (POST, "/webhooks/telnyx/sms"),
-  entities: [User, Company, Lead, LeadSmsLog, SmsInboundUnmatched],
+  entities: [User, Company, Lead, LeadSmsLog, SmsContact, Client],
   auth: false
 }
 
 api telnyxSmsWebhookFailover {
   fn: import { telnyxSmsWebhook } from "@src/server/smsWebhook",
   httpRoute: (POST, "/webhooks/telnyx/sms-failover"),
-  entities: [User, Company, Lead, LeadSmsLog, SmsInboundUnmatched],
+  entities: [User, Company, Lead, LeadSmsLog, SmsContact, Client],
   auth: false
 }
 

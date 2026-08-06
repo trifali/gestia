@@ -22,18 +22,14 @@ import {
   LuCheck,
 } from 'react-icons/lu';
 
-// ─── Time helper ──────────────────────────────────────────────────────────────
+// ─── Helpers partagés avec le shell ───────────────────────────────────────────
+// Descendus dans client/ pour que le widget de messagerie, monté sur toutes les
+// pages, puisse les utiliser sans tirer Syncfusion avec lui. Ré-exportés ici :
+// les appelants existants n'ont pas à changer d'import.
 
-export function formatMontrealTime(date: string | Date): string {
-  return new Intl.DateTimeFormat('fr-CA', {
-    timeZone: 'America/Toronto',
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  }).format(new Date(date));
-}
+import { formatMontrealTime } from '../../client/format';
+export { formatMontrealTime };
+export { smsSegments } from '../../client/sms/smsText';
 
 // ─── Lead provenance ──────────────────────────────────────────────────────────
 // Where a prospect came from. `google_maps` is the default for everything the
@@ -54,28 +50,6 @@ export type LeadSourceKey = (typeof LEAD_SOURCES)[number]['key'];
 
 export function leadSourceLabel(source: string | null | undefined): string {
   return LEAD_SOURCES.find(s => s.key === source)?.label ?? source ?? 'Inconnue';
-}
-
-// ─── SMS length helper ────────────────────────────────────────────────────────
-// A GSM-7 message fits 160 characters per part, but a single character outside
-// that alphabet (an emoji, a curly quote) switches the whole message to UCS-2
-// and drops it to 70 — which is why the composer shows both numbers.
-
-const GSM7 =
-  "@£$¥èéùìòÇ\nØø\rÅåΔ_ΦΓΛΩΠΨΣΘΞÆæßÉ !\"#¤%&'()*+,-./0123456789:;<=>?" +
-  '¡ABCDEFGHIJKLMNOPQRSTUVWXYZÄÖÑÜ§¿abcdefghijklmnopqrstuvwxyzäöñüà';
-const GSM7_EXTENDED = '^{}\\[~]|€';
-
-export function smsSegments(text: string): { chars: number; segments: number; unicode: boolean } {
-  const unicode = [...text].some(c => !GSM7.includes(c) && !GSM7_EXTENDED.includes(c));
-  // Extended characters cost two septets each.
-  const chars = unicode
-    ? [...text].length
-    : [...text].reduce((n, c) => n + (GSM7_EXTENDED.includes(c) ? 2 : 1), 0);
-  const single = unicode ? 70 : 160;
-  const multi = unicode ? 67 : 153;
-  const segments = chars === 0 ? 0 : chars <= single ? 1 : Math.ceil(chars / multi);
-  return { chars, segments, unicode };
 }
 
 // ─── Note thread (timeline + composer) ───────────────────────────────────────

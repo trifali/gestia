@@ -14,5 +14,8 @@ node_modules/
 .gestia-db.log
 .gestia-db.pid
 
+# Paire de clés Ed25519 jetable de scripts/fake-inbound-sms.mjs
+.sms-test-key.json
+
 #macOS specific files
 .DS_Store

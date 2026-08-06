@@ -255,7 +255,9 @@ export function LeadDetailPanel({
         the board underneath once the panel hits its end.
       */}
       <aside
-        className={`fixed inset-y-0 right-0 z-[35] w-full sm:w-[380px] lg:w-[420px] bg-white border-l border-line shadow-xl flex flex-col overflow-y-auto overscroll-contain transition-transform duration-200 ${
+        // pb-20 : la bulle de messagerie flotte au-dessus de ce coin, rien
+        // d'utile ne doit finir sous un disque de 56 px.
+        className={`fixed inset-y-0 right-0 z-[35] w-full sm:w-[380px] lg:w-[420px] pb-20 bg-white border-l border-line shadow-xl flex flex-col overflow-y-auto overscroll-contain transition-transform duration-200 ${
           shown ? 'translate-x-0' : 'translate-x-full'
         }`}
         role='dialog'

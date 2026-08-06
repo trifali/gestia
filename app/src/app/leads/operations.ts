@@ -1,7 +1,7 @@
 import { HttpError } from 'wasp/server';
 import { randomBytes } from 'crypto';
 import { sendEmailWithAttachment, companySmtp } from '../../server/mail';
-import { sendSms, toE164, resolveSmsCredentials } from '../../server/sms';
+import { sendSms, toE164, resolveSmsCredentials, isDirectIdentifier } from '../../server/sms';
 import type {
   GetLeadSearches,
   GetLeadSearchDetail,
@@ -1016,6 +1016,12 @@ export const clearLeadSmsSent = async (
   context: any,
 ): Promise<{ ok: true }> => {
   const companyId = ensureCompany(context.user);
+  // Sur une conversation autonome, « réinitialiser l'envoi » supprimerait toute
+  // la moitié sortante d'un vrai échange. L'action n'a de sens que pour le
+  // drapeau « SMS envoyé » d'une carte de prospection.
+  if (isDirectIdentifier(identifier)) {
+    throw new HttpError(400, "Cette action ne s'applique qu'aux conversations de prospection.");
+  }
   await (context.entities as any).LeadSmsLog.deleteMany({
     where: { companyId, identifier, direction: 'outbound' },
   });
@@ -1026,19 +1032,40 @@ export const clearLeadSmsSent = async (
  * Company-wide count of unread SMS replies, plus a per-search breakdown so the
  * sidebar can flag "Prospection" and each search card can flag itself. Without
  * this, an unread reply is only visible inside the one search it belongs to.
+ *
+ * Les compteurs sont séparés parce qu'ils n'ouvrent pas les mêmes écrans :
+ * `leadTotal` (= somme de `bySearch`) est ce qui a une carte de prospect à
+ * ouvrir, donc la seule chose que la pastille « Prospection » a le droit de
+ * compter ; `otherTotal` — fils autonomes et fils dont le prospect a été
+ * supprimé — ne se lit que dans la boîte SMS.
  */
 export const getSmsReplyAlerts = async (
   _args: void,
   context: any,
-): Promise<{ total: number; bySearch: Record<string, number> }> => {
+): Promise<{
+  total: number;
+  bySearch: Record<string, number>;
+  leadTotal: number;
+  otherTotal: number;
+  inboxEnabled: boolean;
+}> => {
   const companyId = ensureCompany(context.user);
 
-  const unread = await (context.entities as any).LeadSmsLog.groupBy({
-    by: ['identifier'],
-    where: { companyId, direction: 'inbound', readAt: null },
-    _count: { id: true },
-  });
-  if (!unread.length) return { total: 0, bySearch: {} };
+  const [unread, company] = await Promise.all([
+    (context.entities as any).LeadSmsLog.groupBy({
+      by: ['identifier'],
+      where: { companyId, direction: 'inbound', readAt: null },
+      _count: { id: true },
+    }),
+    context.entities.Company.findUnique({
+      where: { id: companyId },
+      select: { smsInboxEnabled: true },
+    }),
+  ]);
+  const inboxEnabled = !!(company as any)?.smsInboxEnabled;
+  if (!unread.length) {
+    return { total: 0, bySearch: {}, leadTotal: 0, otherTotal: 0, inboxEnabled };
+  }
 
   // identifier is the placeId when Google Maps supplied one, else the lead's id.
   const identifiers = (unread as any[]).map((u: any) => u.identifier);
@@ -1055,14 +1082,16 @@ export const getSmsReplyAlerts = async (
 
   const bySearch: Record<string, number> = {};
   let total = 0;
+  let leadTotal = 0;
   for (const u of unread as any[]) {
     total += u._count.id;
     const searchId = searchByIdentifier.get(u.identifier);
-    // A reply whose lead was since deleted still counts in the total, so it
-    // cannot silently vanish — it just has no card to attach to.
-    if (searchId) bySearch[searchId] = (bySearch[searchId] ?? 0) + u._count.id;
+    if (searchId) {
+      leadTotal += u._count.id;
+      bySearch[searchId] = (bySearch[searchId] ?? 0) + u._count.id;
+    }
   }
-  return { total, bySearch };
+  return { total, bySearch, leadTotal, otherTotal: total - leadTotal, inboxEnabled };
 };
 
 /** Clears the unread badge once someone has actually opened the thread. */

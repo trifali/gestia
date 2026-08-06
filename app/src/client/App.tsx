@@ -50,6 +50,11 @@ export default function App() {
   const toaster = (
     <Toaster
       position='bottom-right'
+      // La bulle de messagerie occupe ce coin : la voie des toasts remonte
+      // au-dessus d'elle, puis au-dessus du panneau quand il est ouvert. La
+      // variable est posée par SmsWidget et définie dans Main.css ; sa valeur par
+      // défaut garde le comportement d'origine là où il n'y a pas de widget.
+      containerStyle={{ bottom: 'var(--gestia-toast-bottom, 20px)', right: 20 }}
       toastOptions={{
         duration: 4000,
         style: { fontSize: '0.875rem' },
@@ -122,19 +127,3 @@ export default function App() {
     </>
   );
 }
-
-function ToastProvider() {
-  return (
-    <Toaster
-      position='bottom-right'
-      toastOptions={{
-        duration: 4000,
-        style: { fontSize: '0.875rem' },
-        success: { iconTheme: { primary: '#16a34a', secondary: '#fff' } },
-        error: { iconTheme: { primary: '#dc2626', secondary: '#fff' } },
-      }}
-    />
-  );
-}
-
-export { ToastProvider };

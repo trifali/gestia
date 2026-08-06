@@ -96,6 +96,35 @@ export function toE164(raw: string): string | null {
   return null;
 }
 
+// ─── Conversations autonomes ─────────────────────────────────────────────────
+//
+// Une conversation avec un numéro qui n'appartient à aucun prospect réutilise
+// LeadSmsLog plutôt qu'une seconde table : `identifier` y est déjà une chaîne
+// opaque qui n'exige l'existence d'aucun Lead. Aucun risque de collision — un
+// placeId Google est du base64url (`ChIJ…`) et un id de Lead est un uuid, ni
+// l'un ni l'autre ne peut contenir ':'.
+
+export const DIRECT_IDENTIFIER_PREFIX = 'tel:';
+
+export function directIdentifier(phone: string): string {
+  return `${DIRECT_IDENTIFIER_PREFIX}${phone}`;
+}
+
+export function isDirectIdentifier(identifier: string): boolean {
+  return (identifier ?? '').startsWith(DIRECT_IDENTIFIER_PREFIX);
+}
+
+/**
+ * Le numéro E.164 d'une conversation autonome, ou null si l'identifiant n'en est
+ * pas une — ou porte quelque chose qui n'est pas un numéro joignable (code court,
+ * expéditeur alphanumérique). `isDirectIdentifier` reste vrai dans ce dernier
+ * cas : le fil existe et se lit, mais on ne peut pas y répondre.
+ */
+export function parseDirectIdentifier(identifier: string): string | null {
+  if (!isDirectIdentifier(identifier)) return null;
+  return toE164(identifier.slice(DIRECT_IDENTIFIER_PREFIX.length));
+}
+
 export async function sendSms(params: {
   to: string;
   text: string;

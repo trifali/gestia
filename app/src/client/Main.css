@@ -151,6 +151,18 @@ body {
   }
 }
 
+/* ─── Voie des toasts vs bulle de messagerie ──────────────────────────────── */
+/* La bulle et son panneau occupent le coin inférieur droit, exactement là où
+   react-hot-toast empile ses messages. SmsWidget pose data-sms-widget sur <html>
+   et le conteneur des toasts lit cette variable (voir App.tsx). Un simple
+   décalage fixe collerait les toasts sur la zone de saisie du panneau ouvert. */
+html[data-sms-widget='mounted'] { --gestia-toast-bottom: 88px; }
+html[data-sms-widget='open'] { --gestia-toast-bottom: 88px; }
+@media (min-width: 640px) {
+  /* 88 (bulle) + 560 (panneau) + 16 d'écart */
+  html[data-sms-widget='open'] { --gestia-toast-bottom: 664px; }
+}
+
 /* ─── Syncfusion FileManager: custom .md file icon ────────────────────────── */
 .e-filemanager .e-fe-md.e-fe-icon,
 .e-filemanager span.e-fe-md {

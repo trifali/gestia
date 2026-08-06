@@ -24,6 +24,8 @@ export type SmsSettings = {
   publicKeyPreview: string | null;
   notifySmsReplyByEmail: boolean;
   notifySmsReplyBySms: boolean;
+  /** Whether the floating SMS inbox widget is on for this company. */
+  smsInboxEnabled: boolean;
   /** The company contact details notifications go to, so the UI can show them. */
   companyEmail: string | null;
   companyPhone: string | null;
@@ -57,6 +59,7 @@ export const getSmsSettings = async (_args: void, context: any): Promise<SmsSett
     publicKeyPreview: mask(c.telnyxPublicKey),
     notifySmsReplyByEmail: c.notifySmsReplyByEmail,
     notifySmsReplyBySms: c.notifySmsReplyBySms,
+    smsInboxEnabled: c.smsInboxEnabled,
     companyEmail: c.email ?? null,
     companyPhone: c.phone ?? null,
     canSend: !!(c.telnyxPhoneNumber && c.telnyxApiKey),
@@ -124,6 +127,13 @@ export type SmsCapability = {
   reason: string | null;
   /** Whether this user could fix it themselves. */
   canConfigure: boolean;
+  /**
+   * Whether the floating SMS inbox should be shown. Mirrored here rather than
+   * read from `getSmsSettings` because that one is admin-only and the widget is
+   * for every member. Volontairement tolérant sur les identifiants : si la clé
+   * casse, la boîte reste consultable et seul l'envoi est bloqué.
+   */
+  inboxEnabled: boolean;
 };
 
 /**
@@ -136,15 +146,21 @@ export const getSmsCapability = async (_args: void, context: any): Promise<SmsCa
   const companyId = (context.user as any).companyId;
   const canConfigure = isAdmin(context.user);
   if (!companyId) {
-    return { canSend: false, reason: 'Aucune entreprise associée à votre compte.', canConfigure };
+    return {
+      canSend: false,
+      reason: 'Aucune entreprise associée à votre compte.',
+      canConfigure,
+      inboxEnabled: false,
+    };
   }
 
   const company = await context.entities.Company.findUnique({
     where: { id: companyId },
-    select: { telnyxPhoneNumber: true, telnyxApiKey: true },
+    select: { telnyxPhoneNumber: true, telnyxApiKey: true, smsInboxEnabled: true },
   });
+  const inboxEnabled = !!(company?.smsInboxEnabled && company?.telnyxPhoneNumber);
   if (resolveSmsCredentials(company)) {
-    return { canSend: true, reason: null, canConfigure };
+    return { canSend: true, reason: null, canConfigure, inboxEnabled };
   }
 
   const missingNumber = !company?.telnyxPhoneNumber;
@@ -155,6 +171,7 @@ export const getSmsCapability = async (_args: void, context: any): Promise<SmsCa
   return {
     canSend: false,
     canConfigure,
+    inboxEnabled,
     reason: canConfigure
       ? `SMS non configuré : ajoutez ${what} dans Paramètres → Intégrations.`
       : `SMS non configuré : demandez à un administrateur d'ajouter ${what} dans Paramètres → Intégrations.`,
@@ -172,6 +189,7 @@ type UpdateSmsSettingsArgs = {
   telnyxPublicKey?: string | null;
   notifySmsReplyByEmail?: boolean;
   notifySmsReplyBySms?: boolean;
+  smsInboxEnabled?: boolean;
 };
 
 export const updateSmsSettings = async (
@@ -223,6 +241,23 @@ export const updateSmsSettings = async (
 
   if ('notifySmsReplyByEmail' in args) data.notifySmsReplyByEmail = !!args.notifySmsReplyByEmail;
   if ('notifySmsReplyBySms' in args) data.notifySmsReplyBySms = !!args.notifySmsReplyBySms;
+  if ('smsInboxEnabled' in args) data.smsInboxEnabled = !!args.smsInboxEnabled;
+
+  // Une boîte de réception sans numéro ni clé API n'a rien à afficher et ne peut
+  // rien envoyer. Le contrôle porte sur l'état *fusionné* : la clé peut très bien
+  // être posée dans la même requête que l'activation.
+  if (data.smsInboxEnabled) {
+    const c = await context.entities.Company.findUnique({
+      where: { id: companyId },
+      select: { telnyxPhoneNumber: true, telnyxApiKey: true },
+    });
+    if (!resolveSmsCredentials({ ...c, ...data })) {
+      throw new HttpError(
+        400,
+        "Configurez d'abord le numéro et la clé API Telnyx avant d'activer la messagerie.",
+      );
+    }
+  }
 
   // Refuse to enable a channel with no destination — otherwise the toggle reads
   // as "on" while silently notifying nobody.

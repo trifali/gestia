@@ -46,6 +46,7 @@ import { PAYMENT_METHOD_OPTIONS } from '../payments/PaymentForm';
 import { LuPlus, LuSearch, LuFileText, LuCopy, LuEye, LuX, LuChevronRight, LuWand, LuMessageSquare, LuCheck, LuMail } from 'react-icons/lu';
 import { PageHeader, IconBtn, EditIcon, TrashIcon, useConfirm, Modal, EmptyState } from '../../client/ui';
 import { MagicInput, MagicTextarea } from '../../client/magic';
+import { useSmsAlerts } from '../../client/sms/useSmsAlerts';
 import { formatCurrency } from '../../shared/format';
 import { TEMPLATE_TYPES, TEMPLATE_VARIABLE_GROUPS, getTemplatePdfBase64 } from './templatePdf';
 import { getBoilerplate } from './templateBoilerplates';
@@ -1693,6 +1694,8 @@ function TestSender({
 
 // ─── SMS (Telnyx) panel ───────────────────────────────────────────────────────
 
+type SmsToggleField = 'notifySmsReplyByEmail' | 'notifySmsReplyBySms' | 'smsInboxEnabled';
+
 function SmsSettingsPanel({ settings, refetch }: { settings: any; refetch: () => void }) {
   const s = settings;
   const [phone, setPhone] = useState('');
@@ -1702,6 +1705,9 @@ function SmsSettingsPanel({ settings, refetch }: { settings: any; refetch: () =>
   const [replacingPublicKey, setReplacingPublicKey] = useState(false);
   const [saving, setSaving] = useState(false);
   const [loaded, setLoaded] = useState(false);
+  // Sert uniquement à signaler les messages qui n'ont aucun écran où être lus
+  // tant que la messagerie est éteinte.
+  const unreachableUnread = useSmsAlerts().otherTotal;
 
   useEffect(() => {
     if (loaded || !s) return;
@@ -1740,7 +1746,7 @@ function SmsSettingsPanel({ settings, refetch }: { settings: any; refetch: () =>
     }
   }
 
-  async function toggle(field: 'notifySmsReplyByEmail' | 'notifySmsReplyBySms', next: boolean) {
+  async function toggle(field: SmsToggleField, next: boolean) {
     setSaving(true);
     try {
       await (updateSmsSettings as any)({ [field]: next });
@@ -1861,6 +1867,34 @@ function SmsSettingsPanel({ settings, refetch }: { settings: any; refetch: () =>
             extraHint={!s.canSend ? 'Configurez l\'envoi à l\'étape 1.' : undefined}
           />
         </div>
+      </PanelSection>
+
+      <PanelSection
+        title='5. Messagerie intégrée'
+        hint={
+          <>
+            Ajoute une bulle de discussion en bas à droite de l'application. Vos membres y
+            retrouvent toutes les conversations SMS — réponses de prospects <em>et</em> messages
+            reçus d'un numéro inconnu — et peuvent répondre ou écrire à un nouveau numéro sans
+            quitter la page où ils sont.
+          </>
+        }
+      >
+        <NotifyToggle
+          label='Activer la bulle de messagerie'
+          target='Visible par tous les membres de votre entreprise'
+          missingHint=''
+          checked={!!s.smsInboxEnabled}
+          disabled={saving || !s.canSend}
+          onChange={next => toggle('smsInboxEnabled', next)}
+          extraHint={!s.canSend ? "Configurez l'envoi à l'étape 1." : undefined}
+        />
+        {!s.smsInboxEnabled && unreachableUnread > 0 && (
+          <p className='text-xs text-warning mt-2'>
+            {unreachableUnread} message(s) reçus hors prospection attendent d'être lus : ils ne sont
+            visibles que dans la messagerie.
+          </p>
+        )}
       </PanelSection>
     </div>
   );
