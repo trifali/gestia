@@ -1,29 +1,20 @@
 // Utilitaires de numéro côté client.
 //
-// `toE164` est une copie conforme de `app/src/server/sms.ts` — Wasp ne permet pas
-// d'importer `@src/server` dans du code client. La source de vérité reste le
-// serveur, qui revalide tout ; cette copie n'existe que pour dire « numéro
-// invalide » sans aller-retour réseau. Toute correction là-bas doit être
-// reportée ici.
+// `toE164` et `formatPhoneDisplay` vivent désormais dans `shared/phone`, avec le
+// masque de saisie et la validation : serveur et client partagent la même
+// définition de « numéro acceptable par Telnyx ». Il y en avait trois copies,
+// dont celle-ci, avec la consigne de les tenir synchronisées à la main.
+//
+// Ce fichier reste comme point d'entrée de la messagerie et pour `initialsFor`,
+// qui n'a rien à faire côté serveur.
 
-export function toE164(raw: string): string | null {
-  const trimmed = (raw ?? '').trim();
-  if (!trimmed) return null;
-  const hadPlus = trimmed.startsWith('+');
-  const digits = trimmed.replace(/\D/g, '');
-  if (!digits) return null;
-  if (hadPlus) return digits.length >= 8 && digits.length <= 15 ? `+${digits}` : null;
-  if (digits.length === 10) return `+1${digits}`;
-  if (digits.length === 11 && digits.startsWith('1')) return `+${digits}`;
-  return null;
-}
-
-/** `+15145550100` → `+1 (514) 555-0100`. Tout le reste est rendu tel quel. */
-export function formatPhoneDisplay(e164: string | null | undefined): string {
-  const s = (e164 ?? '').trim();
-  const m = /^\+1(\d{3})(\d{3})(\d{4})$/.exec(s);
-  return m ? `+1 (${m[1]}) ${m[2]}-${m[3]}` : s;
-}
+export {
+  toE164,
+  formatPhoneDisplay,
+  maskPhone,
+  maskPhoneOrName,
+  isSupportedPhone,
+} from '../../shared/phone';
 
 /** Initiales pour la pastille d'une conversation. Un numéro donne « # ». */
 export function initialsFor(name: string | null | undefined): string {

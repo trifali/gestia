@@ -973,6 +973,25 @@ job documentLifecycleSweep {
   entities: [Document, ActivityLog]
 }
 
+// Chaque minute : poste les alertes SMS de réponse arrivées à échéance.
+//
+// Le webhook Telnyx ne les envoie plus lui-même — il les date à +5 minutes. Ce
+// balayage n'envoie que ce qui est *encore non lu* à l'échéance : une réponse
+// vue dans Gestia entre-temps ne coûte pas un SMS. À la minute, parce qu'un
+// délai de 5 minutes annoncé à l'utilisateur doit être tenu à la minute près ;
+// la requête est indexée sur `smsAlertDueAt` et ne coûte rien à vide.
+job sendDueSmsReplyAlerts {
+  executor: PgBoss,
+  perform: {
+    fn: import { sendDueSmsReplyAlerts } from "@src/server/jobs/smsReplyAlerts"
+  },
+  schedule: {
+    cron: "* * * * *"
+  },
+  // Lead / SmsContact / Client : `resolveDisplayName` nomme l'interlocuteur.
+  entities: [LeadSmsLog, Company, Lead, SmsContact, Client]
+}
+
 // Every 5 minutes: send batched project notification emails (admin ← client activity, client ← admin activity)
 job sendProjectNotifications {
   executor: PgBoss,

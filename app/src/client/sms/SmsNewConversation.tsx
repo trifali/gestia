@@ -9,7 +9,7 @@ import {
 } from 'wasp/client/operations';
 import { SmsComposer } from './SmsComposer';
 import { LuX } from 'react-icons/lu';
-import { toE164, formatPhoneDisplay, initialsFor } from './phone';
+import { toE164, formatPhoneDisplay, initialsFor, maskPhoneOrName } from './phone';
 import type { SmsConversationItem, SmsRecipientItem } from './types';
 
 const SOURCE_LABEL: Record<SmsRecipientItem['source'], string> = {
@@ -124,7 +124,9 @@ export function SmsNewConversation({
             aria-controls='sms-to-suggestions'
             className='input mt-1'
             value={to}
-            onChange={e => { setTo(e.target.value); setPicked(null); setSuggestOpen(true); }}
+            // `maskPhoneOrName`, pas `maskPhone` : ce champ cherche aussi un
+            // contact par son nom, que le masque réduirait en miettes.
+            onChange={e => { setTo(maskPhoneOrName(e.target.value)); setPicked(null); setSuggestOpen(true); }}
             onKeyDown={e => {
               // Échap referme d'abord la liste. Sans l'arrêt de propagation, le
               // panneau au-dessus l'interpréterait comme « fermer la messagerie ».

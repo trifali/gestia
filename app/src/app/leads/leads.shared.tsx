@@ -28,6 +28,7 @@ import {
 // les appelants existants n'ont pas à changer d'import.
 
 import { formatMontrealTime } from '../../client/format';
+import { PhoneInput } from '../../client/ui';
 export { formatMontrealTime };
 
 // ─── Lead provenance ──────────────────────────────────────────────────────────
@@ -247,12 +248,12 @@ export function LeadEditForm({
         </div>
         <div>
           <label className='label'>Téléphone</label>
-          <input
+          {/* Le numéro du prospect est la cible de toute la prospection SMS :
+              masqué ici, il ne peut plus arriver hors E.164 au moment d'envoyer. */}
+          <PhoneInput
             className='input'
-            type='tel'
             value={form.phone}
-            onChange={e => setField('phone', e.target.value)}
-            placeholder='—'
+            onChange={next => setField('phone', next)}
           />
         </div>
         <div>

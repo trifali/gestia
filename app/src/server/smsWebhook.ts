@@ -22,15 +22,13 @@ import { config } from 'wasp/server';
 import type { MiddlewareConfigFn } from 'wasp/server';
 import {
   toE164,
-  sendSms,
-  resolveSmsCredentials,
   resolveSmsPublicKey,
   directIdentifier,
   isDirectIdentifier,
 } from './sms';
 import { resolveDisplayName } from './smsDirectory';
 import { sendEmailWithAttachment, companySmtp } from './mail';
-import { toGsm7, gsm7Cost, clampGsm7 } from '../shared/smsSegments';
+import { SMS_ALERT_DELAY_MS } from '../shared/smsAlerts';
 
 /** Telnyx signs `${timestamp}|${rawBody}`; anything older than this is a replay. */
 const SIGNATURE_TOLERANCE_SECONDS = 5 * 60;
@@ -121,66 +119,32 @@ function escapeHtml(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
-/** Une alerte tient dans un segment. Toujours. */
-const ALERT_MAX_CHARS = 160;
-/** Ce qu'on garantit à l'aperçu, même face à une raison sociale à rallonge. */
-const ALERT_MIN_PREVIEW = 40;
-
-/**
- * Compose l'alerte SMS interne, cadrée à un seul segment.
- *
- * Telnyx facture au segment et cette alerte cite la réponse du prospect : sans
- * cadrage, un prospect bavard se paie trois ou quatre fois — et l'alerte est le
- * seul SMS que Gestia envoie de sa propre initiative, donc le seul coût que
- * l'entreprise ne décide pas.
- *
- * Deux leviers, dans cet ordre :
- *
- *  1. `toGsm7`. Le « — » du gabarit d'origine est hors alphabet GSM-7 : il
- *     basculait *chaque* alerte en UCS-2, où le segment tombe à 70 caractères.
- *     Le ramener à « - » (et déshabiller les accents que GSM-7 ignore, ç ê â…)
- *     rend les 160 — 2,4× plus d'aperçu pour le même prix.
- *  2. Troncature. Ce qui dépasse est coupé sur un mot entier. Une alerte dit
- *     « qui » et « quoi en gros » ; le texte intégral est dans Gestia, à un clic.
- *
- * Le courriel, lui, ne coûte rien : il garde la réponse entière et sa typographie.
- */
-export function buildReplyAlertText(who: string, body: string): string {
-  const prefix = 'Gestia - ';
-  const suffix = ' a répondu :\n';
-  const fixed = gsm7Cost(prefix) + gsm7Cost(toGsm7(suffix));
-
-  const whoText = clampGsm7(
-    toGsm7(who).replace(/\s+/g, ' ').trim(),
-    ALERT_MAX_CHARS - fixed - ALERT_MIN_PREVIEW,
-  );
-  const header = `${prefix}${whoText}${toGsm7(suffix)}`;
-
-  // Un retour à la ligne coûte autant qu'une lettre et n'apporte rien dans une
-  // notification : la réponse est remise à plat.
-  const preview = toGsm7(body).replace(/\s+/g, ' ').trim() || '(sans texte)';
-  const budget = ALERT_MAX_CHARS - gsm7Cost(header);
-  if (gsm7Cost(preview) <= budget) return header + preview;
-
-  const cut = clampGsm7(preview, budget - 3);
-  // Reculer jusqu'au mot précédent, sauf si ça ampute l'aperçu : mieux vaut un
-  // mot tronqué que douze caractères perdus.
-  const onWord = cut.replace(/\s+\S*$/, '');
-  const kept = onWord.length > 0 && cut.length - onWord.length <= 12 ? onWord : cut;
-  return `${header}${kept}...`;
-}
-
 /**
  * Notifies the company — and only the company, via the contact details on its
  * own record — that a prospect replied. Each channel is opt-out via the
  * notifySmsReplyBy* toggles in Paramètres → Intégrations.
+ *
+ * Les deux canaux n'ont pas le même tempo, parce qu'ils n'ont pas le même prix :
+ *
+ *   - **courriel** — parti tout de suite. Il ne coûte rien, donc rien ne
+ *     justifierait de le retarder.
+ *   - **SMS** — seulement *daté* ici, à +5 minutes. La tâche planifiée
+ *     `sendDueSmsReplyAlerts` ne l'enverra que si la réponse est toujours non lue
+ *     à l'échéance : quelqu'un qui a Gestia ouvert la verra via la pastille bien
+ *     avant, et l'entreprise n'aura rien payé.
  *
  * Best-effort throughout: a notification failure must never fail the webhook, or
  * Telnyx would retry a reply we have already stored.
  */
 async function notifyCompanyOfReply(
   company: any,
-  opts: { prospectNumber: string; body: string; prospectName: string | null },
+  entities: any,
+  opts: {
+    messageId: string;
+    prospectNumber: string;
+    body: string;
+    prospectName: string | null;
+  },
 ): Promise<void> {
   const who = opts.prospectName
     ? `${opts.prospectName} (${opts.prospectNumber})`
@@ -213,32 +177,16 @@ async function notifyCompanyOfReply(
   }
 
   if (company.notifySmsReplyBySms) {
-    const credentials = resolveSmsCredentials(company);
-    const target = toE164(company.phone ?? '');
-    // Guard the two ways this could loop or misfire: texting our own Telnyx
-    // number would re-enter this webhook forever, and texting the prospect's own
-    // number would send them a copy of their own message.
-    if (!credentials) {
-      console.warn('[telnyx] notification SMS activée mais identifiants Telnyx absents.');
-    } else if (!target) {
-      console.warn('[telnyx] notification SMS activée mais aucun téléphone d\'entreprise valide.');
-    } else if (target === credentials.from) {
-      console.warn('[telnyx] notification SMS ignorée : le téléphone d\'entreprise est le numéro Telnyx.');
-    } else if (target === opts.prospectNumber) {
-      console.warn('[telnyx] notification SMS ignorée : le téléphone d\'entreprise est celui du prospect.');
-    } else {
-      try {
-        // Deliberately not written to LeadSmsLog: an internal alert is not part
-        // of the prospect conversation, and logging it would corrupt the
-        // "last outbound to this number" lookup used to attribute replies.
-        await sendSms({
-          to: target,
-          text: buildReplyAlertText(who, opts.body),
-          credentials,
-        });
-      } catch (err) {
-        console.error('[telnyx] réponse enregistrée mais notification SMS échouée', err);
-      }
+    // Aucune vérification de numéro ni d'identifiants ici : cinq minutes
+    // suffisent à décocher l'option ou à changer de téléphone, et c'est
+    // l'instant de l'envoi qui fait foi. La tâche revalide tout.
+    try {
+      await entities.LeadSmsLog.update({
+        where: { id: opts.messageId },
+        data: { smsAlertDueAt: new Date(Date.now() + SMS_ALERT_DELAY_MS) },
+      });
+    } catch (err) {
+      console.error('[telnyx] réponse enregistrée mais échéance d\'alerte non posée', err);
     }
   }
 }
@@ -316,7 +264,8 @@ async function handleInbound(payload: any, company: any, entities: any): Promise
 
   const prospectName = await resolveDisplayName(entities, company.id, from, identifier);
 
-  await notifyCompanyOfReply(company, {
+  await notifyCompanyOfReply(company, entities, {
+    messageId: created.id,
     prospectNumber: from ?? fromKey,
     body,
     prospectName,

@@ -4,24 +4,11 @@ import { LuChevronDown, LuChevronUp, LuArrowRight, LuX } from 'react-icons/lu';
 import toast from 'react-hot-toast';
 import { useQuery, getClients, createClient, updateClient, deleteClient } from 'wasp/client/operations';
 import type { Client } from 'wasp/entities';
-import { PageHeader, EmptyState, Modal, useConfirm, IconBtn, EditIcon, TrashIcon } from '../../client/ui';
+import { PageHeader, EmptyState, Modal, useConfirm, IconBtn, EditIcon, TrashIcon, PhoneInput } from '../../client/ui';
 import { MagicInput, MagicTextarea } from '../../client/magic';
 import { formatDate } from '../../shared/format';
 
 /** Formate les digits saisis en +1 (438) 444-4343 */
-function maskPhone(raw: string): string {
-  let digits = raw.replace(/\D/g, '');
-  if (digits.startsWith('1')) digits = digits.slice(1);
-  digits = digits.slice(0, 10);
-  const a = digits.slice(0, 3);
-  const p = digits.slice(3, 6);
-  const l = digits.slice(6, 10);
-  if (digits.length === 0) return '';
-  if (digits.length <= 3) return `+1 (${a}`;
-  if (digits.length <= 6) return `+1 (${a}) ${p}`;
-  return `+1 (${a}) ${p}-${l}`;
-}
-
 const STATUS = {
   actif: { label: 'Actif', className: 'badge-success' },
   prospect: { label: 'Prospect', className: 'badge-info' },
@@ -275,11 +262,10 @@ function ClientForm({ client, onClose }: { client?: Client; onClose: () => void 
         </div>
         <div>
           <label className='label'>Téléphone</label>
-          <input
+          <PhoneInput
             className='input'
-            placeholder='+1 (514) 000-0000'
             value={form.phone}
-            onChange={(e) => setForm({ ...form, phone: maskPhone(e.target.value) })}
+            onChange={next => setForm({ ...form, phone: next })}
           />
         </div>
         <div className='col-span-2'>

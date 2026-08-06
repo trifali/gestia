@@ -15,7 +15,7 @@ import {
   getClientActivities,
   getGoogleCalendarStatus,
 } from 'wasp/client/operations';
-import { Modal, useConfirm, IconBtn, TrashIcon, EditIcon } from '../../client/ui';
+import { Modal, useConfirm, IconBtn, TrashIcon, EditIcon, PhoneInput } from '../../client/ui';
 import { MagicInput, MagicTextarea } from '../../client/magic';
 import { formatCurrency, formatDate, formatDateTime } from '../../shared/format';
 import type { Client } from 'wasp/entities';
@@ -481,19 +481,6 @@ function RencontresTab({ client }: { client: ClientDetail }) {
   );
 }
 // ─── Edit modal (reuses same form as ClientsPage) ────────────────────────────
-function maskPhone(raw: string): string {
-  let digits = raw.replace(/\D/g, '');
-  if (digits.startsWith('1')) digits = digits.slice(1);
-  digits = digits.slice(0, 10);
-  const a = digits.slice(0, 3);
-  const p = digits.slice(3, 6);
-  const l = digits.slice(6, 10);
-  if (digits.length === 0) return '';
-  if (digits.length <= 3) return `+1 (${a}`;
-  if (digits.length <= 6) return `+1 (${a}) ${p}`;
-  return `+1 (${a}) ${p}-${l}`;
-}
-
 function ClientEditModal({ client, onClose }: { client: Client; onClose: () => void }) {
   const [form, setForm] = useState({
     name: client.name || '',
@@ -557,11 +544,10 @@ function ClientEditModal({ client, onClose }: { client: Client; onClose: () => v
         </div>
         <div>
           <label className='label'>Téléphone</label>
-          <input
+          <PhoneInput
             className='input'
-            placeholder='+1 (514) 000-0000'
             value={form.phone}
-            onChange={(e) => setForm({ ...form, phone: maskPhone(e.target.value) })}
+            onChange={next => setForm({ ...form, phone: next })}
           />
         </div>
         <div className='col-span-2'>

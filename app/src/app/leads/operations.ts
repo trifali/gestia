@@ -28,6 +28,26 @@ function ensureCompany(user: any): string {
 
 const PLACES_BASE = 'https://maps.googleapis.com/maps/api/place';
 
+/**
+ * Le numéro d'une fiche Google, dans une forme que Telnyx pourra composer.
+ *
+ * `formatted_phone_number` est au format *local* du pays : « (514) 574-2228 »
+ * au Québec, mais « 01 42 68 53 00 » en France et « 020 7946 0958 » au
+ * Royaume-Uni. Sans indicatif pays, `toE164` applique sa règle nord-américaine
+ * et fabrique un numéro faux — mais valide : le français devient
+ * `+10142685300`, que plus rien en aval ne peut détecter comme erroné.
+ *
+ * `international_phone_number` porte l'indicatif (« +33 1 42 68 53 00 ») : le
+ * « + » suffit à désarmer la règle des dix chiffres, pour tous les pays d'un
+ * coup. On le stocke tel quel — lisible pour un humain, et sans ambiguïté pour
+ * `toE164`. Le format local ne sert que de repli quand Google ne le fournit pas.
+ */
+function placePhone(d: any): string | undefined {
+  const intl = (d?.international_phone_number ?? '').trim();
+  if (intl) return intl;
+  return (d?.formatted_phone_number ?? '').trim() || undefined;
+}
+
 async function fetchJson(url: string): Promise<any> {
   const res = await fetch(url);
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -304,7 +324,7 @@ export const searchLeads: SearchLeads<
   // For each stub, fetch place details (in parallel, batches of 5)
   async function getDetails(placeId: string): Promise<any> {
     const fields = [
-      'name', 'formatted_address', 'formatted_phone_number',
+      'name', 'formatted_address', 'formatted_phone_number', 'international_phone_number',
       'website', 'rating', 'user_ratings_total', 'geometry',
       'types', 'business_status', 'url', 'opening_hours',
     ].join('%2C');
@@ -352,7 +372,7 @@ export const searchLeads: SearchLeads<
       const raw: RawLead = {
         name: d.name ?? stub.name,
         address: d.formatted_address ?? stub.formatted_address ?? undefined,
-        phone: d.formatted_phone_number ?? undefined,
+        phone: placePhone(d),
         website: website ?? undefined,
         rating: rating ?? undefined,
         reviewCount: d.user_ratings_total ?? stub.user_ratings_total ?? undefined,
@@ -1180,7 +1200,7 @@ export const fetchMoreLeads = async (
 
   async function getDetails(placeId: string): Promise<any> {
     const fields = [
-      'name', 'formatted_address', 'formatted_phone_number',
+      'name', 'formatted_address', 'formatted_phone_number', 'international_phone_number',
       'website', 'rating', 'user_ratings_total', 'geometry',
       'types', 'business_status', 'url', 'opening_hours',
     ].join('%2C');
@@ -1219,7 +1239,7 @@ export const fetchMoreLeads = async (
       return {
         name: d.name ?? stub.name,
         address: d.formatted_address ?? stub.formatted_address ?? undefined,
-        phone: d.formatted_phone_number ?? undefined,
+        phone: placePhone(d),
         website: website ?? undefined,
         rating: rating ?? undefined,
         reviewCount: d.user_ratings_total ?? stub.user_ratings_total ?? undefined,

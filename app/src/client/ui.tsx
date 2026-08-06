@@ -1,6 +1,54 @@
-import { type ReactNode, useState } from 'react';
+import { type ReactNode, type InputHTMLAttributes, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { LuPencil, LuTrash2, LuTriangleAlert } from 'react-icons/lu';
+import { maskPhone, isSupportedPhone } from '../shared/phone';
+
+// ─── Champ téléphone ──────────────────────────────────────────────────────
+//
+// Le seul champ par lequel un numéro entre dans Gestia. Il met la saisie en
+// forme à chaque frappe (`maskPhone`), ce qui rend un numéro hors E.164
+// difficile à écrire, et signale au départ du curseur ce qui reste invalide —
+// parce qu'un numéro incomplet reste possible et que Telnyx, lui, le refusera
+// sans appel.
+//
+// L'avertissement attend le `blur` : un numéro en cours de frappe est invalide
+// presque tout le temps, le signaler pendant la frappe n'apprendrait rien.
+
+export function PhoneInput({
+  value,
+  onChange,
+  className = '',
+  invalidHint = 'Numéro incomplet — Telnyx refuserait cet envoi.',
+  ...rest
+}: {
+  value: string;
+  onChange: (next: string) => void;
+  className?: string;
+  invalidHint?: string;
+} & Omit<InputHTMLAttributes<HTMLInputElement>, 'value' | 'onChange' | 'className' | 'type'>) {
+  const [touched, setTouched] = useState(false);
+  const invalid = touched && value.trim().length > 0 && !isSupportedPhone(value);
+
+  return (
+    <>
+      <input
+        {...rest}
+        type='tel'
+        inputMode='tel'
+        autoComplete='tel'
+        className={`${className} ${invalid ? 'border-danger' : ''}`}
+        value={value}
+        placeholder={rest.placeholder ?? '+1 (514) 555-0100'}
+        onChange={e => onChange(maskPhone(e.target.value))}
+        onBlur={e => {
+          setTouched(true);
+          rest.onBlur?.(e);
+        }}
+      />
+      {invalid && <span className='text-xs text-danger mt-1 block'>{invalidHint}</span>}
+    </>
+  );
+}
 
 // ─── Reusable icon action buttons ─────────────────────────────────────────
 

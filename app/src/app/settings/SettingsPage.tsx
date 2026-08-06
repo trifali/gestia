@@ -44,10 +44,11 @@ import {
 import { useAuth } from 'wasp/client/auth';
 import { PAYMENT_METHOD_OPTIONS } from '../payments/PaymentForm';
 import { LuPlus, LuSearch, LuFileText, LuCopy, LuEye, LuX, LuChevronRight, LuWand, LuMessageSquare, LuCheck, LuMail } from 'react-icons/lu';
-import { PageHeader, IconBtn, EditIcon, TrashIcon, useConfirm, Modal, EmptyState } from '../../client/ui';
+import { PageHeader, IconBtn, EditIcon, TrashIcon, useConfirm, Modal, EmptyState, PhoneInput } from '../../client/ui';
 import { MagicInput, MagicTextarea } from '../../client/magic';
 import { useSmsAlerts } from '../../client/sms/useSmsAlerts';
 import { formatCurrency } from '../../shared/format';
+import { SMS_ALERT_DELAY_MINUTES } from '../../shared/smsAlerts';
 import { TEMPLATE_TYPES, TEMPLATE_VARIABLE_GROUPS, getTemplatePdfBase64 } from './templatePdf';
 import { getBoilerplate } from './templateBoilerplates';
 import MDEditor from '@uiw/react-md-editor';
@@ -133,13 +134,24 @@ function CompanyForm({ company, canEdit }: { company: any; canEdit: boolean }) {
   const field = (label: string, k: string, type: string = 'text', wrapClass?: string) => (
     <div className={wrapClass}>
       <label className='label'>{label}</label>
-      <MagicInput
-        type={type}
-        className='input'
-        value={form[k] ?? ''}
-        onChange={(e) => setForm({ ...form, [k]: e.target.value })}
-        disabled={!canEdit}
-      />
+      {type === 'tel' ? (
+        // Le téléphone de l'entreprise est la cible des alertes SMS : s'il n'est
+        // pas en E.164, l'alerte ne part jamais et rien ne le dit.
+        <PhoneInput
+          className='input'
+          value={form[k] ?? ''}
+          onChange={next => setForm({ ...form, [k]: next })}
+          disabled={!canEdit}
+        />
+      ) : (
+        <MagicInput
+          type={type}
+          className='input'
+          value={form[k] ?? ''}
+          onChange={(e) => setForm({ ...form, [k]: e.target.value })}
+          disabled={!canEdit}
+        />
+      )}
     </div>
   );
 
@@ -154,7 +166,7 @@ function CompanyForm({ company, canEdit }: { company: any; canEdit: boolean }) {
         {field('Nom commercial', 'name')}
         {field('Raison sociale', 'legalName')}
         {field('Courriel', 'email', 'email')}
-        {field('Téléphone', 'phone')}
+        {field('Téléphone', 'phone', 'tel')}
         {field('Adresse', 'address', 'text', 'md:col-span-2')}
         {field('Ville', 'city')}
         {field('Province', 'province')}
@@ -1631,7 +1643,7 @@ function SecretField({
  * panels so both tests behave identically.
  */
 function TestSender({
-  label, placeholder, defaultTarget, missingHint, disabled, onSend,
+  label, placeholder, defaultTarget, missingHint, disabled, onSend, kind = 'email',
 }: {
   label: string;
   placeholder: string;
@@ -1639,6 +1651,8 @@ function TestSender({
   missingHint: string;
   disabled?: boolean;
   onSend: (to: string | null) => Promise<string>;
+  /** `sms` masque la saisie : un test envoyé à un numéro mal formé est facturé pour rien. */
+  kind?: 'email' | 'sms';
 }) {
   const [override, setOverride] = useState('');
   const [sending, setSending] = useState(false);
@@ -1664,13 +1678,23 @@ function TestSender({
       <div className='flex items-end gap-2'>
         <div className='flex-1 min-w-0'>
           <label className='label'>{label}</label>
-          <input
-            className='input mt-1'
-            value={override}
-            onChange={e => setOverride(e.target.value)}
-            placeholder={defaultTarget ? `${defaultTarget} (par défaut)` : placeholder}
-            disabled={disabled || sending}
-          />
+          {kind === 'sms' ? (
+            <PhoneInput
+              className='input mt-1'
+              value={override}
+              onChange={setOverride}
+              placeholder={defaultTarget ? `${defaultTarget} (par défaut)` : placeholder}
+              disabled={disabled || sending}
+            />
+          ) : (
+            <input
+              className='input mt-1'
+              value={override}
+              onChange={e => setOverride(e.target.value)}
+              placeholder={defaultTarget ? `${defaultTarget} (par défaut)` : placeholder}
+              disabled={disabled || sending}
+            />
+          )}
         </div>
         <button
           type='button'
@@ -1772,12 +1796,12 @@ function SmsSettingsPanel({ settings, refetch }: { settings: any; refetch: () =>
         <div className='space-y-4'>
           <div>
             <label className='label'>Numéro Telnyx</label>
-            <input
+            <PhoneInput
               className='input mt-1'
               value={phone}
-              onChange={e => setPhone(e.target.value)}
-              placeholder='+1 514 555 0100'
+              onChange={setPhone}
               disabled={saving}
+              invalidHint="Numéro incomplet — Telnyx n'accepte que le format E.164."
             />
             <span className='text-xs text-muted mt-1 block'>
               Le numéro d'où partent vos SMS. Les numéros à 10 chiffres sont enregistrés en +1.
@@ -1829,8 +1853,9 @@ function SmsSettingsPanel({ settings, refetch }: { settings: any; refetch: () =>
         hint={"Envoie un vrai SMS. Par défaut au téléphone de l'entreprise."}
       >
         <TestSender
+          kind='sms'
           label='Destinataire'
-          placeholder='(514) 555-0100'
+          placeholder='+1 (514) 555-0100'
           defaultTarget={s.companyPhone}
           missingHint="Ajoutez un téléphone d'entreprise dans l'onglet Entreprise, ou saisissez un numéro."
           disabled={!s.canSend}
@@ -1848,6 +1873,12 @@ function SmsSettingsPanel({ settings, refetch }: { settings: any; refetch: () =>
         title="4. Alertes à la réception d'une réponse"
         hint={<>Seules les coordonnées de l'entreprise sont utilisées — jamais les comptes individuels. Modifiez-les dans l'onglet <strong>Entreprise</strong>.</>}
       >
+        <p className='text-xs text-muted mb-3'>
+          Quand un prospect répond, sa réponse apparaît de toute façon dans Gestia —
+          pastille dans la barre latérale et notification à l'écran, en moins d'une
+          minute et sans frais. Les alertes ci-dessous servent à prévenir
+          l'entreprise <em>en dehors</em> de l'application.
+        </p>
         <div className='grid sm:grid-cols-2 gap-2'>
           <NotifyToggle
             label='Par courriel'
@@ -1867,6 +1898,33 @@ function SmsSettingsPanel({ settings, refetch }: { settings: any; refetch: () =>
             extraHint={!s.canSend ? 'Configurez l\'envoi à l\'étape 1.' : undefined}
           />
         </div>
+
+        {/* Le seul SMS que Gestia envoie de sa propre initiative : l'utilisateur
+            doit savoir exactement quand il part et ce qu'il lui coûte. */}
+        <dl className='mt-3 rounded-lg border border-line bg-canvas-100 px-3 py-2.5 text-xs space-y-2'>
+          <div>
+            <dt className='font-medium text-ink'>Courriel — immédiat, sans frais</dt>
+            <dd className='text-muted mt-0.5'>
+              Part dès la réception, avec la réponse complète et un lien vers la
+              conversation. Envoyé depuis votre propre serveur SMTP.
+            </dd>
+          </div>
+          <div>
+            <dt className='font-medium text-ink'>
+              SMS — après {SMS_ALERT_DELAY_MINUTES} minutes, et seulement si personne n'a lu
+            </dt>
+            <dd className='text-muted mt-0.5'>
+              Gestia attend {SMS_ALERT_DELAY_MINUTES} minutes. Si quelqu'un ouvre la
+              conversation entre-temps, aucun SMS n'est envoyé et rien n'est facturé.
+              Sinon vous recevez un message court au{' '}
+              <strong className='text-ink'>{s.companyPhone || 'téléphone de l\'entreprise'}</strong> :
+              qui a répondu et le début de sa réponse. Un seul SMS par conversation,
+              même si le prospect en envoie plusieurs, et toujours limité à un segment
+              — soit <strong className='text-ink'>un SMS facturé</strong> par votre
+              compte Telnyx.
+            </dd>
+          </div>
+        </dl>
       </PanelSection>
 
       <PanelSection

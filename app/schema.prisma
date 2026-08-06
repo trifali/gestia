@@ -643,11 +643,21 @@ model LeadSmsLog {
   errorCode String? // Telnyx error code when a send fails
   readAt    DateTime? // inbound only: when someone opened the thread
 
+  // Alerte SMS différée (entrants seulement) — voir server/jobs/smsReplyAlerts.ts.
+  // L'alerte n'est pas envoyée à la réception : elle est datée ici, et la tâche
+  // planifiée ne la poste que si le message est toujours non lu à l'échéance.
+  // Lu à temps = `smsAlertDueAt` remis à NULL et aucun SMS facturé.
+  smsAlertDueAt  DateTime? // échéance ; NULL = aucune alerte en attente
+  smsAlertSentAt DateTime? // envoi effectif ; NULL = jamais alerté
+
   // Covers the plain (companyId, identifier) prefix too; createdAt is what the
   // inbox needs to pick each thread's last message.
   @@index([companyId, identifier, createdAt])
   // Attribution lookup: match an inbound number back to the last outbound message.
   @@index([to, direction, createdAt])
+  // La tâche planifiée balaie les échéances chaque minute : peu de lignes
+  // concernées, mais un scan complet de la table à chaque passage sans index.
+  @@index([smsAlertDueAt])
 }
 
 // Lightweight directory: puts a name on a number that is neither a client nor a
