@@ -29,7 +29,6 @@ import {
 
 import { formatMontrealTime } from '../../client/format';
 export { formatMontrealTime };
-export { smsSegments } from '../../client/sms/smsText';
 
 // ─── Lead provenance ──────────────────────────────────────────────────────────
 // Where a prospect came from. `google_maps` is the default for everything the

@@ -30,6 +30,7 @@ import {
 } from './sms';
 import { resolveDisplayName } from './smsDirectory';
 import { sendEmailWithAttachment, companySmtp } from './mail';
+import { toGsm7, gsm7Cost, clampGsm7 } from '../shared/smsSegments';
 
 /** Telnyx signs `${timestamp}|${rawBody}`; anything older than this is a replay. */
 const SIGNATURE_TOLERANCE_SECONDS = 5 * 60;
@@ -120,6 +121,55 @@ function escapeHtml(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
+/** Une alerte tient dans un segment. Toujours. */
+const ALERT_MAX_CHARS = 160;
+/** Ce qu'on garantit à l'aperçu, même face à une raison sociale à rallonge. */
+const ALERT_MIN_PREVIEW = 40;
+
+/**
+ * Compose l'alerte SMS interne, cadrée à un seul segment.
+ *
+ * Telnyx facture au segment et cette alerte cite la réponse du prospect : sans
+ * cadrage, un prospect bavard se paie trois ou quatre fois — et l'alerte est le
+ * seul SMS que Gestia envoie de sa propre initiative, donc le seul coût que
+ * l'entreprise ne décide pas.
+ *
+ * Deux leviers, dans cet ordre :
+ *
+ *  1. `toGsm7`. Le « — » du gabarit d'origine est hors alphabet GSM-7 : il
+ *     basculait *chaque* alerte en UCS-2, où le segment tombe à 70 caractères.
+ *     Le ramener à « - » (et déshabiller les accents que GSM-7 ignore, ç ê â…)
+ *     rend les 160 — 2,4× plus d'aperçu pour le même prix.
+ *  2. Troncature. Ce qui dépasse est coupé sur un mot entier. Une alerte dit
+ *     « qui » et « quoi en gros » ; le texte intégral est dans Gestia, à un clic.
+ *
+ * Le courriel, lui, ne coûte rien : il garde la réponse entière et sa typographie.
+ */
+export function buildReplyAlertText(who: string, body: string): string {
+  const prefix = 'Gestia - ';
+  const suffix = ' a répondu :\n';
+  const fixed = gsm7Cost(prefix) + gsm7Cost(toGsm7(suffix));
+
+  const whoText = clampGsm7(
+    toGsm7(who).replace(/\s+/g, ' ').trim(),
+    ALERT_MAX_CHARS - fixed - ALERT_MIN_PREVIEW,
+  );
+  const header = `${prefix}${whoText}${toGsm7(suffix)}`;
+
+  // Un retour à la ligne coûte autant qu'une lettre et n'apporte rien dans une
+  // notification : la réponse est remise à plat.
+  const preview = toGsm7(body).replace(/\s+/g, ' ').trim() || '(sans texte)';
+  const budget = ALERT_MAX_CHARS - gsm7Cost(header);
+  if (gsm7Cost(preview) <= budget) return header + preview;
+
+  const cut = clampGsm7(preview, budget - 3);
+  // Reculer jusqu'au mot précédent, sauf si ça ampute l'aperçu : mieux vaut un
+  // mot tronqué que douze caractères perdus.
+  const onWord = cut.replace(/\s+\S*$/, '');
+  const kept = onWord.length > 0 && cut.length - onWord.length <= 12 ? onWord : cut;
+  return `${header}${kept}...`;
+}
+
 /**
  * Notifies the company — and only the company, via the contact details on its
  * own record — that a prospect replied. Each channel is opt-out via the
@@ -183,7 +233,7 @@ async function notifyCompanyOfReply(
         // "last outbound to this number" lookup used to attribute replies.
         await sendSms({
           to: target,
-          text: `Gestia — ${who} a répondu par SMS :\n${opts.body}`,
+          text: buildReplyAlertText(who, opts.body),
           credentials,
         });
       } catch (err) {

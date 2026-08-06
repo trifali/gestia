@@ -16,6 +16,7 @@ import {
   SMS_WEBHOOK_PATH,
   SMS_WEBHOOK_FAILOVER_PATH,
 } from '../../server/sms';
+import { toGsm7, clampGsm7 } from '../../shared/smsSegments';
 
 export type SmsSettings = {
   telnyxPhoneNumber: string | null;
@@ -109,9 +110,19 @@ export const sendTestSms = async (
   }
 
   try {
+    // `toGsm7` n'est pas cosmétique : le « — » du gabarit d'origine, hors
+    // alphabet GSM-7, faisait basculer ce test en UCS-2 (70 caractères par
+    // segment) et le facturait donc deux segments au lieu d'un. Le clamp couvre
+    // la raison sociale à rallonge. Voir shared/smsSegments.
     const { id } = await sendSms({
       to,
-      text: `Gestia — test de configuration SMS pour ${company.name ?? 'votre entreprise'}. Si vous recevez ce message, l'envoi fonctionne.`,
+      text: clampGsm7(
+        toGsm7(
+          `Gestia - test de configuration SMS pour ${company.name ?? 'votre entreprise'}. ` +
+            `Si vous recevez ce message, l'envoi fonctionne.`,
+        ),
+        160,
+      ),
       credentials,
     });
     return { ok: true, to, providerId: id };

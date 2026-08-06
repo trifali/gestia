@@ -6,7 +6,8 @@
 import { useEffect, useRef, type FormEvent } from 'react';
 import { LuLoader, LuSend } from 'react-icons/lu';
 import { MagicTextarea } from '../magic';
-import { smsSegments } from './smsText';
+import { toGsm7 } from './smsText';
+import { SmsCostHint } from './SmsCostHint';
 
 export function SmsComposer({
   value,
@@ -26,7 +27,6 @@ export function SmsComposer({
   autoFocus?: boolean;
 }) {
   const ref = useRef<HTMLTextAreaElement | null>(null);
-  const counts = smsSegments(value);
 
   // Auto-grandissement plafonné : une réponse courte ne doit pas manger la
   // conversation, une longue ne doit pas défiler dans deux lignes.
@@ -83,10 +83,7 @@ export function SmsComposer({
       </div>
       <div className='text-[11px] text-muted mt-1 flex items-center gap-1.5 min-h-[14px]'>
         {value.length > 0 && (
-          <span>{counts.chars} caractère(s) · {counts.segments} SMS</span>
-        )}
-        {counts.unicode && (
-          <span className='text-amber-600'>caractères spéciaux — limite 70 par SMS</span>
+          <SmsCostHint text={value} onSimplify={() => onChange(toGsm7(value))} />
         )}
       </div>
     </form>

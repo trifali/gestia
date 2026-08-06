@@ -85,7 +85,6 @@ import {
 } from '../../client/ui';
 import {
   formatMontrealTime,
-  smsSegments,
   LEAD_SOURCES,
   NoteThread,
   LeadEditForm,
@@ -95,6 +94,8 @@ import {
   type LeadFormValues,
 } from './leads.shared';
 import { LeadDetailPanel } from './LeadDetailPanel';
+import { SmsCostHint } from '../../client/sms/SmsCostHint';
+import { toGsm7 } from '../../client/sms/smsText';
 import { useSmsCapability, useEmailCapability } from '../../client/capabilities';
 import { SMS_THREAD_POLL_MS } from '../../client/polling';
 import { SmsMessageList } from '../../client/sms/SmsMessageList';
@@ -631,7 +632,6 @@ function TemplatesModal({
   const companyEmail = (company as any)?.email ?? '';
   const fromEmail = (senderInfo as any)?.fromEmail ?? '';
   const fromName = (senderInfo as any)?.fromName || (company as any)?.name || 'Gestia';
-  const previewSms = smsSegments(previewBody);
 
   async function handleGenerate() {
     setGenerating(true);
@@ -813,9 +813,10 @@ function TemplatesModal({
               <div className='text-sm whitespace-pre-wrap px-3 py-3 min-h-[120px]'>
                 {body.trim() ? previewBody : <span className='text-muted italic'>Message vide</span>}
               </div>
-              <div className='text-xs text-muted px-3 py-2 border-t border-line bg-canvas-100'>
-                {previewSms.chars} caractère(s) · {previewSms.segments} SMS
-                {previewSms.unicode ? ' · caractères spéciaux (limite 70/SMS)' : ''}
+              <div className='text-xs text-muted px-3 py-2 border-t border-line bg-canvas-100 flex items-center gap-1.5 flex-wrap'>
+                {/* Aperçu seul : la conversion se propose dans l'éditeur, sur le
+                    texte réel du modèle plutôt que sur son rendu fictif. */}
+                <SmsCostHint text={previewBody} />
               </div>
             </div>
           ) : (
@@ -890,9 +891,15 @@ function TemplatesModal({
                   : `Bonjour,\n\nJe me permets de vous contacter au sujet de {{lead.name}}...\n\nCordialement,\n{{sender.name}}`}
               />
               {isSms && (
-                <div className='text-xs text-muted mt-1'>
-                  Aperçu avec données fictives : {previewSms.chars} caractère(s) · {previewSms.segments} SMS
-                  {previewSms.unicode ? ' · caractères spéciaux (limite 70/SMS)' : ''}
+                // Le levier le plus rentable de l'application : un « — » dans un
+                // modèle se paie à *chaque* envoi, à chaque prospect. Le corriger
+                // ici le corrige une fois pour toutes.
+                <div className='text-xs text-muted mt-1 flex items-center gap-1.5 flex-wrap'>
+                  <SmsCostHint
+                    text={previewBody}
+                    onSimplify={() => setBody(toGsm7(body))}
+                    compact
+                  />
                 </div>
               )}
             </div>
@@ -1449,7 +1456,6 @@ function ProspectSmsModal({ lead, searchTitle, onClose, onSent }: { lead: Lead; 
     }
   }
 
-  const counts = smsSegments(text);
 
   return (
     <div className='space-y-4'>
@@ -1528,8 +1534,7 @@ function ProspectSmsModal({ lead, searchTitle, onClose, onSent }: { lead: Lead; 
           placeholder={`Bonjour, ici ${(company as any)?.name ?? 'notre entreprise'}…`}
         />
         <div className='text-xs text-muted mt-1 flex items-center gap-1.5'>
-          <span>{counts.chars} caractère(s) · {counts.segments} SMS</span>
-          {counts.unicode && <span className='text-amber-600'>caractères spéciaux — limite 70 par SMS</span>}
+          <SmsCostHint text={text} onSimplify={() => setText(toGsm7(text))} />
         </div>
       </div>
 
