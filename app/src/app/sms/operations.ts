@@ -526,3 +526,45 @@ export const deleteSmsContact = async (
   await (context.entities as any).SmsContact.delete({ where: { id } });
   return { deleted: true };
 };
+
+// ─── Suppression d'un fil ────────────────────────────────────────────────────
+
+/**
+ * Efface définitivement une conversation, c'est-à-dire tous les LeadSmsLog de
+ * l'entreprise portant cet identifiant.
+ *
+ * Rien d'autre à nettoyer : il n'existe pas de table de conversation, un fil
+ * n'est qu'un regroupement de messages. Les non-lus et les échéances d'alerte
+ * partent donc avec les lignes — les pastilles retombent seules et la tâche
+ * planifiée n'a plus rien à envoyer, sans qu'aucun appelant ait à filtrer quoi
+ * que ce soit.
+ *
+ * Voir aussi clearLeadSmsSent (leads/operations.ts) : les deux seuls chemins qui
+ * suppriment des LeadSmsLog.
+ */
+export const deleteSmsConversation = async (
+  { identifier }: { identifier: string },
+  context: any,
+): Promise<{ deleted: number }> => {
+  const { companyId } = await ensureInbox(context);
+  const id = (identifier ?? '').trim();
+  if (!id) throw new HttpError(400, 'Conversation requise');
+
+  // Le compte tient lieu de contrôle d'appartenance : `identifier` n'a pas de
+  // table à interroger, donc « existe-t-il des messages de cette entreprise sur
+  // ce fil » est la seule question qui ait un sens — et l'identifiant d'une
+  // autre entreprise y répond zéro, donc 404 comme partout ailleurs.
+  const existing = await (context.entities as any).LeadSmsLog.count({
+    where: { companyId, identifier: id },
+  });
+  if (!existing) throw new HttpError(404);
+
+  // Le répertoire survit : aucune clé étrangère ne lie SmsContact aux messages,
+  // volontairement (cf. deleteSmsContact ci-dessus). Effacer ce qu'une personne
+  // a écrit n'efface pas son nom — si elle réécrit, le fil renaît déjà nommé.
+  // deleteSmsContact reste la porte pour l'autre besoin.
+  const { count } = await (context.entities as any).LeadSmsLog.deleteMany({
+    where: { companyId, identifier: id },
+  });
+  return { deleted: count };
+};

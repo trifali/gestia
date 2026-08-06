@@ -1,5 +1,6 @@
 import { LuMessageSquare } from 'react-icons/lu';
 import { formatRelativeShort } from '../format';
+import { IconBtn, TrashIcon } from '../ui';
 import { formatPhoneDisplay, initialsFor } from './phone';
 import type { SmsConversationItem } from './types';
 
@@ -8,11 +9,13 @@ export function SmsConversationList({
   loading,
   onOpen,
   onNew,
+  onDelete,
 }: {
   conversations: SmsConversationItem[];
   loading: boolean;
   onOpen: (identifier: string) => void;
   onNew: () => void;
+  onDelete: (c: SmsConversationItem) => void;
 }) {
   if (loading) {
     return (
@@ -46,11 +49,11 @@ export function SmsConversationList({
       {conversations.map(c => {
         const title = c.displayName || formatPhoneDisplay(c.phone) || c.address;
         return (
-          <li key={c.identifier}>
+          <li key={c.identifier} className='relative group border-b border-line/60'>
             <button
               type='button'
               onClick={() => onOpen(c.identifier)}
-              className='w-full text-left px-3 py-2.5 flex items-start gap-3 border-b border-line/60 hover:bg-canvas-100 transition-colors focus:outline-none focus-visible:bg-canvas-100'
+              className='w-full text-left px-3 py-2.5 pr-12 sm:pr-3 flex items-start gap-3 group-hover:bg-canvas-100 transition-colors focus:outline-none focus-visible:bg-canvas-100'
             >
               <span className='shrink-0 w-9 h-9 rounded-full bg-accent-50 text-accent-700 flex items-center justify-center font-semibold text-xs'>
                 {initialsFor(c.displayName ?? c.address)}
@@ -81,6 +84,20 @@ export function SmsConversationList({
                 </span>
               </span>
             </button>
+
+            {/* Frère du bouton de rangée et non enfant : un bouton dans un
+                bouton n'est pas du HTML valide, et le clic remonterait au fil.
+                Toujours visible sous `sm` — le panneau y est plein écran et il
+                n'y a pas de survol au doigt. */}
+            <div className='absolute right-1.5 top-1/2 -translate-y-1/2 rounded-lg bg-canvas-100 opacity-100 transition-opacity sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100'>
+              <IconBtn
+                title='Supprimer la conversation'
+                variant='danger'
+                onClick={() => onDelete(c)}
+              >
+                <TrashIcon />
+              </IconBtn>
+            </div>
           </li>
         );
       })}

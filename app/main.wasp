@@ -740,6 +740,12 @@ action deleteSmsContact {
   fn: import { deleteSmsContact } from "@src/app/sms/operations",
   entities: [User, SmsContact]
 }
+// Suppression définitive d'un fil : les messages partent, le répertoire reste.
+// Company est nécessaire à l'opt-in smsInboxEnabled vérifié par l'opération.
+action deleteSmsConversation {
+  fn: import { deleteSmsConversation } from "@src/app/sms/operations",
+  entities: [User, Company, LeadSmsLog]
+}
 
 // Per-company Telnyx credentials + reply-notification toggles.
 query getSmsSettings {

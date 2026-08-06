@@ -1031,6 +1031,10 @@ export const getLeadSmsLogs = async (
 
 // Resets the "SMS sent" flag. Inbound replies are deliberately spared — they are
 // the prospect's messages, not a status we own.
+//
+// Pour effacer un fil entier, réponses comprises, voir deleteSmsConversation
+// (sms/operations.ts) : ce sont les deux seuls chemins qui suppriment des
+// LeadSmsLog.
 export const clearLeadSmsSent = async (
   { identifier }: { identifier: string },
   context: any,
