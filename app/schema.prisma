@@ -106,27 +106,28 @@ model Company {
   modalityCancellationPolicy String?
   modalityContractTerms      String?
 
-  users                  User[]
-  clients                Client[]
-  projects               Project[]
-  documents              Document[]
-  payments               Payment[]
-  meetings               Meeting[]
-  automations            Automation[]
-  priceItems             PriceItem[]
-  priceCategories        PriceCategory[]
-  activities             ActivityLog[]
-  templates              DocumentTemplate[]
-  leadSearches           LeadSearch[]
-  prospectStatuses       ProspectStatus[]
-  leadStatusConfigs      LeadStatusConfig[]
-  leadNotes              LeadNote[]
-  leadEmailLogs          LeadEmailLog[]
-  leadEmailDrafts        LeadEmailDraft[]
-  leadSmsLogs            LeadSmsLog[]
-  smsContacts            SmsContact[]
-  prospectTemplates      ProspectTemplate[]
-  leadShareTokens        LeadSearchShareToken[]
+  users               User[]
+  clients             Client[]
+  projects            Project[]
+  documents           Document[]
+  payments            Payment[]
+  meetings            Meeting[]
+  automations         Automation[]
+  priceItems          PriceItem[]
+  priceCategories     PriceCategory[]
+  activities          ActivityLog[]
+  templates           DocumentTemplate[]
+  leadSearches        LeadSearch[]
+  prospectStatuses    ProspectStatus[]
+  leadStatusConfigs   LeadStatusConfig[]
+  leadNotes           LeadNote[]
+  leadEmailLogs       LeadEmailLog[]
+  leadEmailDrafts     LeadEmailDraft[]
+  leadSmsLogs         LeadSmsLog[]
+  smsContacts         SmsContact[]
+  prospectTemplates   ProspectTemplate[]
+  leadShareTokens     LeadSearchShareToken[]
+  leadInboundWebhooks LeadInboundWebhook[]
 }
 
 model Client {
@@ -485,9 +486,16 @@ model LeadSearch {
   errorMsg    String?
   totalFound  Int     @default(0)
 
-  leads      Lead[]
-  templates  ProspectTemplate[]
-  shareToken LeadSearchShareToken?
+  // Comment ce tableau se remplit : google_maps | webhook | manual.
+  // Une colonne plutôt qu'un test `inboundWebhook != null` : toute l'interface s'y
+  // branche, et elle reste juste pour un tableau dont le webhook a été supprimé.
+  // Les tableaux existants sont tous des recherches Google, d'où la valeur par défaut.
+  kind String @default("google_maps")
+
+  leads          Lead[]
+  templates      ProspectTemplate[]
+  shareToken     LeadSearchShareToken?
+  inboundWebhook LeadInboundWebhook?
 
   @@index([companyId])
 }
@@ -508,6 +516,12 @@ model Lead {
   reviewCount     Int?
   category        String?
   placeId         String?
+  // Identifiant du prospect chez la source externe (clé anti-doublon d'un appel
+  // entrant). Distinct de placeId, qui est une identité *d'entreprise* réutilisable
+  // d'une recherche à l'autre ; un envoi de formulaire est un événement unique qui
+  // ne se reproduit jamais. Volontairement non unique : une seconde source pourra
+  // réutiliser la même valeur sans collision.
+  externalId      String?
   mapsUrl         String?
   latitude        Float?
   longitude       Float?
@@ -522,6 +536,7 @@ model Lead {
   order           Int       @default(0) // manual position inside its kanban column
 
   @@index([searchId])
+  @@index([externalId])
 }
 
 // A reusable message model of a prospection search. Kept on the original
@@ -635,7 +650,7 @@ model LeadSmsLog {
   identifier String
   to         String // E.164 number the message was sent to
   fromNumber String // Telnyx number it was sent from
-  body       String @default("")
+  body       String  @default("")
   providerId String? @unique // Telnyx message id — also the webhook idempotency key
 
   direction String    @default("outbound") // "outbound" | "inbound"
@@ -648,8 +663,8 @@ model LeadSmsLog {
   // l'échéance est posée ici, et la tâche planifiée ne poste courriel *et* SMS
   // que si le message est toujours non lu à ce moment-là. Lu à temps =
   // `replyAlertDueAt` remis à NULL et rien d'envoyé sur aucun canal.
-  replyAlertDueAt  DateTime? // échéance ; NULL = aucune alerte en attente
-  replyAlertSentAt DateTime? // clôture du cycle ; NULL = alerte encore vivante
+  replyAlertDueAt       DateTime? // échéance ; NULL = aucune alerte en attente
+  replyAlertSentAt      DateTime? // clôture du cycle ; NULL = alerte encore vivante
   // Le volet courriel est réglé en une passe (parti, refusé ou échoué) : il ne
   // coûte rien mais ne se réessaie pas, alors que le SMS retente chaque minute.
   // Sans ce marqueur distinct, une reprise SMS renverrait le courriel.
@@ -735,4 +750,81 @@ model LeadEmailDraft {
 
   @@unique([companyId, identifier])
   @@index([companyId, identifier])
+}
+
+// ─── Réception de prospects par webhook ───────────────────────────────────────
+// Un tableau alimenté par webhook a une adresse publique permanente et un secret
+// que l'on peut faire tourner sans casser l'adresse. C'est tout l'intérêt de les
+// séparer : l'URL vit dans une configuration Zapier, un script Google Sheets et
+// le HTML d'un site — changer de secret ne doit pas obliger à tout reconfigurer.
+model LeadInboundWebhook {
+  id        String   @id @default(uuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  companyId String
+
+  // Un tableau, un webhook. Cascade : sans tableau l'adresse n'a plus de cible et
+  // doit cesser d'exister, pas rester ouverte sur le vide.
+  search   LeadSearch @relation(fields: [searchId], references: [id], onDelete: Cascade)
+  searchId String     @unique
+
+  // Identifiant public, celui de l'URL. IMMUABLE : aucune opération ne le modifie.
+  publicId        String    @unique
+  // Secret partagé, en-tête X-Gestia-Secret. Rotatif. Jamais renvoyé au client
+  // sauf demande explicite d'un administrateur — il est fait pour être recopié
+  // ailleurs, contrairement à telnyxApiKey ou smtpPassword.
+  secret          String
+  secretRotatedAt DateTime?
+
+  // Correspondance champs JSON reçus → champs du prospect (voir shared/leadIntake).
+  // `{}` = pas encore configurée : le point d'entrée capture sans rien créer, ce
+  // qui est exactement l'état « test » dont on a besoin pour construire la
+  // correspondance à partir d'un vrai appel.
+  mapping Json @default("{}")
+
+  isActive       Boolean   @default(true)
+  receivedCount  Int       @default(0)
+  lastReceivedAt DateTime?
+
+  // Repère de la dernière alerte « prospects reçus » : la tâche ne réexpédie que
+  // ce qui est arrivé après. Sans cette borne, chaque passage renverrait tout
+  // l'historique de la journée.
+  notifiedAt DateTime?
+
+  events LeadInboundEvent[]
+
+  @@index([companyId])
+}
+
+// Journal de chaque appel reçu, écrit AVANT toute création de prospect. Il porte
+// à lui seul l'idempotence, sert d'échantillon à la correspondance, rend visible
+// un Zapier mal configuré, et permet de rejouer. Purgé à 90 jours.
+model LeadInboundEvent {
+  id        String   @id @default(uuid())
+  createdAt DateTime @default(now())
+
+  webhook   LeadInboundWebhook @relation(fields: [webhookId], references: [id], onDelete: Cascade)
+  webhookId String
+  companyId String
+
+  // Valeur du champ anti-doublon désigné par la correspondance (external_id,
+  // leadgen_id, numéro de ligne…). Null quand l'émetteur n'en fournit pas : on
+  // n'invente pas de clé à partir du contenu, sinon deux demandes légitimes de la
+  // même personne n'en feraient qu'une.
+  dedupeKey String?
+
+  // captured | ok | duplicate | rejected | error
+  // `captured` = reçu avant qu'une correspondance existe ; sert d'échantillon.
+  status   String   @default("captured")
+  errorMsg String?
+  payload  Json     @default("{}") // corps reçu, secret retiré
+  sourceIp String?
+  // Colonnes simples, sans clé étrangère — comme LeadNote.identifier : supprimer
+  // un prospect ne doit ni effacer la trace, ni rouvrir la porte à un doublon.
+  leadIds  String[] @default([])
+
+  @@unique([webhookId, dedupeKey])
+  @@index([webhookId, createdAt])
 }

@@ -7,16 +7,10 @@
 
 const MONTREAL = 'America/Toronto';
 
-export function formatMontrealTime(date: string | Date): string {
-  return new Intl.DateTimeFormat('fr-CA', {
-    timeZone: MONTREAL,
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  }).format(new Date(date));
-}
+// Vit dans `shared/format` depuis que le serveur en a besoin lui aussi (l'en-tête
+// des notes écrites par un appel entrant). Réexporté ici pour que les appelants
+// existants n'aient pas à changer d'import.
+export { formatMontrealTime } from '../shared/format';
 
 const HOUR_ONLY = new Intl.DateTimeFormat('fr-CA', {
   timeZone: MONTREAL,

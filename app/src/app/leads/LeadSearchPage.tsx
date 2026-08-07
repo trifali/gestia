@@ -75,6 +75,7 @@ import {
   revokeLeadShareToken,
 } from 'wasp/client/operations';
 import type { Lead, LeadSearch, LeadStatusConfig } from 'wasp/entities';
+import { useAuth } from 'wasp/client/auth';
 import {
   PageHeader,
   EmptyState,
@@ -143,49 +144,12 @@ import {
   LuMessageSquare,
 } from 'react-icons/lu';
 import { MagicInput, MagicTextarea } from '../../client/magic';
+import { SearchForm, defaultForm, RADIUS_OPTIONS } from './GoogleSearchForm';
+import { NewBoardModal } from './NewBoardModal';
+import { IntakePanel } from './intake/IntakePanel';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const PROVINCES = ['QC', 'ON', 'BC', 'AB', 'MB', 'SK', 'NS', 'NB', 'NL', 'PE', 'YT', 'NT', 'NU'];
-
-const BUSINESS_TYPE_SUGGESTIONS = [
-  'Agence web', 'Agence marketing', 'Agence de communication',
-  'Plombier', 'Électricien', 'Menuisier', 'Peintre', 'Entrepreneur général',
-  'Architecte', 'Designer intérieur',
-  'Restaurant', 'Café', 'Boulangerie', 'Traiteur',
-  'Avocat', 'Notaire', 'Comptable', 'Fiscaliste',
-  'Médecin', 'Dentiste', 'Physiothérapeute', 'Chiropraticien',
-  'Salon de coiffure', 'Salon de beauté', 'Spa',
-  'Photographe', 'Vidéaste', 'Studio photo',
-  'Mécanicien auto', 'Carrossier',
-  'École privée', 'Centre de formation', 'Tuteur',
-  'Gym', 'Centre de conditionnement physique', 'Studio yoga',
-  'Nettoyage commercial', 'Service de ménage',
-  'Fleuriste', 'Boutique cadeaux', 'Librairie',
-  'Hôtel', 'Auberge', 'Chalet à louer',
-  'Clinique vétérinaire',
-  'Garderie', 'CPE',
-];
-
-const RADIUS_OPTIONS = [
-  { value: 5000, label: '5 km' },
-  { value: 10000, label: '10 km' },
-  { value: 25000, label: '25 km' },
-  { value: 50000, label: '50 km' },
-];
-
-const RATING_OPTIONS = [
-  { value: 0, label: 'Aucune restriction' },
-  { value: 3, label: '3+ étoiles' },
-  { value: 4, label: '4+ étoiles' },
-  { value: 4.5, label: '4.5+ étoiles' },
-];
-
-const MAX_RESULTS_OPTIONS = [
-  { value: 10, label: '10 résultats' },
-  { value: 20, label: '20 résultats' },
-  { value: 40, label: '40 résultats (plus lent)' },
-];
 
 const LEAD_STATUS = {
   nouveau: { label: 'Nouveau', className: 'badge-info' },
@@ -193,236 +157,6 @@ const LEAD_STATUS = {
   qualifie: { label: 'Qualifié', className: 'badge-success' },
   rejete: { label: 'Rejeté', className: 'bg-red-50 text-red-600 text-xs font-medium px-2 py-0.5 rounded-full' },
 } as const;
-
-// ─── Default form state ───────────────────────────────────────────────────────
-
-function defaultForm() {
-  return {
-    title: '',
-    description: '',
-    purpose: '',
-    businessType: '',
-    city: '',
-    province: 'QC',
-    radius: 10000,
-    minRating: 0,
-    requireWebsite: false,
-    maxResults: 20,
-    language: 'fr',
-  };
-}
-
-// ─── New search form ──────────────────────────────────────────────────────────
-
-function SearchForm({ onClose, onDone, initialValues, readOnly, footerExtra }: { onClose: () => void; onDone: (id: string) => void; initialValues?: Partial<ReturnType<typeof defaultForm>>; readOnly?: boolean; footerExtra?: React.ReactNode }) {
-  const [form, setForm] = useState(() => ({ ...defaultForm(), ...initialValues }));
-  const [loading, setLoading] = useState(false);
-
-  function set(field: string, value: any) {
-    setForm(prev => ({ ...prev, [field]: value }));
-  }
-
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    if (!form.businessType.trim()) return toast.error('Type d\'entreprise requis');
-    if (!form.city.trim()) return toast.error('Ville requise');
-    setLoading(true);
-    try {
-      // @ts-ignore -- purpose added, Wasp will regen types on restart
-      const result = await searchLeads({
-        title: form.title || `${form.businessType} — ${form.city}`,
-        description: form.description || undefined,
-        // @ts-ignore
-        purpose: form.purpose || undefined,
-        filters: {
-          businessType: form.businessType,
-          city: form.city,
-          province: form.province,
-          radius: form.radius,
-          minRating: form.minRating,
-          requireWebsite: form.requireWebsite,
-          maxResults: form.maxResults,
-          language: form.language,
-        },
-      });
-      toast.success(`${result.leads?.length ?? 0} prospect(s) trouvé(s)`);
-      onDone(result.id);
-    } catch (err: any) {
-      const msg = err?.message ?? 'Erreur lors de la recherche';
-      if (msg.includes('GOOGLE_PLACES_API_KEY')) {
-        toast.error('Clé API Google Places manquante. Ajoutez GOOGLE_PLACES_API_KEY dans .env.server.', { duration: 6000 });
-      } else {
-        toast.error(msg);
-      }
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  return (
-    <form onSubmit={handleSubmit} className='space-y-5'>
-      {!readOnly && (
-        <p className='text-sm text-muted'>
-          Décrivez le type d'entreprise que vous cherchez, choisissez la zone géographique et
-          lancez la prospection. Gestia extraira les coordonnées depuis Google Maps.
-        </p>
-      )}
-
-      {/* Title */}
-      <div>
-        <label className='label'>Nom de la recherche</label>
-        <input
-          className='input'
-          placeholder='Ex : Plombiers Montréal — Mai 2026'
-          value={form.title}
-          onChange={e => set('title', e.target.value)}
-          disabled={readOnly}
-        />
-        {!readOnly && <p className='text-xs text-muted mt-1'>Laissez vide pour générer automatiquement.</p>}
-      </div>
-
-      {!readOnly && (
-        <div>
-          <label className='label'>Objectif de la prospection <span className='text-muted font-normal'>(optionnel)</span></label>
-          <input
-            className='input'
-            placeholder='Ex : proposer une refonte de site web, offrir un audit SEO gratuit…'
-            value={form.purpose}
-            onChange={e => set('purpose', e.target.value)}
-          />
-          <p className='text-xs text-muted mt-1'>L’IA utilisera cet objectif pour rédiger les courriels de tous les prospects de cette recherche.</p>
-        </div>
-      )}
-
-      <hr className='border-line' />
-
-      {/* Business type */}
-      <div>
-        <label className='label required'>Type d'entreprise / secteur</label>
-        <input
-          className='input'
-          list='biz-types'
-          placeholder='Ex : Agence web, Plombier, Restaurant…'
-          value={form.businessType}
-          onChange={e => set('businessType', e.target.value)}
-          required={!readOnly}
-          disabled={readOnly}
-        />
-        {!readOnly && (
-          <>
-            <datalist id='biz-types'>
-              {BUSINESS_TYPE_SUGGESTIONS.map(s => (
-                <option key={s} value={s} />
-              ))}
-            </datalist>
-            <p className='text-xs text-muted mt-1'>
-              Soyez précis : "Agence web React" donne de meilleurs résultats que "agence".
-            </p>
-          </>
-        )}
-      </div>
-
-      {/* Location */}
-      <div className='grid grid-cols-2 gap-3'>
-        <div>
-          <label className='label required'>Ville</label>
-          <input
-            className='input'
-            placeholder='Ex : Montréal, Québec, Laval'
-            value={form.city}
-            onChange={e => set('city', e.target.value)}
-            required={!readOnly}
-            disabled={readOnly}
-          />
-        </div>
-        <div>
-          <label className='label'>Province</label>
-          <select className='input' value={form.province} onChange={e => set('province', e.target.value)} disabled={readOnly}>
-            {PROVINCES.map(p => <option key={p} value={p}>{p}</option>)}
-          </select>
-        </div>
-      </div>
-
-      {/* Radius + Rating */}
-      <div className='grid grid-cols-2 gap-3'>
-        <div>
-          <label className='label'>Rayon de recherche</label>
-          <select className='input' value={form.radius} onChange={e => set('radius', Number(e.target.value))} disabled={readOnly}>
-            {RADIUS_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-          </select>
-        </div>
-        <div>
-          <label className='label'>Note Google minimale</label>
-          <select className='input' value={form.minRating} onChange={e => set('minRating', Number(e.target.value))} disabled={readOnly}>
-            {RATING_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-          </select>
-        </div>
-      </div>
-
-      {/* Max results + language */}
-      <div className='grid grid-cols-2 gap-3'>
-        <div>
-          <label className='label'>Nombre de résultats</label>
-          <select className='input' value={form.maxResults} onChange={e => set('maxResults', Number(e.target.value))} disabled={readOnly}>
-            {MAX_RESULTS_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-          </select>
-        </div>
-        <div>
-          <label className='label'>Langue des résultats</label>
-          <select className='input' value={form.language} onChange={e => set('language', e.target.value)} disabled={readOnly}>
-            <option value='fr'>Français</option>
-            <option value='en'>Anglais</option>
-          </select>
-        </div>
-      </div>
-
-      {/* Toggles */}
-      <label className={`flex items-center gap-3 select-none ${readOnly ? 'cursor-default opacity-70' : 'cursor-pointer'}`}>
-        <input
-          type='checkbox'
-          className='w-4 h-4 rounded accent-accent-600'
-          checked={form.requireWebsite}
-          onChange={e => set('requireWebsite', e.target.checked)}
-          disabled={readOnly}
-        />
-        <span className='text-sm'>Exiger un site web (filtre les entreprises sans site)</span>
-      </label>
-
-      {!readOnly && (
-        <div className='bg-blue-50 border border-blue-200 rounded-xl p-4 text-sm text-blue-800'>
-          <p className='font-medium mb-1'>Ce que Gestia va extraire :</p>
-          <ul className='space-y-0.5 text-blue-700 text-xs list-disc list-inside'>
-            <li>Nom, adresse, ville, code postal</li>
-            <li>Numéro de téléphone (si disponible sur Google)</li>
-            <li>Site web + tentative d'extraction du courriel</li>
-            <li>Note Google et nombre d'avis</li>
-            <li>Lien Google Maps</li>
-          </ul>
-        </div>
-      )}
-
-      {loading && (
-        <div className='flex items-center gap-3 text-sm text-accent-700 bg-accent-50 border border-accent-200 rounded-xl p-4'>
-          <LuLoader size={18} className='animate-spin shrink-0' />
-          <span>Recherche en cours… cela peut prendre jusqu'à 30 secondes selon le nombre de résultats.</span>
-        </div>
-      )}
-
-      <div className='flex justify-end items-center gap-2 pt-2'>
-        {footerExtra}
-        <button type='button' className='btn-secondary' onClick={onClose} disabled={loading}>
-          {readOnly ? 'Fermer' : 'Annuler'}
-        </button>
-        {!readOnly && (
-          <button type='submit' className='btn-primary gap-2' disabled={loading}>
-            {loading ? <LuLoader size={16} className='animate-spin' /> : <LuSearch size={16} />}
-            Lancer la prospection
-          </button>
-        )}
-      </div>
-    </form>
-  );
-}
 
 // ─── Note modal ───────────────────────────────────────────────────────────────
 
@@ -2210,6 +1944,7 @@ function LeadsKanban({
   onAddLead,
   onFetchMore,
   fetchingMore,
+  canFetchMore,
 }: {
   leads: Lead[];
   statusConfigs: LeadStatusConfig[];
@@ -2240,6 +1975,8 @@ function LeadsKanban({
   /** Opens the "search more on Google Maps" modal, owned by the board. */
   onFetchMore: () => void;
   fetchingMore: boolean;
+  /** Faux sur un tableau webhook : il n'a pas de critères Google à relancer. */
+  canFetchMore: boolean;
 }) {
   const onNoteRef = useRef(onNote);
   onNoteRef.current = onNote;
@@ -2436,6 +2173,7 @@ function LeadsKanban({
             >
               <LuPlus size={12} />
             </button>
+            {canFetchMore && (
             <button
               className='w-5 h-5 rounded flex items-center justify-center text-muted hover:text-ink hover:bg-canvas transition-colors shrink-0'
               title='Chercher plus de prospects sur Google Maps avec les mêmes critères'
@@ -2444,6 +2182,7 @@ function LeadsKanban({
             >
               {fetchingMore ? <LuLoader size={12} className='animate-spin' /> : <LuSearch size={12} />}
             </button>
+            )}
           </>
         ) : undefined}
         mobileColumnExtra={col => col.key === 'nouveau' ? (
@@ -2455,6 +2194,7 @@ function LeadsKanban({
             >
               <LuPlus size={12} />
             </button>
+            {canFetchMore && (
             <button
               className='w-6 h-6 rounded flex items-center justify-center text-muted hover:text-ink hover:bg-canvas'
               title='Chercher plus de prospects sur Google Maps'
@@ -2463,6 +2203,7 @@ function LeadsKanban({
             >
               {fetchingMore ? <LuLoader size={12} className='animate-spin' /> : <LuSearch size={12} />}
             </button>
+            )}
           </>
         ) : undefined}
         searchBarSlot={(() => {
@@ -2658,6 +2399,13 @@ function LeadsBoard({ searchId, onBack }: { searchId: string; onBack: () => void
   const [fetchingMore, setFetchingMore] = useState(false);
   const [showShareModal, setShowShareModal] = useState(false);
 
+  // Un tableau alimenté par webhook n'a pas de critères Google : tout ce qui
+  // relance une recherche ou en affiche les filtres n'a rien à y faire.
+  const isWebhookBoard = (search as any)?.kind === 'webhook';
+  const inbound = (search as any)?.inboundWebhook ?? null;
+  const { data: boardUser } = useAuth();
+  const isAdmin = (boardUser as any)?.role === 'admin' || (boardUser as any)?.isAdmin === true;
+
   async function handleDeleteLead(lead: Lead) {
     setDeleting(true);
     try {
@@ -2834,13 +2582,16 @@ function LeadsBoard({ searchId, onBack }: { searchId: string; onBack: () => void
           <NoteModal lead={noteTarget} onClose={() => { setNoteTarget(null); refetch(); }} />
         )}
       </Modal>
-      {/* Search criteria, with the "find more prospects" action attached to them */}
+      {/* Le même bouton mène à deux réglages selon la nature du tableau : les
+          critères Google d'un côté, la source de réception de l'autre. */}
       <Modal
         open={showDetails}
-        title='Détails de la recherche'
+        title={isWebhookBoard ? 'Source de prospects' : 'Détails de la recherche'}
         onClose={() => setShowDetails(false)}
       >
-        {showDetails && (
+        {showDetails && (isWebhookBoard ? (
+          <IntakePanel searchId={searchId} isAdmin={isAdmin} onLeadsCreated={refetch} />
+        ) : (
           <SearchForm
             readOnly
             onClose={() => setShowDetails(false)}
@@ -2856,7 +2607,7 @@ function LeadsBoard({ searchId, onBack }: { searchId: string; onBack: () => void
               </button>
             }
           />
-        )}
+        ))}
       </Modal>
 
       <FetchMoreLeadsModal
@@ -2978,7 +2729,7 @@ function LeadsBoard({ searchId, onBack }: { searchId: string; onBack: () => void
               <h2 className='text-base sm:text-lg font-semibold truncate'>{search.title}</h2>
               <button
                 className='w-6 h-6 rounded flex items-center justify-center hover:bg-canvas text-muted hover:text-ink transition-colors shrink-0'
-                title='Détails de la recherche'
+                title={isWebhookBoard ? 'Source de prospects' : 'Détails de la recherche'}
                 onClick={() => setShowDetails(true)}
               >
                 <LuEye size={14} />
@@ -2991,31 +2742,50 @@ function LeadsBoard({ searchId, onBack }: { searchId: string; onBack: () => void
               <p className='text-xs text-muted'>Objectif : {(search as any).purpose}</p>
             )}
             <div className='flex flex-wrap gap-1.5 mt-1'>
-              {filters.businessType && (
-                <span className='badge-info'>{filters.businessType}</span>
-              )}
-              {filters.city && (
-                <span className='badge-neutral flex items-center gap-1'>
-                  <LuMapPin size={11} />{filters.city}{filters.province ? `, ${filters.province}` : ''}
-                </span>
-              )}
-              {filters.radius && (
-                <span className='badge-neutral'>
-                  {RADIUS_OPTIONS.find(r => r.value === filters.radius)?.label ?? `${filters.radius / 1000} km`}
-                </span>
-              )}
-              {filters.minRating > 0 && (
-                <span className='badge-neutral flex items-center gap-1'>
-                  <LuStar size={11} />{filters.minRating}+
-                </span>
-              )}
-              {filters.requireWebsite && (
-                <span className='badge-neutral flex items-center gap-1'>
-                  <LuGlobe size={11} />Site web requis
-                </span>
-              )}
-              {filters.language && (
-                <span className='badge-neutral'>{filters.language === 'fr' ? 'Français' : 'English'}</span>
+              {isWebhookBoard ? (
+                <>
+                  <span className='badge-info flex items-center gap-1'>
+                    <LuLink size={11} />Source automatique
+                  </span>
+                  {!inbound?.isActive ? (
+                    <span className='badge-neutral text-amber-700'>En pause</span>
+                  ) : inbound?.lastReceivedAt ? (
+                    <span className='badge-neutral'>
+                      Dernier prospect le {formatMontrealTime(inbound.lastReceivedAt)}
+                    </span>
+                  ) : (
+                    <span className='badge-neutral'>En attente de configuration</span>
+                  )}
+                </>
+              ) : (
+                <>
+                  {filters.businessType && (
+                    <span className='badge-info'>{filters.businessType}</span>
+                  )}
+                  {filters.city && (
+                    <span className='badge-neutral flex items-center gap-1'>
+                      <LuMapPin size={11} />{filters.city}{filters.province ? `, ${filters.province}` : ''}
+                    </span>
+                  )}
+                  {filters.radius && (
+                    <span className='badge-neutral'>
+                      {RADIUS_OPTIONS.find(r => r.value === filters.radius)?.label ?? `${filters.radius / 1000} km`}
+                    </span>
+                  )}
+                  {filters.minRating > 0 && (
+                    <span className='badge-neutral flex items-center gap-1'>
+                      <LuStar size={11} />{filters.minRating}+
+                    </span>
+                  )}
+                  {filters.requireWebsite && (
+                    <span className='badge-neutral flex items-center gap-1'>
+                      <LuGlobe size={11} />Site web requis
+                    </span>
+                  )}
+                  {filters.language && (
+                    <span className='badge-neutral'>{filters.language === 'fr' ? 'Français' : 'English'}</span>
+                  )}
+                </>
               )}
               <span className='text-xs text-muted self-center'>{leads.length} prospect(s)</span>
             </div>
@@ -3065,6 +2835,7 @@ function LeadsBoard({ searchId, onBack }: { searchId: string; onBack: () => void
           onAddLead={() => setShowAddLead(true)}
           onFetchMore={() => setShowFetchMore(true)}
           fetchingMore={fetchingMore}
+          canFetchMore={!isWebhookBoard}
         />
       </div>
       </div>
@@ -3149,11 +2920,16 @@ function SearchList({
   const [editTarget, setEditTarget] = useState<{ id: string; title: string; purpose?: string | null } | null>(null);
   const [shareTargetId, setShareTargetId] = useState<string | null>(null);
 
-  async function handleDelete(id: string, title: string) {
-    if (await ask(`Supprimer la recherche « ${title} » ?`, { description: 'Tous les prospects associés seront supprimés.' })) {
+  async function handleDelete(id: string, title: string, isWebhook: boolean) {
+    // Un tableau webhook emporte son adresse de réception (Cascade). Le dire ici
+    // plutôt que de le laisser découvrir quand les prospects cessent d'arriver.
+    const description = isWebhook
+      ? 'Tous les prospects associés seront supprimés, et l\'adresse de réception cessera de fonctionner.'
+      : 'Tous les prospects associés seront supprimés.';
+    if (await ask(`Supprimer le tableau « ${title} » ?`, { description })) {
       try {
         await deleteLeadSearch({ id });
-        toast.success('Recherche supprimée');
+        toast.success('Tableau supprimé');
       } catch {
         toast.error('Erreur lors de la suppression');
       }
@@ -3167,9 +2943,9 @@ function SearchList({
   if (list.length === 0) {
     return (
       <EmptyState
-        title='Aucune recherche'
-        description='Lancez votre première prospection pour trouver des clients potentiels.'
-        action={<button className='btn-primary' onClick={onNew}>Nouvelle recherche</button>}
+        title='Aucun tableau'
+        description="Cherchez des entreprises sur Google Maps, ou créez un tableau qui reçoit automatiquement vos prospects."
+        action={<button className='btn-primary' onClick={onNew}>Nouveau tableau</button>}
       />
     );
   }
@@ -3199,6 +2975,8 @@ function SearchList({
         {list.map((s: any) => {
           const f: any = s.filters ?? {};
           const leadCount = s.leads?.length ?? s.totalFound ?? 0;
+          const isWebhook = s.kind === 'webhook';
+          const inbound = s.inboundWebhook ?? null;
           return (
             <div
               key={s.id}
@@ -3234,6 +3012,7 @@ function SearchList({
                   >
                     <LuPencil size={14} />
                   </IconBtn>
+                  {!isWebhook && (
                   <IconBtn
                     title='Dupliquer les filtres'
                     onClick={() => onDuplicate({
@@ -3251,10 +3030,11 @@ function SearchList({
                   >
                     <LuCopyPlus size={14} />
                   </IconBtn>
+                  )}
                   <IconBtn
                     variant='danger'
                     title='Supprimer'
-                    onClick={() => handleDelete(s.id, s.title)}
+                    onClick={() => handleDelete(s.id, s.title, isWebhook)}
                   >
                     <TrashIcon />
                   </IconBtn>
@@ -3265,14 +3045,32 @@ function SearchList({
                 <p className='text-xs text-muted mt-1 line-clamp-2'>{s.description}</p>
               )}
 
-              <div className='mt-3 flex items-center gap-2 text-xs text-muted'>
-                {f.businessType && (
-                  <span className='badge-neutral'>{f.businessType}</span>
-                )}
-                {f.city && (
-                  <span className='flex items-center gap-1'>
-                    <LuMapPin size={10} /> {f.city}
-                  </span>
+              <div className='mt-3 flex items-center gap-2 text-xs text-muted flex-wrap'>
+                {isWebhook ? (
+                  <>
+                    <span className='badge-info inline-flex items-center gap-1'>
+                      <LuLink size={10} />
+                      Source automatique
+                    </span>
+                    {!inbound?.isActive ? (
+                      <span className='text-amber-700'>En pause</span>
+                    ) : inbound?.lastReceivedAt ? (
+                      <span>Dernier prospect le {formatMontrealTime(inbound.lastReceivedAt)}</span>
+                    ) : (
+                      <span>En attente de configuration</span>
+                    )}
+                  </>
+                ) : (
+                  <>
+                    {f.businessType && (
+                      <span className='badge-neutral'>{f.businessType}</span>
+                    )}
+                    {f.city && (
+                      <span className='flex items-center gap-1'>
+                        <LuMapPin size={10} /> {f.city}
+                      </span>
+                    )}
+                  </>
                 )}
               </div>
 
@@ -3298,6 +3096,10 @@ export default function LeadSearchPage() {
   const [formPrefill, setFormPrefill] = useState<Partial<ReturnType<typeof defaultForm>> | undefined>(undefined);
   const [showManageStatuses, setShowManageStatuses] = useState(false);
   const { data: statusConfigs = [], refetch: refetchStatuses } = useQuery(getLeadStatusConfigs);
+  const { data: user } = useAuth();
+  // Même expression que SettingsPage : `role` est la source moderne, `isAdmin`
+  // l'héritage encore posé à l'inscription depuis ADMIN_EMAILS.
+  const isAdmin = (user as any)?.role === 'admin' || (user as any)?.isAdmin === true;
 
   function handleDone(id: string) {
     setShowForm(false);
@@ -3331,21 +3133,21 @@ export default function LeadSearchPage() {
           onClose={() => setShowManageStatuses(false)}
         />
       </Modal>
-      <Modal
+      {/* Remonté à chaque ouverture : l'assistant garde son état interne (étape,
+          tableau créé), et le rouvrir doit repartir de zéro plutôt que de
+          retomber sur le webhook configuré la fois d'avant. */}
+      <NewBoardModal
+        key={showForm ? 'open' : 'closed'}
         open={showForm}
-        title={formPrefill ? 'Dupliquer la recherche' : 'Nouvelle prospection'}
+        isAdmin={isAdmin}
+        googlePrefill={formPrefill}
         onClose={() => { setShowForm(false); setFormPrefill(undefined); }}
-      >
-        <SearchForm
-          onClose={() => { setShowForm(false); setFormPrefill(undefined); }}
-          onDone={handleDone}
-          initialValues={formPrefill}
-        />
-      </Modal>
+        onDone={handleDone}
+      />
 
       <PageHeader
         title='Prospection'
-        subtitle={selectedId ? undefined : 'Trouvez des entreprises à démarcher à partir de Google Maps.'}
+        subtitle={selectedId ? undefined : 'Cherchez des entreprises sur Google Maps, ou recevez vos prospects automatiquement.'}
         onBack={selectedId ? handleBack : undefined}
         actions={
           <div className='flex items-center gap-2'>
@@ -3356,8 +3158,8 @@ export default function LeadSearchPage() {
                   Statuts
                 </button>
                 <button className='btn-primary gap-2' onClick={() => setShowForm(true)}>
-                  <LuSearch size={16} />
-                  Nouvelle recherche
+                  <LuPlus size={16} />
+                  Nouveau tableau
                 </button>
               </>
             )}

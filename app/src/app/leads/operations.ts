@@ -150,7 +150,12 @@ export const getLeadSearches: GetLeadSearches<void, LeadSearchSummary[]> = async
   return context.entities.LeadSearch.findMany({
     where: { companyId },
     orderBy: { createdAt: 'desc' },
-    include: { leads: { select: { id: true } } },
+    include: {
+      leads: { select: { id: true } },
+      // De quoi distinguer une carte de tableau webhook sans révéler ni son
+      // adresse ni son secret : la liste n'en a pas besoin.
+      inboundWebhook: { select: { isActive: true, lastReceivedAt: true, receivedCount: true } },
+    },
   }) as any;
 };
 
@@ -161,7 +166,10 @@ export const getLeadSearchDetail: GetLeadSearchDetail<
   const companyId = ensureCompany(context.user);
   const search = await context.entities.LeadSearch.findUnique({
     where: { id: searchId },
-    include: { leads: { orderBy: [{ order: 'asc' }, { createdAt: 'asc' }] } },
+    include: {
+      leads: { orderBy: [{ order: 'asc' }, { createdAt: 'asc' }] },
+      inboundWebhook: { select: { isActive: true, lastReceivedAt: true, receivedCount: true } },
+    },
   });
   if (!search || search.companyId !== companyId) throw new HttpError(404);
 
@@ -572,7 +580,10 @@ export const exportLeads: ExportLeads<{ searchId: string }, { csv: string }> = a
   const companyId = ensureCompany(context.user);
   const search = await context.entities.LeadSearch.findUnique({
     where: { id: searchId },
-    include: { leads: { orderBy: [{ order: 'asc' }, { createdAt: 'asc' }] } },
+    include: {
+      leads: { orderBy: [{ order: 'asc' }, { createdAt: 'asc' }] },
+      inboundWebhook: { select: { isActive: true, lastReceivedAt: true, receivedCount: true } },
+    },
   });
   if (!search || search.companyId !== companyId) throw new HttpError(404);
 
@@ -618,6 +629,24 @@ const VIRTUAL_UNKNOWN: any = {
   color: '#9ca3af',
   order: 9999,
 };
+
+/**
+ * La colonne où doit atterrir un prospect arrivé sans que personne ne choisisse.
+ *
+ * La première colonne de l'entreprise, pas « nouveau » en dur : une entreprise
+ * qui a renommé ou réordonné ses statuts via « Gérer les statuts » attend que ses
+ * arrivées tombent dans *sa* première colonne. Repli sur `nouveau` uniquement si
+ * rien n'a encore été semé — jamais sur `unknown`, qui est une colonne virtuelle
+ * de rattrapage et non une destination.
+ */
+export async function resolveIntakeStatus(entities: any, companyId: string): Promise<string> {
+  const first = await entities.LeadStatusConfig.findFirst({
+    where: { companyId, key: { not: UNKNOWN_STATUS_KEY } },
+    orderBy: { order: 'asc' },
+    select: { key: true },
+  });
+  return first?.key ?? 'nouveau';
+}
 
 // ─── Lead status config operations ───────────────────────────────────────────
 
@@ -1305,6 +1334,45 @@ export const fetchMoreLeads = async (
   return { added: rawLeads.length, exhausted: false, nextExpandedRadiusKm: nextExpandedM / 1000 };
 };
 
+// ─── insertLeadOnTop ──────────────────────────────────────────────────────────
+
+/**
+ * Insère un prospect en tête de sa colonne.
+ *
+ * Extrait de `createLead` pour que la réception par webhook produise des cartes
+ * qui se comportent exactement comme un ajout manuel — par construction, et non
+ * par recopie d'un bout de code qui divergerait à la première correction. Toute
+ * autre source de prospects à venir doit passer par ici.
+ *
+ * `entities` plutôt qu'un `context` : les appelants sont une action Wasp et un
+ * gestionnaire d'API, qui n'ont pas la même forme de contexte. La vérification
+ * d'appartenance à l'entreprise reste à l'appelant — cette fonction ne sait rien
+ * du locataire et ne doit pas faire croire le contraire.
+ */
+export async function insertLeadOnTop(
+  entities: any,
+  args: { searchId: string; status: string; data: Record<string, unknown> },
+): Promise<any> {
+  // Land on top of its column so a freshly added prospect is the first thing
+  // seen. Orders are re-normalised to 0..n-1 by applyLeadOrder on the next
+  // drag, so going negative here is safe.
+  const first = await entities.Lead.findFirst({
+    where: { searchId: args.searchId, status: args.status },
+    orderBy: { order: 'asc' },
+    select: { order: true },
+  });
+
+  return entities.Lead.create({
+    data: {
+      ...args.data,
+      searchId: args.searchId,
+      status: args.status,
+      statusUpdatedAt: new Date(),
+      order: (first?.order ?? 0) - 1,
+    },
+  });
+}
+
 // ─── createLead (manual entry) ────────────────────────────────────────────────
 
 export const createLead = async (
@@ -1334,28 +1402,17 @@ export const createLead = async (
     return t ? t : null;
   };
 
-  // Land on top of its column so a freshly added prospect is the first thing
-  // seen. Orders are re-normalised to 0..n-1 by applyLeadOrder on the next
-  // drag, so going negative here is safe.
-  const first = await context.entities.Lead.findFirst({
-    where: { searchId: args.searchId, status },
-    orderBy: { order: 'asc' },
-    select: { order: true },
-  });
-
-  return context.entities.Lead.create({
+  return insertLeadOnTop(context.entities, {
+    searchId: args.searchId,
+    status,
     data: {
-      searchId: args.searchId,
       name,
       phone: clean(args.phone),
       email: clean(args.email),
       website: clean(args.website),
       address: clean(args.address),
       category: clean(args.category),
-      status,
       source: args.source?.trim() || 'manual',
-      statusUpdatedAt: new Date(),
-      order: (first?.order ?? 0) - 1,
     },
   });
 };

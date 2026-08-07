@@ -20,6 +20,27 @@ export function formatNumber(n: number | null | undefined, fractionDigits = 2): 
   }).format(typeof n === 'number' ? n : 0);
 }
 
+const MONTREAL = 'America/Toronto';
+
+/**
+ * Horodatage explicitement à l'heure de Montréal.
+ *
+ * Les `formatDate` / `formatTime` ci-dessous lisent l'heure *locale* du système,
+ * ce qui convient dans un navigateur québécois mais donne l'heure UTC sur le
+ * serveur. Tout ce qui est daté côté serveur — l'en-tête d'une note écrite par
+ * un appel entrant, par exemple — doit passer par ici.
+ */
+export function formatMontrealTime(date: string | Date): string {
+  return new Intl.DateTimeFormat('fr-CA', {
+    timeZone: MONTREAL,
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(new Date(date));
+}
+
 const MONTHS = [
   'janvier', 'février', 'mars', 'avril', 'mai', 'juin',
   'juillet', 'août', 'septembre', 'octobre', 'novembre', 'décembre',

@@ -33,24 +33,15 @@ export { formatMontrealTime };
 
 // ─── Lead provenance ──────────────────────────────────────────────────────────
 // Where a prospect came from. `google_maps` is the default for everything the
-// Google Maps search brings in; the rest are picked by hand.
+// Google Maps search brings in; the rest are picked by hand or declared by an
+// inbound webhook. Vit dans `shared/leadSources` depuis que le serveur doit
+// valider la provenance annoncée par un appel entrant ; réexporté ici pour que
+// les appelants existants n'aient pas à changer d'import.
 
-export const LEAD_SOURCES = [
-  { key: 'google_maps', label: 'Google Maps' },
-  { key: 'manual', label: 'Ajout manuel' },
-  { key: 'facebook', label: 'Facebook' },
-  { key: 'instagram', label: 'Instagram' },
-  { key: 'linkedin', label: 'LinkedIn' },
-  { key: 'referral', label: 'Référence' },
-  { key: 'website', label: 'Site web' },
-  { key: 'other', label: 'Autre' },
-] as const;
+import { leadSourceLabel } from '../../shared/leadSources';
 
-export type LeadSourceKey = (typeof LEAD_SOURCES)[number]['key'];
-
-export function leadSourceLabel(source: string | null | undefined): string {
-  return LEAD_SOURCES.find(s => s.key === source)?.label ?? source ?? 'Inconnue';
-}
+export { LEAD_SOURCES, leadSourceLabel, normalizeLeadSource } from '../../shared/leadSources';
+export type { LeadSourceKey } from '../../shared/leadSources';
 
 // ─── Note thread (timeline + composer) ───────────────────────────────────────
 // Used in NoteModal for both the authenticated page and the public portal.

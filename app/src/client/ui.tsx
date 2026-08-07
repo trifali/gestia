@@ -1,6 +1,7 @@
 import { type ReactNode, type InputHTMLAttributes, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { LuPencil, LuTrash2, LuTriangleAlert } from 'react-icons/lu';
+import toast from 'react-hot-toast';
+import { LuCheck, LuCopy, LuPencil, LuTrash2, LuTriangleAlert } from 'react-icons/lu';
 import { maskPhone, isSupportedPhone } from '../shared/phone';
 
 // ─── Champ téléphone ──────────────────────────────────────────────────────
@@ -197,6 +198,57 @@ export function EmptyState({
       <h3 className='font-semibold text-ink'>{title}</h3>
       {description && <p className='text-sm text-muted mt-1 max-w-md mx-auto'>{description}</p>}
       {action && <div className='mt-5 flex justify-center'>{action}</div>}
+    </div>
+  );
+}
+
+/**
+ * Valeur à recopier ailleurs — adresse de webhook, secret partagé.
+ *
+ * En lecture seule et sélectionnée au focus : ces valeurs se recopient, elles ne
+ * s'éditent pas. Le bouton confirme visuellement la copie, parce qu'un
+ * presse-papiers silencieux laisse toujours douter qu'il s'est passé quelque chose.
+ */
+export function CopyableUrl({
+  label,
+  value,
+  hint,
+  mono = true,
+}: {
+  label?: string;
+  value: string;
+  hint?: ReactNode;
+  mono?: boolean;
+}) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <div>
+      {label && <label className='label'>{label}</label>}
+      <div className={`flex items-center gap-1.5 ${label ? 'mt-1' : ''}`}>
+        <input
+          className={`input flex-1 text-xs ${mono ? 'font-mono' : ''}`}
+          value={value}
+          readOnly
+          onFocus={e => e.target.select()}
+        />
+        <button
+          type='button'
+          className={`btn-secondary px-2.5 shrink-0 ${copied ? 'text-success border-success/30' : ''}`}
+          title='Copier'
+          onClick={async () => {
+            try {
+              await navigator.clipboard.writeText(value);
+              setCopied(true);
+              setTimeout(() => setCopied(false), 1500);
+            } catch {
+              toast.error('Copie impossible');
+            }
+          }}
+        >
+          {copied ? <LuCheck size={14} /> : <LuCopy size={14} />}
+        </button>
+      </div>
+      {hint && <p className='text-xs text-muted mt-1'>{hint}</p>}
     </div>
   );
 }

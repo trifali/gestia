@@ -602,11 +602,11 @@ action disconnectGoogleCalendar {
 
 query getLeadSearches {
   fn: import { getLeadSearches } from "@src/app/leads/operations",
-  entities: [User, LeadSearch, Lead]
+  entities: [User, LeadSearch, Lead, LeadInboundWebhook]
 }
 query getLeadSearchDetail {
   fn: import { getLeadSearchDetail } from "@src/app/leads/operations",
-  entities: [User, LeadSearch, Lead, LeadNote, LeadEmailLog, LeadEmailDraft, LeadSmsLog]
+  entities: [User, LeadSearch, Lead, LeadNote, LeadEmailLog, LeadEmailDraft, LeadSmsLog, LeadInboundWebhook]
 }
 action searchLeads {
   fn: import { searchLeads } from "@src/app/leads/operations",
@@ -805,6 +805,49 @@ action deleteLeads {
   fn: import { deleteLeads } from "@src/app/leads/operations",
   entities: [User, LeadSearch, Lead]
 }
+
+// ─── Réception de prospects (assistant « Nouveau tableau », branche webhook) ───
+action createWebhookBoard {
+  fn: import { createWebhookBoard } from "@src/app/leads/intakeOperations",
+  entities: [User, LeadSearch, LeadInboundWebhook]
+}
+query getLeadIntakeConfig {
+  fn: import { getLeadIntakeConfig } from "@src/app/leads/intakeOperations",
+  entities: [User, LeadSearch, LeadInboundWebhook, LeadInboundEvent]
+}
+// Opération à part : le secret ne voyage jamais dans une requête de routine.
+query revealLeadIntakeSecret {
+  fn: import { revealLeadIntakeSecret } from "@src/app/leads/intakeOperations",
+  entities: [User, LeadSearch, LeadInboundWebhook]
+}
+query getLeadIntakeEvents {
+  fn: import { getLeadIntakeEvents } from "@src/app/leads/intakeOperations",
+  entities: [User, LeadSearch, LeadInboundWebhook, LeadInboundEvent]
+}
+query getLatestIntakeSample {
+  fn: import { getLatestIntakeSample } from "@src/app/leads/intakeOperations",
+  entities: [User, LeadSearch, LeadInboundWebhook, LeadInboundEvent]
+}
+action saveLeadIntakeMapping {
+  fn: import { saveLeadIntakeMapping } from "@src/app/leads/intakeOperations",
+  entities: [User, LeadSearch, LeadInboundWebhook]
+}
+action rotateLeadIntakeSecret {
+  fn: import { rotateLeadIntakeSecret } from "@src/app/leads/intakeOperations",
+  entities: [User, LeadSearch, LeadInboundWebhook]
+}
+action updateLeadIntakeWebhook {
+  fn: import { updateLeadIntakeWebhook } from "@src/app/leads/intakeOperations",
+  entities: [User, LeadSearch, LeadInboundWebhook]
+}
+action simulateLeadIntakeCall {
+  fn: import { simulateLeadIntakeCall } from "@src/app/leads/intakeOperations",
+  entities: [User, LeadSearch, LeadInboundWebhook, LeadInboundEvent]
+}
+action replayIntakeEvent {
+  fn: import { replayIntakeEvent } from "@src/app/leads/intakeOperations",
+  entities: [User, LeadSearch, Lead, LeadStatusConfig, LeadInboundWebhook, LeadInboundEvent]
+}
 query getLeadShareToken {
   fn: import { getLeadShareToken } from "@src/app/leads/operations",
   entities: [User, LeadSearch, LeadSearchShareToken]
@@ -962,6 +1005,35 @@ api telnyxSmsWebhookFailover {
   auth: false
 }
 
+// ─── Réception de prospects ───────────────────────────────────────────────────
+// Une adresse permanente par tableau, un secret rotatif dans l'en-tête
+// X-Gestia-Secret. Alimentée par Zapier/Make (formulaires Facebook), un script
+// Google Sheets, ou le formulaire d'un site web :
+//   https://api.gestia.trifali.app/webhooks/prospects/<publicId>
+//
+// L'espace de nommage remplace l'analyse de corps par une qui accepte aussi
+// l'urlencodé — c'est ce qui permet à un <form> HTML de poster directement.
+apiNamespace leadIntakeWebhooks {
+  middlewareConfigFn: import { leadIntakeMiddleware } from "@src/server/leadIntake/webhook",
+  path: "/webhooks/prospects"
+}
+
+api leadIntakeReceive {
+  fn: import { leadIntakeReceive } from "@src/server/leadIntake/webhook",
+  httpRoute: (POST, "/webhooks/prospects/:publicId"),
+  entities: [Company, LeadSearch, Lead, LeadStatusConfig, LeadInboundWebhook, LeadInboundEvent],
+  auth: false
+}
+
+// GET séparé plutôt qu'un ALL : ouvrir l'adresse dans un navigateur doit dire
+// quelque chose d'utile, et cette réponse ne lit ni le secret ni les prospects.
+api leadIntakePing {
+  fn: import { leadIntakePing } from "@src/server/leadIntake/webhook",
+  httpRoute: (GET, "/webhooks/prospects/:publicId"),
+  entities: [LeadInboundWebhook],
+  auth: false
+}
+
 // Hourly background sweep that advances document statuses based on time
 // (quotes → expiree after validUntil, invoices → en_retard after dueDate).
 // Runs every hour to advance document statuses based on time:
@@ -1001,6 +1073,38 @@ job sendDueSmsReplyAlerts {
 }
 
 // Every 5 minutes: send batched project notification emails (admin ← client activity, client ← admin activity)
+// Entretien de la réception de prospects. Rien ici n'est nécessaire à
+// l'acheminement — un appel entrant crée sa carte immédiatement.
+
+// Purge quotidienne du journal des appels (90 jours), en épargnant le plus
+// récent de chaque source : c'est lui qui sert d'échantillon à l'écran de
+// correspondance quand on veut la reconfigurer.
+job sweepLeadInboundEvents {
+  executor: PgBoss,
+  perform: {
+    fn: import { sweepLeadInboundEvents } from "@src/server/jobs/leadIntake"
+  },
+  schedule: {
+    cron: "30 4 * * *"
+  },
+  entities: [LeadInboundWebhook, LeadInboundEvent]
+}
+
+// Toutes les 5 minutes : prévient l'entreprise des prospects arrivés que
+// personne n'a encore ouverts. Même logique différée que les alertes de réponse
+// SMS — un prospect déjà déplacé de sa colonne d'arrivée a été vu, et ne
+// déclenche rien.
+job notifyInboundLeads {
+  executor: PgBoss,
+  perform: {
+    fn: import { notifyInboundLeads } from "@src/server/jobs/leadIntake"
+  },
+  schedule: {
+    cron: "*/5 * * * *"
+  },
+  entities: [LeadInboundWebhook, Lead, Company]
+}
+
 job sendProjectNotifications {
   executor: PgBoss,
   perform: {

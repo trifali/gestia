@@ -44,7 +44,7 @@ import {
 import { useAuth } from 'wasp/client/auth';
 import { PAYMENT_METHOD_OPTIONS } from '../payments/PaymentForm';
 import { LuPlus, LuSearch, LuFileText, LuCopy, LuEye, LuX, LuChevronRight, LuWand, LuMessageSquare, LuCheck, LuMail } from 'react-icons/lu';
-import { PageHeader, IconBtn, EditIcon, TrashIcon, useConfirm, Modal, EmptyState, PhoneInput } from '../../client/ui';
+import { PageHeader, IconBtn, EditIcon, TrashIcon, useConfirm, Modal, EmptyState, PhoneInput, CopyableUrl } from '../../client/ui';
 import { MagicInput, MagicTextarea } from '../../client/magic';
 import { useSmsAlerts } from '../../client/sms/useSmsAlerts';
 import { formatCurrency } from '../../shared/format';
@@ -1553,34 +1553,6 @@ function PanelSection({ title, hint, children }: { title: string; hint?: React.R
 }
 
 /** Read-only URL with a copy button — these go into the Telnyx portal verbatim. */
-function CopyableUrl({ label, value }: { label: string; value: string }) {
-  const [copied, setCopied] = useState(false);
-  return (
-    <div>
-      <label className='label'>{label}</label>
-      <div className='flex items-center gap-1.5 mt-1'>
-        <input className='input font-mono text-xs flex-1' value={value} readOnly onFocus={e => e.target.select()} />
-        <button
-          type='button'
-          className={`btn-secondary px-2.5 shrink-0 ${copied ? 'text-success border-success/30' : ''}`}
-          title='Copier'
-          onClick={async () => {
-            try {
-              await navigator.clipboard.writeText(value);
-              setCopied(true);
-              setTimeout(() => setCopied(false), 1500);
-            } catch {
-              toast.error('Copie impossible');
-            }
-          }}
-        >
-          {copied ? <LuCheck size={14} /> : <LuCopy size={14} />}
-        </button>
-      </div>
-    </div>
-  );
-}
-
 /**
  * Secret input that never displays the stored value. Shows a masked preview until
  * the admin chooses to replace it, so saving the form cannot wipe a key by
