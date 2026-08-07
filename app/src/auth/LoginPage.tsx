@@ -1,8 +1,14 @@
-import { Link } from 'react-router';
-import { LoginForm } from 'wasp/client/auth';
+import { Link, Navigate } from 'react-router';
+import { LoginForm, useAuth } from 'wasp/client/auth';
 import { AuthPageLayout } from './AuthPageLayout';
 
 export default function LoginPage() {
+  const { data: user, isLoading } = useAuth();
+
+  // Déjà connecté → on envoie directement au tableau de bord.
+  if (isLoading) return null;
+  if (user) return <Navigate to='/tableau-de-bord' replace />;
+
   return (
     <AuthPageLayout title='Bienvenue de retour' subtitle='Connectez-vous à votre espace Gestia'>
       <LoginForm />
