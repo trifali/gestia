@@ -48,7 +48,7 @@ import { PageHeader, IconBtn, EditIcon, TrashIcon, useConfirm, Modal, EmptyState
 import { MagicInput, MagicTextarea } from '../../client/magic';
 import { useSmsAlerts } from '../../client/sms/useSmsAlerts';
 import { formatCurrency } from '../../shared/format';
-import { SMS_ALERT_DELAY_MINUTES } from '../../shared/smsAlerts';
+import { REPLY_ALERT_DELAY_MINUTES } from '../../shared/smsAlerts';
 import { TEMPLATE_TYPES, TEMPLATE_VARIABLE_GROUPS, getTemplatePdfBase64 } from './templatePdf';
 import { getBoilerplate } from './templateBoilerplates';
 import MDEditor from '@uiw/react-md-editor';
@@ -1395,7 +1395,7 @@ function IntegrationsTab({ canEdit }: { canEdit: boolean }) {
 
       <Modal
         open={openPanel === 'sms'}
-        title='SMS aux prospects (Telnyx)'
+        title='SMS (Telnyx)'
         onClose={() => setOpenPanel(null)}
       >
         <SmsSettingsPanel settings={sms} refetch={refetchSms} />
@@ -1874,10 +1874,11 @@ function SmsSettingsPanel({ settings, refetch }: { settings: any; refetch: () =>
         hint={<>Seules les coordonnées de l'entreprise sont utilisées — jamais les comptes individuels. Modifiez-les dans l'onglet <strong>Entreprise</strong>.</>}
       >
         <p className='text-xs text-muted mb-3'>
-          Quand un prospect répond, sa réponse apparaît de toute façon dans Gestia —
-          pastille dans la barre latérale et notification à l'écran, en moins d'une
-          minute et sans frais. Les alertes ci-dessous servent à prévenir
-          l'entreprise <em>en dehors</em> de l'application.
+          Quand quelqu'un vous répond — prospect, client ou numéro inconnu — sa
+          réponse apparaît de toute façon dans Gestia : pastille dans la barre
+          latérale et notification à l'écran, en moins d'une minute et sans frais.
+          Les alertes ci-dessous servent à prévenir l'entreprise <em>en dehors</em> de
+          l'application.
         </p>
         <div className='grid sm:grid-cols-2 gap-2'>
           <NotifyToggle
@@ -1899,29 +1900,37 @@ function SmsSettingsPanel({ settings, refetch }: { settings: any; refetch: () =>
           />
         </div>
 
-        {/* Le seul SMS que Gestia envoie de sa propre initiative : l'utilisateur
-            doit savoir exactement quand il part et ce qu'il lui coûte. */}
+        {/* Le SMS d'alerte est le seul que Gestia envoie de sa propre initiative :
+            l'utilisateur doit savoir exactement quand il part et ce qu'il coûte. */}
         <dl className='mt-3 rounded-lg border border-line bg-canvas-100 px-3 py-2.5 text-xs space-y-2'>
           <div>
-            <dt className='font-medium text-ink'>Courriel — immédiat, sans frais</dt>
+            <dt className='font-medium text-ink'>
+              Les deux partent après {REPLY_ALERT_DELAY_MINUTES} minutes, jamais avant
+            </dt>
             <dd className='text-muted mt-0.5'>
-              Part dès la réception, avec la réponse complète et un lien vers la
-              conversation. Envoyé depuis votre propre serveur SMTP.
+              Gestia laisse {REPLY_ALERT_DELAY_MINUTES} minutes à votre équipe pour voir
+              la réponse dans l'application. Si quelqu'un ouvre la conversation
+              entre-temps, <strong className='text-ink'>aucune alerte n'est envoyée</strong> :
+              le message a déjà été vu, et rien n'est facturé. Une seule alerte par
+              conversation, même si plusieurs messages arrivent dans l'intervalle.
             </dd>
           </div>
           <div>
-            <dt className='font-medium text-ink'>
-              SMS — après {SMS_ALERT_DELAY_MINUTES} minutes, et seulement si personne n'a lu
-            </dt>
+            <dt className='font-medium text-ink'>Courriel — sans frais</dt>
             <dd className='text-muted mt-0.5'>
-              Gestia attend {SMS_ALERT_DELAY_MINUTES} minutes. Si quelqu'un ouvre la
-              conversation entre-temps, aucun SMS n'est envoyé et rien n'est facturé.
-              Sinon vous recevez un message court au{' '}
+              La réponse complète et un lien vers la conversation, à l'adresse{' '}
+              <strong className='text-ink'>{s.companyEmail || 'de l\'entreprise'}</strong>,
+              depuis votre propre serveur SMTP.
+            </dd>
+          </div>
+          <div>
+            <dt className='font-medium text-ink'>SMS — un segment facturé</dt>
+            <dd className='text-muted mt-0.5'>
+              Un message court au{' '}
               <strong className='text-ink'>{s.companyPhone || 'téléphone de l\'entreprise'}</strong> :
-              qui a répondu et le début de sa réponse. Un seul SMS par conversation,
-              même si le prospect en envoie plusieurs, et toujours limité à un segment
-              — soit <strong className='text-ink'>un SMS facturé</strong> par votre
-              compte Telnyx.
+              qui a répondu et le début de sa réponse. Toujours limité à un segment —
+              soit <strong className='text-ink'>un SMS facturé</strong> par votre compte
+              Telnyx.
             </dd>
           </div>
         </dl>

@@ -643,12 +643,17 @@ model LeadSmsLog {
   errorCode String? // Telnyx error code when a send fails
   readAt    DateTime? // inbound only: when someone opened the thread
 
-  // Alerte SMS différée (entrants seulement) — voir server/jobs/smsReplyAlerts.ts.
-  // L'alerte n'est pas envoyée à la réception : elle est datée ici, et la tâche
-  // planifiée ne la poste que si le message est toujours non lu à l'échéance.
-  // Lu à temps = `smsAlertDueAt` remis à NULL et aucun SMS facturé.
-  smsAlertDueAt  DateTime? // échéance ; NULL = aucune alerte en attente
-  smsAlertSentAt DateTime? // envoi effectif ; NULL = jamais alerté
+  // Alerte de réponse différée (entrants seulement) — voir
+  // server/jobs/smsReplyAlerts.ts. Aucune alerte ne part à la réception :
+  // l'échéance est posée ici, et la tâche planifiée ne poste courriel *et* SMS
+  // que si le message est toujours non lu à ce moment-là. Lu à temps =
+  // `replyAlertDueAt` remis à NULL et rien d'envoyé sur aucun canal.
+  replyAlertDueAt  DateTime? // échéance ; NULL = aucune alerte en attente
+  replyAlertSentAt DateTime? // clôture du cycle ; NULL = alerte encore vivante
+  // Le volet courriel est réglé en une passe (parti, refusé ou échoué) : il ne
+  // coûte rien mais ne se réessaie pas, alors que le SMS retente chaque minute.
+  // Sans ce marqueur distinct, une reprise SMS renverrait le courriel.
+  replyAlertEmailSentAt DateTime?
 
   // Covers the plain (companyId, identifier) prefix too; createdAt is what the
   // inbox needs to pick each thread's last message.
@@ -657,7 +662,7 @@ model LeadSmsLog {
   @@index([to, direction, createdAt])
   // La tâche planifiée balaie les échéances chaque minute : peu de lignes
   // concernées, mais un scan complet de la table à chaque passage sans index.
-  @@index([smsAlertDueAt])
+  @@index([replyAlertDueAt])
 }
 
 // Lightweight directory: puts a name on a number that is neither a client nor a

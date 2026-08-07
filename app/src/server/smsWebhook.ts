@@ -18,7 +18,6 @@
 import crypto from 'crypto';
 import express from 'express';
 import type { Request, Response } from 'express';
-import { config } from 'wasp/server';
 import type { MiddlewareConfigFn } from 'wasp/server';
 import {
   toE164,
@@ -26,9 +25,7 @@ import {
   directIdentifier,
   isDirectIdentifier,
 } from './sms';
-import { resolveDisplayName } from './smsDirectory';
-import { sendEmailWithAttachment, companySmtp } from './mail';
-import { SMS_ALERT_DELAY_MS } from '../shared/smsAlerts';
+import { REPLY_ALERT_DELAY_MS } from '../shared/smsAlerts';
 
 /** Telnyx signs `${timestamp}|${rawBody}`; anything older than this is a replay. */
 const SIGNATURE_TOLERANCE_SECONDS = 5 * 60;
@@ -115,79 +112,32 @@ function ourNumberFromPayload(eventType: string, payload: any): string | null {
   return toE164(raw ?? '');
 }
 
-function escapeHtml(s: string): string {
-  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-}
-
 /**
- * Notifies the company — and only the company, via the contact details on its
- * own record — that a prospect replied. Each channel is opt-out via the
- * notifySmsReplyBy* toggles in Paramètres → Intégrations.
+ * Datation de l'alerte de réponse — aucune notification ne part d'ici.
  *
- * Les deux canaux n'ont pas le même tempo, parce qu'ils n'ont pas le même prix :
+ * Les deux canaux, courriel et SMS, partagent la même échéance à +5 minutes. La
+ * tâche planifiée `sendDueSmsReplyAlerts` ne les postera que si la réponse est
+ * *toujours non lue* à ce moment-là : quelqu'un qui a Gestia ouvert la verra via
+ * la pastille en vingt secondes, et personne n'aura reçu de doublon dans sa boîte
+ * ni payé un SMS. Notifier hors de l'application n'a de sens que si personne
+ * n'était dedans.
  *
- *   - **courriel** — parti tout de suite. Il ne coûte rien, donc rien ne
- *     justifierait de le retarder.
- *   - **SMS** — seulement *daté* ici, à +5 minutes. La tâche planifiée
- *     `sendDueSmsReplyAlerts` ne l'enverra que si la réponse est toujours non lue
- *     à l'échéance : quelqu'un qui a Gestia ouvert la verra via la pastille bien
- *     avant, et l'entreprise n'aura rien payé.
+ * Rien n'est vérifié ici — ni courriel d'entreprise, ni identifiants Telnyx.
+ * Cinq minutes suffisent à décocher une option ou à changer de coordonnées, et
+ * c'est l'instant de l'envoi qui fait foi : la tâche revalide tout.
  *
- * Best-effort throughout: a notification failure must never fail the webhook, or
- * Telnyx would retry a reply we have already stored.
+ * Best-effort : un échec ne doit jamais faire échouer le webhook, sinon Telnyx
+ * retenterait une réponse déjà enregistrée.
  */
-async function notifyCompanyOfReply(
-  company: any,
-  entities: any,
-  opts: {
-    messageId: string;
-    prospectNumber: string;
-    body: string;
-    prospectName: string | null;
-  },
-): Promise<void> {
-  const who = opts.prospectName
-    ? `${opts.prospectName} (${opts.prospectNumber})`
-    : opts.prospectNumber;
-
-  if (company.notifySmsReplyByEmail) {
-    const to = (company.email ?? '').trim();
-    const smtp = companySmtp(company);
-    if (!to) {
-      console.warn('[telnyx] notification courriel activée mais aucun courriel d\'entreprise.');
-    } else if (!smtp) {
-      console.warn('[telnyx] notification courriel activée mais aucun serveur SMTP propre à l\'entreprise.');
-    } else {
-      try {
-        const link = `${config.frontendUrl}/prospection`;
-        await sendEmailWithAttachment({
-          smtp,
-          to,
-          subject: `Réponse SMS — ${opts.prospectName ?? opts.prospectNumber}`,
-          text: `${who} a répondu par SMS :\n\n${opts.body}\n\nVoir dans Gestia : ${link}`,
-          html:
-            `<p><strong>${escapeHtml(who)}</strong> a répondu par SMS :</p>` +
-            `<blockquote style="margin:12px 0;padding:8px 12px;border-left:3px solid #FF6A3D;white-space:pre-wrap">${escapeHtml(opts.body)}</blockquote>` +
-            `<p><a href="${link}">Voir dans Gestia</a></p>`,
-        });
-      } catch (err) {
-        console.error('[telnyx] réponse enregistrée mais notification courriel échouée', err);
-      }
-    }
-  }
-
-  if (company.notifySmsReplyBySms) {
-    // Aucune vérification de numéro ni d'identifiants ici : cinq minutes
-    // suffisent à décocher l'option ou à changer de téléphone, et c'est
-    // l'instant de l'envoi qui fait foi. La tâche revalide tout.
-    try {
-      await entities.LeadSmsLog.update({
-        where: { id: opts.messageId },
-        data: { smsAlertDueAt: new Date(Date.now() + SMS_ALERT_DELAY_MS) },
-      });
-    } catch (err) {
-      console.error('[telnyx] réponse enregistrée mais échéance d\'alerte non posée', err);
-    }
+async function scheduleReplyAlert(company: any, entities: any, messageId: string): Promise<void> {
+  if (!company.notifySmsReplyByEmail && !company.notifySmsReplyBySms) return;
+  try {
+    await entities.LeadSmsLog.update({
+      where: { id: messageId },
+      data: { replyAlertDueAt: new Date(Date.now() + REPLY_ALERT_DELAY_MS) },
+    });
+  } catch (err) {
+    console.error('[telnyx] réponse enregistrée mais échéance d\'alerte non posée', err);
   }
 }
 
@@ -245,7 +195,7 @@ async function handleInbound(payload: any, company: any, entities: any): Promise
     select: { id: true },
   });
 
-  // Sur un fil autonome, une seule alerte tant qu'il n'est pas lu : une réponse
+  // Sur un fil autonome, une seule échéance tant qu'il n'est pas lu : une réponse
   // de prospect est attendue et mérite chaque notification, mais un flot de
   // pourriel venant d'un inconnu ne doit pas devenir autant de courriels — et
   // autant de SMS facturés quand notifySmsReplyBySms est actif.
@@ -262,14 +212,7 @@ async function handleInbound(payload: any, company: any, entities: any): Promise
     if (priorUnread > 0) return;
   }
 
-  const prospectName = await resolveDisplayName(entities, company.id, from, identifier);
-
-  await notifyCompanyOfReply(company, entities, {
-    messageId: created.id,
-    prospectNumber: from ?? fromKey,
-    body,
-    prospectName,
-  });
+  await scheduleReplyAlert(company, entities, created.id);
 }
 
 async function handleDeliveryReceipt(payload: any, company: any, entities: any): Promise<void> {
