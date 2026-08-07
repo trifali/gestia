@@ -96,26 +96,39 @@ export type EmailCapability = {
   /** Ready-to-display explanation when canSend is false, else null. */
   reason: string | null;
   canConfigure: boolean;
+  /**
+   * Company address every client send is copied to in Cci, or null when the
+   * copy is off. Lets a compose form say where the copy goes instead of making
+   * the user add their own address in Cc by hand.
+   */
+  copyToCompany: string | null;
 };
 
 /**
  * Readable by every member of the company — unlike `getEmailSettings`, which is
  * admin-only — so the UI can disable its send buttons and explain why. Returns
- * booleans and a message only; no credential material.
+ * booleans, the Cci address and a message only; no credential material.
  */
 export const getEmailCapability = async (_args: void, context: any): Promise<EmailCapability> => {
   if (!context.user) throw new HttpError(401);
   const companyId = (context.user as any).companyId;
   const canConfigure = isAdmin(context.user);
   if (!companyId) {
-    return { canSend: false, reason: 'Aucune entreprise associée à votre compte.', canConfigure };
+    return {
+      canSend: false,
+      reason: 'Aucune entreprise associée à votre compte.',
+      canConfigure,
+      copyToCompany: null,
+    };
   }
 
   const company = await context.entities.Company.findUnique({
     where: { id: companyId },
     select: { ...SMTP_SELECT },
   });
-  if (companySmtp(company)) return { canSend: true, reason: null, canConfigure };
+  const smtp = companySmtp(company);
+  const copyToCompany = smtp?.copyTo ?? null;
+  if (smtp) return { canSend: true, reason: null, canConfigure, copyToCompany };
 
   const missing: string[] = [];
   if (!company?.smtpHost?.trim()) missing.push('l\'hôte');
@@ -126,6 +139,7 @@ export const getEmailCapability = async (_args: void, context: any): Promise<Ema
   return {
     canSend: false,
     canConfigure,
+    copyToCompany,
     reason: canConfigure
       ? `Courriel non configuré : ajoutez ${what} dans Paramètres → Intégrations.`
       : `Courriel non configuré : demandez à un administrateur d'ajouter ${what} dans Paramètres → Intégrations.`,

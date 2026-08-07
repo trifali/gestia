@@ -58,7 +58,11 @@ function buildDefaults(args: {
 }
 
 export function SendDocumentEmailModal({ doc, company, brand, activities, onClose }: Props) {
-  const { canSend: emailCanSend, reason: emailReason } = useEmailCapability();
+  const {
+    canSend: emailCanSend,
+    reason: emailReason,
+    copyToCompany,
+  } = useEmailCapability();
   const docAny = doc as any;
   const initialType: DocType = doc.type === 'invoice' ? 'invoice' : 'quote';
 
@@ -107,9 +111,9 @@ export function SendDocumentEmailModal({ doc, company, brand, activities, onClos
   const [to, setTo] = useState<string>(
     docAny.emailTo || initialPrev?.metadata?.to || doc.client.email || '',
   );
-  const [cc, setCc] = useState<string>(
-    docAny.emailCc ?? initialPrev?.metadata?.cc ?? ((company as any)?.email || ''),
-  );
+  // Deliberately empty by default: the copy to the company goes out in Cci via
+  // Paramètres → Intégrations, so pre-filling Cc here would only duplicate it.
+  const [cc, setCc] = useState<string>(docAny.emailCc ?? initialPrev?.metadata?.cc ?? '');
   const [sending, setSending] = useState(false);
   const [savingDraft, setSavingDraft] = useState(false);
   const [previewing, setPreviewing] = useState(false);
@@ -333,16 +337,29 @@ export function SendDocumentEmailModal({ doc, company, brand, activities, onClos
                   placeholder='client@exemple.com'
                 />
               </Field>
-              <Field label='Cc' hint={isCurrentType ? 'Séparez plusieurs adresses par des virgules.' : undefined}>
+              <Field
+                label='Cc'
+                hint={
+                  isCurrentType
+                    ? 'Facultatif. Séparez plusieurs adresses par des virgules.'
+                    : undefined
+                }
+              >
                 <input
                   type='text'
                   className='input'
                   value={cc}
                   readOnly={!isCurrentType}
                   onChange={(e) => isCurrentType && setCc(e.target.value)}
-                  placeholder='nous@entreprise.com'
+                  placeholder='autre@exemple.com'
                 />
               </Field>
+              {isCurrentType && copyToCompany && (
+                <p className='text-xs text-muted -mt-2'>
+                  Une copie sera aussi envoyée en Cci à{' '}
+                  <span className='font-medium text-ink/80'>{copyToCompany}</span>.
+                </p>
+              )}
               <Field label='Objet'>
                 <MagicInput
                   type='text'

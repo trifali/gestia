@@ -59,7 +59,21 @@ export function useSmsInbox(): SmsInboxCapability {
   };
 }
 
-export function useEmailCapability(): Capability {
+export type EmailCapability = Capability & {
+  /** Company address copied in Cci on every client send, null when off. */
+  copyToCompany: string | null;
+};
+
+/**
+ * Comme les autres capacités, plus l'adresse copiée en Cci — `normalise` laisse
+ * tomber les champs qu'il ne connaît pas, d'où le champ ajouté ici. Null tant
+ * que la requête n'a pas répondu : mieux vaut ne rien annoncer qu'annoncer une
+ * copie qui n'aura pas lieu.
+ */
+export function useEmailCapability(): EmailCapability {
   const { data } = useQuery(getEmailCapability);
-  return normalise(data, 'Courriel non configuré dans Paramètres → Intégrations.');
+  return {
+    ...normalise(data, 'Courriel non configuré dans Paramètres → Intégrations.'),
+    copyToCompany: (data as any)?.copyToCompany || null,
+  };
 }
