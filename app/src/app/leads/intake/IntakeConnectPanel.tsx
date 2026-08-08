@@ -6,7 +6,7 @@
 // qu'on a reçu. C'est aussi le seul moyen honnête : personne ne connaît par cœur
 // la forme exacte que Zapier donne à un formulaire Facebook.
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import toast from 'react-hot-toast';
 import {
   LuCheck,
@@ -18,53 +18,39 @@ import {
   LuEyeOff,
 } from 'react-icons/lu';
 import {
-  getLatestIntakeSample,
   revealLeadIntakeSecret,
   rotateLeadIntakeSecret,
   simulateLeadIntakeCall,
-  useQuery,
 } from 'wasp/client/operations';
-import { CopyableUrl } from '../../../client/ui';
+import { CopyableUrl, useConfirm } from '../../../client/ui';
 import { formatMontrealTime } from '../../../client/format';
 import { buildRecipes, UPSTREAM_NOTE } from './recipes';
-
-/** Assez court pour que l'attente paraisse vivante, assez long pour ne rien marteler. */
-const LISTEN_POLL_MS = 2000;
+import type { IntakeSample } from '../intakeOperations';
 
 export function IntakeConnectPanel({
   searchId,
   url,
   isAdmin,
-  hasSample,
-  onSampleArrived,
+  sample,
+  listening,
+  onListen,
+  onSimulated,
 }: {
   searchId: string;
   url: string;
   isAdmin: boolean;
-  /** Un échantillon existe déjà : on n'attend plus, on propose de passer à la suite. */
-  hasSample: boolean;
-  onSampleArrived: () => void;
+  /** Le dernier appel reçu — détenu par IntakePanel, jamais rechargé ici. */
+  sample: IntakeSample;
+  listening: boolean;
+  onListen: () => void;
+  /** L'appel d'exemple est une action délibérée : on enchaîne tout de suite. */
+  onSimulated: () => void;
 }) {
   const [secret, setSecret] = useState<string | null>(null);
   const [revealing, setRevealing] = useState(false);
   const [simulating, setSimulating] = useState(false);
-  const [listening, setListening] = useState(!hasSample);
   const [recipeKey, setRecipeKey] = useState('zapier');
-
-  // On ne scrute que tant qu'on attend : une fois l'appel arrivé, la requête
-  // n'a plus rien à apprendre et continuerait à interroger le serveur pour rien.
-  const { data: sample } = useQuery(
-    getLatestIntakeSample,
-    { searchId },
-    { enabled: listening, refetchInterval: listening ? LISTEN_POLL_MS : false },
-  );
-
-  useEffect(() => {
-    if (listening && sample) {
-      setListening(false);
-      onSampleArrived();
-    }
-  }, [listening, sample, onSampleArrived]);
+  const { ask, Dialog: ConfirmDialog } = useConfirm();
 
   async function reveal() {
     setRevealing(true);
@@ -79,11 +65,14 @@ export function IntakeConnectPanel({
   }
 
   async function rotate() {
-    if (!confirm(
-      'Faire tourner le secret ?\n\n'
-      + 'L\'adresse ne change pas, mais toute source qui utilise encore l\'ancien secret '
-      + 'cessera d\'être acceptée jusqu\'à ce que vous y colliez le nouveau.',
-    )) return;
+    const ok = await ask('Faire tourner le secret ?', {
+      description:
+        'L\'adresse de réception ne change pas. En revanche, toute source qui utilise encore '
+        + 'l\'ancien secret sera refusée jusqu\'à ce que vous y colliez le nouveau.',
+      confirmLabel: 'Faire tourner',
+      variant: 'danger',
+    });
+    if (!ok) return;
     try {
       const res = await rotateLeadIntakeSecret({ searchId });
       setSecret(res.secret);
@@ -98,8 +87,7 @@ export function IntakeConnectPanel({
     try {
       await simulateLeadIntakeCall({ searchId });
       toast.success('Appel d\'exemple enregistré.');
-      setListening(false);
-      onSampleArrived();
+      onSimulated();
     } catch (err: any) {
       toast.error(err?.message ?? 'Simulation impossible');
     } finally {
@@ -112,6 +100,7 @@ export function IntakeConnectPanel({
 
   return (
     <div className='space-y-5'>
+      {ConfirmDialog}
       <CopyableUrl
         label='Adresse de réception'
         value={url}
@@ -221,20 +210,43 @@ export function IntakeConnectPanel({
             )}
           </div>
         </div>
-      ) : (
+      ) : sample ? (
         <div className='rounded-xl border border-success/30 bg-success/5 p-4 flex items-center gap-3'>
           <LuCheck size={18} className='shrink-0 text-success' />
           <div className='flex-1 min-w-0'>
             <p className='text-sm font-medium text-ink'>Appel reçu</p>
-            {sample && (
-              <p className='text-xs text-muted mt-0.5'>
-                Dernier appel le {formatMontrealTime(sample.receivedAt)} · {sample.paths.length} champ(s) détecté(s)
-              </p>
-            )}
+            <p className='text-xs text-muted mt-0.5'>
+              Dernier appel le {formatMontrealTime(sample.receivedAt)} · {sample.paths.length} champ(s) détecté(s)
+            </p>
           </div>
-          <button type='button' className='btn-secondary shrink-0' onClick={() => setListening(true)}>
+          <button type='button' className='btn-secondary shrink-0' onClick={onListen}>
             Attendre un nouvel appel
           </button>
+        </div>
+      ) : (
+        // Écoute arrivée à échéance sans rien recevoir. On le dit plutôt que de
+        // laisser un aspirateur tourner : rien n'est perdu, un appel qui arrive
+        // plus tard sera de toute façon enregistré et visible dans le journal.
+        <div className='rounded-xl border border-line bg-canvas-100 p-4 flex items-center gap-3'>
+          <LuCircleAlert size={18} className='shrink-0 text-muted' />
+          <div className='flex-1 min-w-0'>
+            <p className='text-sm font-medium text-ink'>Écoute interrompue</p>
+            <p className='text-xs text-muted mt-0.5'>
+              Aucun appel reçu pour l'instant. Vos sources peuvent écrire à tout moment : ce qui
+              arrivera sera enregistré et visible dans le journal.
+            </p>
+          </div>
+          <div className='flex items-center gap-1.5 shrink-0'>
+            {isAdmin && (
+              <button type='button' className='btn-secondary gap-1.5' onClick={simulate} disabled={simulating}>
+                {simulating ? <LuLoader size={14} className='animate-spin' /> : <LuPlay size={14} />}
+                Simuler
+              </button>
+            )}
+            <button type='button' className='btn-secondary' onClick={onListen}>
+              Réécouter
+            </button>
+          </div>
         </div>
       )}
     </div>

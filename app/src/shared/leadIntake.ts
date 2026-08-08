@@ -315,6 +315,21 @@ function findPath(paths: DetectedPath[], aliases: string[]): string | null {
 }
 
 /**
+ * Provenance devinée d'après la forme de l'appel.
+ *
+ * `leadgen_id` et `field_data` sont la signature d'un formulaire Meta relayé par
+ * Zapier ou Make ; rien d'autre n'a cette allure. Deviner ici plutôt que de le
+ * demander à la création du tableau : à ce moment-là on a l'appel sous les yeux,
+ * et l'utilisateur corrige d'un clic dans la même liste déroulante.
+ */
+export function inferSource(paths: DetectedPath[]): LeadSourceKey {
+  const keys = paths.map(p => p.path.toLowerCase());
+  const has = (needle: string) => keys.some(k => k.includes(needle));
+  if (has('leadgen_id') || has('field_data')) return 'facebook';
+  return 'other';
+}
+
+/**
  * Correspondance de départ, déduite des noms de champs. Sert **uniquement** à
  * pré-remplir l'assistant : l'utilisateur voit chaque ligne et la corrige. Une
  * heuristique qu'on peut relire et rectifier vaut mieux qu'une heuristique
@@ -322,7 +337,7 @@ function findPath(paths: DetectedPath[], aliases: string[]): string | null {
  */
 export function suggestMapping(
   paths: DetectedPath[],
-  defaultSource: LeadSourceKey = 'other',
+  defaultSource: LeadSourceKey = inferSource(paths),
 ): LeadIntakeMapping {
   const rule = (path: string | null): FieldRule => (path ? { kind: 'path', path } : NO_RULE);
 

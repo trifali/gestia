@@ -13,7 +13,6 @@ import { randomBytes } from 'crypto';
 import { z } from 'zod';
 import { requireAdmin } from '../../server/tenant';
 import { insertLeadOnTop, resolveIntakeStatus } from './operations';
-import { normalizeLeadSource, type LeadSourceKey } from '../../shared/leadSources';
 import {
   applyMapping,
   flattenPaths,
@@ -74,7 +73,7 @@ function generateSecret(): string {
  * test) là où une recherche Google bloque le temps du scrutage.
  */
 export const createWebhookBoard = async (
-  args: { title: string; description?: string; defaultSource?: string },
+  args: { title: string; description?: string },
   context: any,
 ): Promise<{ searchId: string; publicId: string; url: string; secret: string }> => {
   const companyId = ensureCompany(context.user);
@@ -83,7 +82,6 @@ export const createWebhookBoard = async (
   const title = args.title?.trim();
   if (!title) throw new HttpError(400, 'Le nom du tableau est requis.');
 
-  const defaultSource: LeadSourceKey = normalizeLeadSource(args.defaultSource);
   const publicId = generatePublicId();
   const secret = generateSecret();
 
@@ -95,10 +93,7 @@ export const createWebhookBoard = async (
       kind: 'webhook',
       status: 'done',
       totalFound: 0,
-      // `filters` reste le sac à dos du tableau : y consigner la provenance par
-      // défaut évite une colonne de plus, et l'assistant s'en sert pour
-      // pré-remplir la correspondance au premier échantillon.
-      filters: { source: 'inbound', defaultSource },
+      filters: { source: 'inbound' },
     },
     select: { id: true },
   });
@@ -122,7 +117,6 @@ export type LeadIntakeConfig = {
   isActive: boolean;
   receivedCount: number;
   lastReceivedAt: Date | null;
-  defaultSource: LeadSourceKey;
   errorCount: number;
 };
 
@@ -153,7 +147,6 @@ export const getLeadIntakeConfig = async (
     isActive: webhook.isActive,
     receivedCount: webhook.receivedCount,
     lastReceivedAt: webhook.lastReceivedAt,
-    defaultSource: normalizeLeadSource((webhook.search as any)?.filters?.defaultSource),
     errorCount,
   };
 };
@@ -216,22 +209,37 @@ export type IntakeSample = {
  * déclenche sa source, et la forme réelle de ce qu'elle envoie apparaît. Régler
  * une correspondance sur un vrai appel plutôt que sur une documentation, c'est
  * toute la différence entre « ça devrait marcher » et « ça marche ».
+ *
+ * Une seule requête Prisma, contrairement aux autres opérations d'ici qui
+ * passent par `requireIntake` : c'est la seule qui soit interrogée en boucle, et
+ * le pool de connexions est petit. Deux allers-retours par battement, ça se
+ * remarque ; un seul, non. L'appartenance à l'entreprise est donc vérifiée à la
+ * main juste en dessous, exactement comme le ferait `requireIntake`.
  */
 export const getLatestIntakeSample = async (
   { searchId, eventId }: { searchId: string; eventId?: string },
   context: any,
 ): Promise<IntakeSample> => {
-  const { webhook } = await requireIntake(context, searchId);
-  const event = eventId
-    ? await context.entities.LeadInboundEvent.findFirst({
-        where: { id: eventId, webhookId: webhook.id },
-        select: { id: true, createdAt: true, payload: true },
-      })
-    : await context.entities.LeadInboundEvent.findFirst({
-        where: { webhookId: webhook.id },
+  const companyId = ensureCompany(context.user);
+
+  const webhook = await context.entities.LeadInboundWebhook.findUnique({
+    where: { searchId },
+    select: {
+      companyId: true,
+      mapping: true,
+      events: {
+        where: eventId ? { id: eventId } : undefined,
         orderBy: { createdAt: 'desc' },
+        take: 1,
         select: { id: true, createdAt: true, payload: true },
-      });
+      },
+    },
+  });
+  if (!webhook || webhook.companyId !== companyId) {
+    throw new HttpError(404, 'Cette source de prospects est introuvable.');
+  }
+
+  const event = webhook.events[0];
   if (!event) return null;
 
   const paths = flattenPaths(event.payload);
@@ -242,7 +250,8 @@ export const getLatestIntakeSample = async (
     paths,
     suggested: isMappingConfigured(webhook.mapping)
       ? null
-      : suggestMapping(paths, normalizeLeadSource((webhook.search as any)?.filters?.defaultSource)),
+      // Sans argument, `suggestMapping` déduit la provenance de l'appel lui-même.
+      : suggestMapping(paths),
   };
 };
 

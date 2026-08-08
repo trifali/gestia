@@ -15,7 +15,6 @@ import toast from 'react-hot-toast';
 import { LuLink, LuLoader, LuSearch } from 'react-icons/lu';
 import { createWebhookBoard } from 'wasp/client/operations';
 import { Modal } from '../../client/ui';
-import { LEAD_SOURCES } from '../../shared/leadSources';
 import { SearchForm, defaultForm } from './GoogleSearchForm';
 import { IntakePanel } from './intake/IntakePanel';
 
@@ -40,7 +39,6 @@ export function NewBoardModal({
   const [kind, setKind] = useState<Kind>('google_maps');
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
-  const [source, setSource] = useState('facebook');
   const [creating, setCreating] = useState(false);
   const [createdId, setCreatedId] = useState<string | null>(null);
 
@@ -49,7 +47,6 @@ export function NewBoardModal({
     setKind('google_maps');
     setTitle('');
     setDescription('');
-    setSource('facebook');
     setCreatedId(null);
   }
 
@@ -73,7 +70,7 @@ export function NewBoardModal({
     }
     setCreating(true);
     try {
-      const res = await createWebhookBoard({ title: name, description, defaultSource: source });
+      const res = await createWebhookBoard({ title: name, description });
       setCreatedId(res.searchId);
       setStep('intake');
     } catch (err: any) {
@@ -134,20 +131,6 @@ export function NewBoardModal({
               />
             </div>
           </div>
-
-          {kind === 'webhook' && (
-            <div>
-              <label className='label'>Provenance des prospects</label>
-              <select className='input' value={source} onChange={e => setSource(e.target.value)}>
-                {LEAD_SOURCES.filter(s => s.key !== 'google_maps' && s.key !== 'manual').map(s => (
-                  <option key={s.key} value={s.key}>{s.label}</option>
-                ))}
-              </select>
-              <p className='text-xs text-muted mt-1'>
-                Affichée sur chaque carte. Modifiable ensuite dans la correspondance.
-              </p>
-            </div>
-          )}
 
           <div className='flex justify-end gap-2 pt-2'>
             <button type='button' className='btn-secondary' onClick={close} disabled={creating}>
