@@ -65,44 +65,57 @@ function generateSecret(): string {
 // ─── createLeadBoard ──────────────────────────────────────────────────────────
 
 /**
- * Crée un tableau alimenté par webhook, avec son adresse et son secret.
+ * Crée un tableau qui n'a pas besoin d'aller chercher ses prospects : webhook
+ * (ils arrivent tout seuls) ou manuel (on les saisit à la main).
  *
- * Le pendant Google Maps de l'assistant reste `searchLeads` : cette action ne
- * couvre que la branche webhook, parce qu'elle a besoin de rendre la main
- * immédiatement (l'adresse doit exister pour qu'on puisse déclencher un appel de
- * test) là où une recherche Google bloque le temps du scrutage.
+ * La troisième façon de remplir un tableau, la recherche Google Maps, reste
+ * `searchLeads` : elle bloque le temps du scrutage, là où ces deux-ci doivent
+ * rendre la main immédiatement — pour un webhook, l'adresse doit exister avant
+ * qu'on puisse déclencher l'appel de test qui sert à régler la correspondance.
+ *
+ * Un tableau manuel n'a délibérément aucun webhook : pas d'adresse, pas de
+ * secret, rien à faire tourner. C'est un tableau vide dans lequel on ajoute des
+ * cartes avec le « + » de la première colonne.
  */
-export const createWebhookBoard = async (
-  args: { title: string; description?: string },
+export const createLeadBoard = async (
+  args: { title: string; description?: string; kind?: 'webhook' | 'manual' },
   context: any,
-): Promise<{ searchId: string; publicId: string; url: string; secret: string }> => {
+): Promise<{ searchId: string; kind: 'webhook' | 'manual' }> => {
   const companyId = ensureCompany(context.user);
-  requireAdmin(context.user);
+
+  const kind = args.kind === 'manual' ? 'manual' : 'webhook';
+  // Un tableau manuel n'expose aucun point d'entrée : tout membre peut en créer.
+  // Un webhook ouvre une adresse sur l'extérieur, donc administrateurs seulement.
+  if (kind === 'webhook') requireAdmin(context.user);
 
   const title = args.title?.trim();
   if (!title) throw new HttpError(400, 'Le nom du tableau est requis.');
-
-  const publicId = generatePublicId();
-  const secret = generateSecret();
 
   const search = await context.entities.LeadSearch.create({
     data: {
       companyId,
       title,
       description: args.description?.trim() || null,
-      kind: 'webhook',
+      kind,
       status: 'done',
       totalFound: 0,
-      filters: { source: 'inbound' },
+      filters: { source: kind === 'webhook' ? 'inbound' : 'manual' },
     },
     select: { id: true },
   });
 
-  await context.entities.LeadInboundWebhook.create({
-    data: { companyId, searchId: search.id, publicId, secret },
-  });
+  if (kind === 'webhook') {
+    await context.entities.LeadInboundWebhook.create({
+      data: {
+        companyId,
+        searchId: search.id,
+        publicId: generatePublicId(),
+        secret: generateSecret(),
+      },
+    });
+  }
 
-  return { searchId: search.id, publicId, url: intakeUrl(publicId), secret };
+  return { searchId: search.id, kind };
 };
 
 // ─── Lecture ──────────────────────────────────────────────────────────────────

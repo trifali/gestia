@@ -807,8 +807,8 @@ action deleteLeads {
 }
 
 // ─── Réception de prospects (assistant « Nouveau tableau », branche webhook) ───
-action createWebhookBoard {
-  fn: import { createWebhookBoard } from "@src/app/leads/intakeOperations",
+action createLeadBoard {
+  fn: import { createLeadBoard } from "@src/app/leads/intakeOperations",
   entities: [User, LeadSearch, LeadInboundWebhook]
 }
 query getLeadIntakeConfig {

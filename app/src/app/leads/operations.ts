@@ -1,4 +1,5 @@
 import { HttpError } from 'wasp/server';
+import { UNKNOWN_STATUS_KEY } from '../../shared/leadStatus';
 import { randomBytes } from 'crypto';
 import { sendEmailWithAttachment, companySmtp } from '../../server/mail';
 import { sendSms, toE164, resolveSmsCredentials, isDirectIdentifier } from '../../server/sms';
@@ -610,7 +611,7 @@ export const exportLeads: ExportLeads<{ searchId: string }, { csv: string }> = a
 
 // ─── Default statuses ─────────────────────────────────────────────────────────
 
-export const UNKNOWN_STATUS_KEY = 'unknown';
+export { UNKNOWN_STATUS_KEY } from '../../shared/leadStatus';
 
 const DEFAULT_STATUSES = [
   { key: 'nouveau',  label: 'Nouveau',  color: '#3b82f6', order: 0 },

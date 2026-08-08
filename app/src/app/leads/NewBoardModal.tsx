@@ -12,13 +12,13 @@
 
 import { useState } from 'react';
 import toast from 'react-hot-toast';
-import { LuLink, LuLoader, LuSearch } from 'react-icons/lu';
-import { createWebhookBoard } from 'wasp/client/operations';
+import { LuLink, LuLoader, LuPencil, LuSearch } from 'react-icons/lu';
+import { createLeadBoard } from 'wasp/client/operations';
 import { Modal } from '../../client/ui';
 import { SearchForm, defaultForm } from './GoogleSearchForm';
 import { IntakePanel } from './intake/IntakePanel';
 
-type Kind = 'google_maps' | 'webhook';
+type Kind = 'google_maps' | 'webhook' | 'manual';
 type Step = 'choose' | 'google' | 'intake';
 
 export function NewBoardModal({
@@ -70,7 +70,14 @@ export function NewBoardModal({
     }
     setCreating(true);
     try {
-      const res = await createWebhookBoard({ title: name, description });
+      const res = await createLeadBoard({ title: name, description, kind });
+      // Un tableau manuel n'a rien à configurer : on l'ouvre directement, prêt à
+      // recevoir sa première carte.
+      if (kind === 'manual') {
+        reset();
+        onDone(res.searchId);
+        return;
+      }
       setCreatedId(res.searchId);
       setStep('intake');
     } catch (err: any) {
@@ -112,7 +119,7 @@ export function NewBoardModal({
 
           <div>
             <label className='label'>Comment le remplir</label>
-            <div className='grid gap-3 sm:grid-cols-2 mt-1'>
+            <div className='grid gap-3 sm:grid-cols-3 mt-1'>
               <SourceCard
                 selected={kind === 'google_maps'}
                 onSelect={() => setKind('google_maps')}
@@ -129,6 +136,13 @@ export function NewBoardModal({
                 disabled={!isAdmin}
                 disabledHint='Réservé aux administrateurs'
               />
+              <SourceCard
+                selected={kind === 'manual'}
+                onSelect={() => setKind('manual')}
+                icon={<LuPencil size={20} />}
+                title='Saisie manuelle'
+                description="Un tableau vide, que vous remplissez vous-même. Rien à configurer."
+              />
             </div>
           </div>
 
@@ -138,7 +152,7 @@ export function NewBoardModal({
             </button>
             <button type='button' className='btn-primary gap-2' onClick={handleContinue} disabled={creating}>
               {creating ? <LuLoader size={16} className='animate-spin' /> : null}
-              Continuer
+              {kind === 'manual' ? 'Créer le tableau' : 'Continuer'}
             </button>
           </div>
         </div>

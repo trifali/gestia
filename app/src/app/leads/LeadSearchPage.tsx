@@ -76,6 +76,7 @@ import {
 } from 'wasp/client/operations';
 import type { Lead, LeadSearch, LeadStatusConfig } from 'wasp/entities';
 import { useAuth } from 'wasp/client/auth';
+import { UNKNOWN_STATUS_KEY } from '../../shared/leadStatus';
 import {
   PageHeader,
   EmptyState,
@@ -150,6 +151,37 @@ import { IntakePanel } from './intake/IntakePanel';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
+
+// ─── Nature d'un tableau ──────────────────────────────────────────────────────
+//
+// Comment il se remplit — la seule chose qui distingue vraiment deux tableaux de
+// prospection entre eux. Affiché à l'identique dans la liste et dans l'en-tête du
+// tableau ouvert, d'où ce point unique : deux libellés qui divergent donneraient
+// l'impression que ce sont deux notions différentes.
+
+const BOARD_KINDS = {
+  google_maps: { label: 'Recherche Google Maps', short: 'Google Maps', Icon: LuSearch },
+  webhook: { label: 'Source automatique', short: 'Webhook', Icon: LuLink },
+  manual: { label: 'Saisie manuelle', short: 'Manuel', Icon: LuPencil },
+} as const;
+
+type BoardKind = keyof typeof BOARD_KINDS;
+
+/** Les tableaux d'avant la distinction sont tous des recherches Google. */
+function boardKind(search: any): BoardKind {
+  const kind = search?.kind;
+  return kind in BOARD_KINDS ? (kind as BoardKind) : 'google_maps';
+}
+
+function BoardKindBadge({ kind, size = 11 }: { kind: BoardKind; size?: number }) {
+  const { label, Icon } = BOARD_KINDS[kind];
+  return (
+    <span className='badge-info inline-flex items-center gap-1 whitespace-nowrap' title={label}>
+      <Icon size={size} />
+      {label}
+    </span>
+  );
+}
 
 const LEAD_STATUS = {
   nouveau: { label: 'Nouveau', className: 'badge-info' },
@@ -1377,12 +1409,12 @@ function ManageStatusesModal({
   onRefresh: () => void;
   onClose: () => void;
 }) {
-  const unknownEntry = configs.find(c => c.key === 'unknown');
+  const unknownEntry = configs.find(c => c.key === UNKNOWN_STATUS_KEY);
 
   // Local ordered list for instant visual feedback
-  const [ordered, setOrdered] = useState(() => configs.filter(c => c.key !== 'unknown'));
+  const [ordered, setOrdered] = useState(() => configs.filter(c => c.key !== UNKNOWN_STATUS_KEY));
   useEffect(() => {
-    setOrdered(configs.filter(c => c.key !== 'unknown'));
+    setOrdered(configs.filter(c => c.key !== UNKNOWN_STATUS_KEY));
   }, [configs]);
 
   const [editId, setEditId] = useState<string | null>(null);
@@ -1978,6 +2010,13 @@ function LeadsKanban({
   /** Faux sur un tableau webhook : il n'a pas de critères Google à relancer. */
   canFetchMore: boolean;
 }) {
+  // La première colonne de l'entreprise, celle où atterrit tout nouveau prospect
+  // — la même que retient `resolveIntakeStatus` côté serveur. On ne code pas
+  // « nouveau » en dur : seul le statut `unknown` est protégé de la suppression,
+  // et un tableau manuel dont la colonne d'accueil aurait disparu n'offrirait
+  // plus aucun moyen d'ajouter une carte.
+  const firstColumnKey = statusConfigs.find(c => c.key !== UNKNOWN_STATUS_KEY)?.key ?? 'nouveau';
+
   const onNoteRef = useRef(onNote);
   onNoteRef.current = onNote;
   const onEmailRef = useRef(onEmail);
@@ -2164,7 +2203,7 @@ function LeadsKanban({
         cardActions={cardActionsForLead}
         onCardClick={lead => onOpenDetailRef.current(lead)}
         selectedLeadId={selectedLeadId}
-        columnExtra={keyField => keyField === 'nouveau' ? (
+        columnExtra={keyField => keyField === firstColumnKey ? (
           <>
             <button
               className='w-5 h-5 rounded flex items-center justify-center text-muted hover:text-ink hover:bg-canvas transition-colors shrink-0'
@@ -2185,7 +2224,7 @@ function LeadsKanban({
             )}
           </>
         ) : undefined}
-        mobileColumnExtra={col => col.key === 'nouveau' ? (
+        mobileColumnExtra={col => col.key === firstColumnKey ? (
           <>
             <button
               className='w-6 h-6 rounded flex items-center justify-center text-muted hover:text-ink hover:bg-canvas'
@@ -2399,9 +2438,12 @@ function LeadsBoard({ searchId, onBack }: { searchId: string; onBack: () => void
   const [fetchingMore, setFetchingMore] = useState(false);
   const [showShareModal, setShowShareModal] = useState(false);
 
-  // Un tableau alimenté par webhook n'a pas de critères Google : tout ce qui
-  // relance une recherche ou en affiche les filtres n'a rien à y faire.
-  const isWebhookBoard = (search as any)?.kind === 'webhook';
+  // Seul un tableau issu d'une recherche Google a des critères : pour les deux
+  // autres, tout ce qui relance une recherche ou en affiche les filtres n'a rien
+  // à faire à l'écran.
+  const kind = boardKind(search);
+  const isWebhookBoard = kind === 'webhook';
+  const isGoogleBoard = kind === 'google_maps';
   const inbound = (search as any)?.inboundWebhook ?? null;
   const { data: boardUser } = useAuth();
   const isAdmin = (boardUser as any)?.role === 'admin' || (boardUser as any)?.isAdmin === true;
@@ -2727,13 +2769,15 @@ function LeadsBoard({ searchId, onBack }: { searchId: string; onBack: () => void
           <div className='flex-1 min-w-0'>
             <div className='flex items-center gap-1.5'>
               <h2 className='text-base sm:text-lg font-semibold truncate'>{search.title}</h2>
-              <button
-                className='w-6 h-6 rounded flex items-center justify-center hover:bg-canvas text-muted hover:text-ink transition-colors shrink-0'
-                title={isWebhookBoard ? 'Source de prospects' : 'Détails de la recherche'}
-                onClick={() => setShowDetails(true)}
-              >
-                <LuEye size={14} />
-              </button>
+              {kind !== 'manual' && (
+                <button
+                  className='w-6 h-6 rounded flex items-center justify-center hover:bg-canvas text-muted hover:text-ink transition-colors shrink-0'
+                  title={isWebhookBoard ? 'Source de prospects' : 'Détails de la recherche'}
+                  onClick={() => setShowDetails(true)}
+                >
+                  <LuEye size={14} />
+                </button>
+              )}
             </div>
             {search.description && (
               <p className='text-sm text-muted italic'>{search.description}</p>
@@ -2742,22 +2786,21 @@ function LeadsBoard({ searchId, onBack }: { searchId: string; onBack: () => void
               <p className='text-xs text-muted'>Objectif : {(search as any).purpose}</p>
             )}
             <div className='flex flex-wrap gap-1.5 mt-1'>
-              {isWebhookBoard ? (
-                <>
-                  <span className='badge-info flex items-center gap-1'>
-                    <LuLink size={11} />Source automatique
+              <BoardKindBadge kind={kind} />
+
+              {isWebhookBoard && (
+                !inbound?.isActive ? (
+                  <span className='badge-neutral text-amber-700'>En pause</span>
+                ) : inbound?.lastReceivedAt ? (
+                  <span className='badge-neutral'>
+                    Dernier prospect le {formatMontrealTime(inbound.lastReceivedAt)}
                   </span>
-                  {!inbound?.isActive ? (
-                    <span className='badge-neutral text-amber-700'>En pause</span>
-                  ) : inbound?.lastReceivedAt ? (
-                    <span className='badge-neutral'>
-                      Dernier prospect le {formatMontrealTime(inbound.lastReceivedAt)}
-                    </span>
-                  ) : (
-                    <span className='badge-neutral'>En attente de configuration</span>
-                  )}
-                </>
-              ) : (
+                ) : (
+                  <span className='badge-neutral'>En attente de configuration</span>
+                )
+              )}
+
+              {isGoogleBoard && (
                 <>
                   {filters.businessType && (
                     <span className='badge-info'>{filters.businessType}</span>
@@ -2835,7 +2878,7 @@ function LeadsBoard({ searchId, onBack }: { searchId: string; onBack: () => void
           onAddLead={() => setShowAddLead(true)}
           onFetchMore={() => setShowFetchMore(true)}
           fetchingMore={fetchingMore}
-          canFetchMore={!isWebhookBoard}
+          canFetchMore={isGoogleBoard}
         />
       </div>
       </div>
@@ -2975,7 +3018,8 @@ function SearchList({
         {list.map((s: any) => {
           const f: any = s.filters ?? {};
           const leadCount = s.leads?.length ?? s.totalFound ?? 0;
-          const isWebhook = s.kind === 'webhook';
+          const kind = boardKind(s);
+          const isWebhook = kind === 'webhook';
           const inbound = s.inboundWebhook ?? null;
           return (
             <div
@@ -3012,7 +3056,7 @@ function SearchList({
                   >
                     <LuPencil size={14} />
                   </IconBtn>
-                  {!isWebhook && (
+                  {kind === 'google_maps' && (
                   <IconBtn
                     title='Dupliquer les filtres'
                     onClick={() => onDuplicate({
@@ -3046,21 +3090,19 @@ function SearchList({
               )}
 
               <div className='mt-3 flex items-center gap-2 text-xs text-muted flex-wrap'>
-                {isWebhook ? (
-                  <>
-                    <span className='badge-info inline-flex items-center gap-1'>
-                      <LuLink size={10} />
-                      Source automatique
-                    </span>
-                    {!inbound?.isActive ? (
-                      <span className='text-amber-700'>En pause</span>
-                    ) : inbound?.lastReceivedAt ? (
-                      <span>Dernier prospect le {formatMontrealTime(inbound.lastReceivedAt)}</span>
-                    ) : (
-                      <span>En attente de configuration</span>
-                    )}
-                  </>
-                ) : (
+                <BoardKindBadge kind={kind} size={10} />
+
+                {isWebhook && (
+                  !inbound?.isActive ? (
+                    <span className='text-amber-700'>En pause</span>
+                  ) : inbound?.lastReceivedAt ? (
+                    <span>Dernier prospect le {formatMontrealTime(inbound.lastReceivedAt)}</span>
+                  ) : (
+                    <span>En attente de configuration</span>
+                  )
+                )}
+
+                {kind === 'google_maps' && (
                   <>
                     {f.businessType && (
                       <span className='badge-neutral'>{f.businessType}</span>
