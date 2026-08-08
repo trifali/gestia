@@ -235,6 +235,12 @@ export function IntakePanel({
           sample={sample}
           listening={listening}
           onListen={startListening}
+          notifyByEmail={cfg.notifyByEmail}
+          notifyBySms={cfg.notifyBySms}
+          alertEmail={cfg.alertEmail}
+          alertPhone={cfg.alertPhone}
+          canAlertBySms={cfg.canAlertBySms}
+          onAlertsChanged={refetchConfig}
           onSimulated={async () => {
             await refetchSample();
             setListening(false);

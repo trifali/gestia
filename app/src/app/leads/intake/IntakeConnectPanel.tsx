@@ -21,10 +21,11 @@ import {
   revealLeadIntakeSecret,
   rotateLeadIntakeSecret,
   simulateLeadIntakeCall,
+  updateLeadIntakeWebhook,
 } from 'wasp/client/operations';
 import { CopyableUrl, useConfirm } from '../../../client/ui';
 import { formatMontrealTime } from '../../../client/format';
-import { buildRecipes, UPSTREAM_NOTE } from './recipes';
+import { buildRecipes } from './recipes';
 import type { IntakeSample } from '../intakeOperations';
 
 export function IntakeConnectPanel({
@@ -35,6 +36,12 @@ export function IntakeConnectPanel({
   listening,
   onListen,
   onSimulated,
+  notifyByEmail,
+  notifyBySms,
+  alertEmail,
+  alertPhone,
+  canAlertBySms,
+  onAlertsChanged,
 }: {
   searchId: string;
   url: string;
@@ -45,6 +52,13 @@ export function IntakeConnectPanel({
   onListen: () => void;
   /** L'appel d'exemple est une action délibérée : on enchaîne tout de suite. */
   onSimulated: () => void;
+  notifyByEmail: boolean;
+  notifyBySms: boolean;
+  /** Coordonnées de l'entreprise que les alertes viseraient. */
+  alertEmail: string | null;
+  alertPhone: string | null;
+  canAlertBySms: boolean;
+  onAlertsChanged: () => void;
 }) {
   const [secret, setSecret] = useState<string | null>(null);
   const [revealing, setRevealing] = useState(false);
@@ -143,11 +157,16 @@ export function IntakeConnectPanel({
         </p>
       </div>
 
-      {/* Ce qui reste à faire hors de Gestia — annoncé, pas découvert. */}
-      <div className='flex gap-2.5 text-xs text-muted bg-canvas-100 border border-line rounded-xl p-3'>
-        <LuCircleAlert size={15} className='shrink-0 mt-0.5' />
-        <p>{UPSTREAM_NOTE}</p>
-      </div>
+      <IntakeAlerts
+        searchId={searchId}
+        isAdmin={isAdmin}
+        notifyByEmail={notifyByEmail}
+        notifyBySms={notifyBySms}
+        alertEmail={alertEmail}
+        alertPhone={alertPhone}
+        canAlertBySms={canAlertBySms}
+        onChanged={onAlertsChanged}
+      />
 
       {/* ── Recettes ── */}
       <div>
@@ -250,6 +269,154 @@ export function IntakeConnectPanel({
         </div>
       )}
     </div>
+  );
+}
+
+// ─── Alertes de la source ─────────────────────────────────────────────────────
+
+/**
+ * Qui est prévenu quand un prospect arrive **sur ce tableau**.
+ *
+ * Réglé par source et non dans les paramètres de l'entreprise : on ne reçoit pas
+ * de la même façon d'un formulaire Facebook et d'un tableur de rappels, et une
+ * entreprise veut être alertée sur le tableau qui compte, pas sur les six.
+ *
+ * Les deux sont éteints par défaut. Une alerte est une interruption, et le SMS est
+ * facturé : on les demande, on ne les subit pas.
+ */
+function IntakeAlerts({
+  searchId,
+  isAdmin,
+  notifyByEmail,
+  notifyBySms,
+  alertEmail,
+  alertPhone,
+  canAlertBySms,
+  onChanged,
+}: {
+  searchId: string;
+  isAdmin: boolean;
+  notifyByEmail: boolean;
+  notifyBySms: boolean;
+  alertEmail: string | null;
+  alertPhone: string | null;
+  canAlertBySms: boolean;
+  onChanged: () => void;
+}) {
+  const [saving, setSaving] = useState<'email' | 'sms' | null>(null);
+
+  async function toggle(channel: 'email' | 'sms', next: boolean) {
+    setSaving(channel);
+    try {
+      await updateLeadIntakeWebhook({
+        searchId,
+        ...(channel === 'email' ? { notifyByEmail: next } : { notifyBySms: next }),
+      } as any);
+      onChanged();
+    } catch (err: any) {
+      toast.error(err?.message ?? 'Modification impossible');
+    } finally {
+      setSaving(null);
+    }
+  }
+
+  const none = !notifyByEmail && !notifyBySms;
+
+  // Ce qui empêche un canal de servir, dit à l'endroit où on l'active — et non
+  // pas seulement l'absence de destinataire. Un « Par SMS » grisé qui affiche
+  // pourtant le bon numéro ne dit pas ce qui manque : ici, la clé Telnyx.
+  const emailBlocked = alertEmail ? null : "Aucun courriel d'entreprise — Paramètres › Entreprise";
+  const smsBlocked =
+    !alertPhone ? "Aucun téléphone d'entreprise — Paramètres › Entreprise"
+    : !canAlertBySms ? 'Envoi de SMS non configuré — Paramètres › Intégrations'
+    : null;
+
+  return (
+    <div>
+      <label className='label'>Alertes à l'arrivée d'un prospect</label>
+      <div className='grid gap-2 sm:grid-cols-2'>
+        <AlertToggle
+          label='Par courriel'
+          target={alertEmail}
+          blocked={emailBlocked}
+          checked={notifyByEmail}
+          busy={saving === 'email'}
+          disabled={!isAdmin || saving !== null || !!emailBlocked}
+          onChange={next => toggle('email', next)}
+        />
+        <AlertToggle
+          label='Par SMS'
+          target={alertPhone}
+          blocked={smsBlocked}
+          checked={notifyBySms}
+          busy={saving === 'sms'}
+          disabled={!isAdmin || saving !== null || !!smsBlocked}
+          onChange={next => toggle('sms', next)}
+        />
+      </div>
+      <p className='text-xs text-muted mt-1.5'>
+        {none ? (
+          <>
+            Aucune alerte : les prospects apparaissent sur le tableau, sans notification hors de
+            Gestia.
+          </>
+        ) : (
+          <>
+            Envoyée 10 minutes après l'arrivée, et seulement si personne n'a touché au prospect
+            entre-temps. Une seule alerte par vague, pas une par prospect
+            {notifyBySms ? <> — soit <strong className='text-ink'>un SMS facturé</strong></> : null}.
+          </>
+        )}
+      </p>
+    </div>
+  );
+}
+
+function AlertToggle({
+  label,
+  target,
+  blocked,
+  checked,
+  busy,
+  disabled,
+  onChange,
+}: {
+  label: string;
+  target: string | null;
+  /** Ce qui empêche ce canal de servir, et où le régler. `null` = utilisable. */
+  blocked: string | null;
+  checked: boolean;
+  busy: boolean;
+  disabled: boolean;
+  onChange: (next: boolean) => void;
+}) {
+  // Le destinataire est affiché en clair quand le canal marche : un interrupteur
+  // « Par SMS » nu laisse deviner à quel numéro, et personne n'active une alerte
+  // facturée à l'aveugle. Sinon c'est l'obstacle qui prend la place.
+  const detail = blocked ?? target;
+  return (
+    <label
+      className={`flex items-start gap-2.5 rounded-xl border p-2.5 transition-colors ${
+        disabled ? 'border-line bg-canvas-100' : 'border-line hover:border-ink/30 cursor-pointer'
+      }`}
+    >
+      <input
+        type='checkbox'
+        className='mt-0.5 rounded border-line text-accent focus:ring-accent/30'
+        checked={checked}
+        disabled={disabled}
+        onChange={e => onChange(e.target.checked)}
+      />
+      <span className='min-w-0 flex-1'>
+        <span className='flex items-center gap-1.5 text-sm font-medium text-ink'>
+          {label}
+          {busy && <LuLoader size={11} className='animate-spin text-muted' />}
+        </span>
+        <span className={`block truncate text-xs ${blocked ? 'text-warning' : 'text-muted'}`} title={detail ?? ''}>
+          {detail}
+        </span>
+      </span>
+    </label>
   );
 }
 

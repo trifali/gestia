@@ -822,9 +822,11 @@ action createLeadBoard {
   fn: import { createLeadBoard } from "@src/app/leads/intakeOperations",
   entities: [User, LeadSearch, LeadInboundWebhook]
 }
+// `Company` : les alertes visent le courriel et le téléphone de l'entreprise, et
+// l'écran doit pouvoir dire lesquels — et griser un canal injoignable.
 query getLeadIntakeConfig {
   fn: import { getLeadIntakeConfig } from "@src/app/leads/intakeOperations",
-  entities: [User, LeadSearch, LeadInboundWebhook, LeadInboundEvent]
+  entities: [User, Company, LeadSearch, LeadInboundWebhook, LeadInboundEvent]
 }
 // Opération à part : le secret ne voyage jamais dans une requête de routine.
 query revealLeadIntakeSecret {
@@ -847,9 +849,11 @@ action rotateLeadIntakeSecret {
   fn: import { rotateLeadIntakeSecret } from "@src/app/leads/intakeOperations",
   entities: [User, LeadSearch, LeadInboundWebhook]
 }
+// Pause et alertes de la source. `Company` sert à refuser d'allumer un canal qui
+// ne mènerait nulle part.
 action updateLeadIntakeWebhook {
   fn: import { updateLeadIntakeWebhook } from "@src/app/leads/intakeOperations",
-  entities: [User, LeadSearch, LeadInboundWebhook]
+  entities: [User, Company, LeadSearch, LeadInboundWebhook]
 }
 action simulateLeadIntakeCall {
   fn: import { simulateLeadIntakeCall } from "@src/app/leads/intakeOperations",

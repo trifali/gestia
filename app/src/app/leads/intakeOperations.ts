@@ -138,6 +138,19 @@ export type LeadIntakeConfig = {
   receivedCount: number;
   lastReceivedAt: Date | null;
   errorCount: number;
+  /** Alertes demandées pour cette source. */
+  notifyByEmail: boolean;
+  notifyBySms: boolean;
+  /**
+   * Où partiraient ces alertes, et si c'est possible.
+   *
+   * Renvoyé pour que l'écran puisse dire « à quelle adresse » plutôt qu'un
+   * interrupteur nu, et griser ce qui ne mènerait nulle part : une alerte
+   * activée qui ne prévient personne est pire qu'une alerte éteinte.
+   */
+  alertEmail: string | null;
+  alertPhone: string | null;
+  canAlertBySms: boolean;
 };
 
 export const getLeadIntakeConfig = async (
@@ -156,6 +169,11 @@ export const getLeadIntakeConfig = async (
     },
   });
 
+  const company = await context.entities.Company.findUnique({
+    where: { id: webhook.companyId },
+    select: { email: true, phone: true, telnyxPhoneNumber: true, telnyxApiKey: true },
+  });
+
   const mapping = isMappingConfigured(webhook.mapping) ? (webhook.mapping as LeadIntakeMapping) : null;
   return {
     searchId,
@@ -168,6 +186,13 @@ export const getLeadIntakeConfig = async (
     receivedCount: webhook.receivedCount,
     lastReceivedAt: webhook.lastReceivedAt,
     errorCount,
+    notifyByEmail: webhook.notifyByEmail,
+    notifyBySms: webhook.notifyBySms,
+    alertEmail: company?.email?.trim() || null,
+    alertPhone: company?.phone?.trim() || null,
+    // Le SMS demande en plus un numéro et une clé Telnyx : c'est Gestia qui
+    // l'émet, pas le serveur de courriel de l'entreprise.
+    canAlertBySms: !!(company?.telnyxPhoneNumber && company?.telnyxApiKey && company?.phone?.trim()),
   };
 };
 
@@ -411,15 +436,59 @@ export const rotateLeadIntakeSecret = async (
   return { secret };
 };
 
+/**
+ * Les réglages de la source elle-même : sa mise en pause et ses alertes.
+ *
+ * Chaque champ est optionnel et n'est écrit que s'il est présent — l'écran bascule
+ * un interrupteur à la fois, et une requête ne doit pas réinitialiser les autres
+ * en passant.
+ */
 export const updateLeadIntakeWebhook = async (
-  { searchId, isActive }: { searchId: string; isActive: boolean },
+  {
+    searchId,
+    isActive,
+    notifyByEmail,
+    notifyBySms,
+  }: {
+    searchId: string;
+    isActive?: boolean;
+    notifyByEmail?: boolean;
+    notifyBySms?: boolean;
+  },
   context: any,
-): Promise<{ isActive: boolean }> => {
-  const { webhook } = await requireIntake(context, searchId, { admin: true });
+): Promise<{ isActive: boolean; notifyByEmail: boolean; notifyBySms: boolean }> => {
+  const { companyId, webhook } = await requireIntake(context, searchId, { admin: true });
+
+  const data: Record<string, boolean> = {};
+  if (isActive !== undefined) data.isActive = !!isActive;
+  if (notifyByEmail !== undefined) data.notifyByEmail = !!notifyByEmail;
+  if (notifyBySms !== undefined) data.notifyBySms = !!notifyBySms;
+
+  // Refuser d'allumer un canal sans destination : sinon l'interrupteur affiche
+  // « activé » alors que la tâche n'aura personne à prévenir, et l'utilisateur
+  // n'apprendra son erreur qu'en constatant l'absence d'alerte.
+  if (data.notifyByEmail || data.notifyBySms) {
+    const company = await context.entities.Company.findUnique({
+      where: { id: companyId },
+      select: { email: true, phone: true, telnyxPhoneNumber: true, telnyxApiKey: true },
+    });
+    if (data.notifyByEmail && !company?.email?.trim()) {
+      throw new HttpError(400, "Ajoutez d'abord un courriel d'entreprise dans Paramètres › Entreprise.");
+    }
+    if (data.notifyBySms) {
+      if (!company?.phone?.trim()) {
+        throw new HttpError(400, "Ajoutez d'abord un téléphone d'entreprise dans Paramètres › Entreprise.");
+      }
+      if (!company?.telnyxPhoneNumber || !company?.telnyxApiKey) {
+        throw new HttpError(400, "Configurez d'abord l'envoi de SMS dans Paramètres › Intégrations.");
+      }
+    }
+  }
+
   const updated = await context.entities.LeadInboundWebhook.update({
     where: { id: webhook.id },
-    data: { isActive: !!isActive },
-    select: { isActive: true },
+    data,
+    select: { isActive: true, notifyByEmail: true, notifyBySms: true },
   });
   return updated;
 };

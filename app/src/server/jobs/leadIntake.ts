@@ -71,12 +71,22 @@ export const notifyInboundLeads = async (_args: unknown, context: any) => {
   const due = new Date(now - NOTIFY_DELAY_MS);
   const floor = new Date(now - NOTIFY_MAX_AGE_MS);
 
+  // Les sources sans aucune alerte demandée sont écartées en SQL. C'est le cas
+  // par défaut, donc de très loin le plus courant : les charger pour découvrir
+  // ensuite qu'il n'y a rien à envoyer ferait tourner une requête de prospects
+  // par source toutes les cinq minutes, pour rien.
   const webhooks = await context.entities.LeadInboundWebhook.findMany({
-    where: { isActive: true, lastReceivedAt: { gte: floor, lte: due } },
+    where: {
+      isActive: true,
+      lastReceivedAt: { gte: floor, lte: due },
+      OR: [{ notifyByEmail: true }, { notifyBySms: true }],
+    },
     select: {
       id: true,
       companyId: true,
       notifiedAt: true,
+      notifyByEmail: true,
+      notifyBySms: true,
       search: { select: { id: true, title: true } },
     },
   });
@@ -102,11 +112,12 @@ export const notifyInboundLeads = async (_args: unknown, context: any) => {
     );
     if (unseen.length === 0) continue;
 
+    // Les coordonnées visées sont celles de l'entreprise — jamais un compte
+    // individuel — mais le choix des canaux appartient à la source.
     const company = await context.entities.Company.findUnique({
       where: { id: webhook.companyId },
       select: {
         id: true, name: true, email: true, phone: true,
-        notifyInboundLeadByEmail: true, notifyInboundLeadBySms: true,
         telnyxPhoneNumber: true, telnyxApiKey: true,
         smtpHost: true, smtpPort: true, smtpUsername: true, smtpPassword: true,
         smtpFromName: true, smtpFromEmail: true,
@@ -114,16 +125,11 @@ export const notifyInboundLeads = async (_args: unknown, context: any) => {
     });
     if (!company) continue;
 
-    // Les deux canaux sont éteints : rien à envoyer, et surtout on ne pose pas
-    // `notifiedAt`. Réactiver l'alerte doit pouvoir rattraper ce qui est arrivé
-    // entre-temps, ce qu'un repère avancé dans le vide interdirait.
-    if (!company.notifyInboundLeadByEmail && !company.notifyInboundLeadBySms) continue;
-
     let delivered = false;
-    if (company.notifyInboundLeadByEmail) {
+    if (webhook.notifyByEmail) {
       delivered = await deliverInboundAlert(company, webhook.search.title, unseen);
     }
-    if (company.notifyInboundLeadBySms) {
+    if (webhook.notifyBySms) {
       delivered = (await deliverInboundSms(company, webhook.search.title, unseen)) || delivered;
     }
 

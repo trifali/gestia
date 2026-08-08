@@ -163,15 +163,3 @@ function envoyerNouveauxProspects() {
     },
   ];
 }
-
-/**
- * Ce que l'utilisateur doit encore faire *en amont* de Gestia. Annoncé dès le
- * départ : découvrir après coup qu'il manquait une étape hors de l'application
- * est la meilleure façon de croire que la fonctionnalité est cassée.
- */
-export const UPSTREAM_NOTE =
-  'Gestia reçoit les prospects — il ne va pas les chercher chez Facebook. Il vous faut donc une '
-  + 'source qui les pousse ici : Zapier ou Make (immédiat, le plus fiable), ou le connecteur '
-  + 'Google Sheets de Meta suivi du script ci-contre. Ce dernier a la réputation de s\'interrompre '
-  + 'quand son autorisation Google expire ; si vos prospects cessent d\'arriver, c\'est la première '
-  + 'chose à vérifier.';

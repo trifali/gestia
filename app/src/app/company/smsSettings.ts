@@ -25,9 +25,6 @@ export type SmsSettings = {
   publicKeyPreview: string | null;
   notifySmsReplyByEmail: boolean;
   notifySmsReplyBySms: boolean;
-  /** Idem pour un prospect arrivé par webhook. */
-  notifyInboundLeadByEmail: boolean;
-  notifyInboundLeadBySms: boolean;
   /** Whether the floating SMS inbox widget is on for this company. */
   smsInboxEnabled: boolean;
   /** The company contact details notifications go to, so the UI can show them. */
@@ -63,8 +60,6 @@ export const getSmsSettings = async (_args: void, context: any): Promise<SmsSett
     publicKeyPreview: mask(c.telnyxPublicKey),
     notifySmsReplyByEmail: c.notifySmsReplyByEmail,
     notifySmsReplyBySms: c.notifySmsReplyBySms,
-    notifyInboundLeadByEmail: c.notifyInboundLeadByEmail,
-    notifyInboundLeadBySms: c.notifyInboundLeadBySms,
     smsInboxEnabled: c.smsInboxEnabled,
     companyEmail: c.email ?? null,
     companyPhone: c.phone ?? null,
@@ -205,8 +200,6 @@ type UpdateSmsSettingsArgs = {
   telnyxPublicKey?: string | null;
   notifySmsReplyByEmail?: boolean;
   notifySmsReplyBySms?: boolean;
-  notifyInboundLeadByEmail?: boolean;
-  notifyInboundLeadBySms?: boolean;
   smsInboxEnabled?: boolean;
 };
 
@@ -259,8 +252,6 @@ export const updateSmsSettings = async (
 
   if ('notifySmsReplyByEmail' in args) data.notifySmsReplyByEmail = !!args.notifySmsReplyByEmail;
   if ('notifySmsReplyBySms' in args) data.notifySmsReplyBySms = !!args.notifySmsReplyBySms;
-  if ('notifyInboundLeadByEmail' in args) data.notifyInboundLeadByEmail = !!args.notifyInboundLeadByEmail;
-  if ('notifyInboundLeadBySms' in args) data.notifyInboundLeadBySms = !!args.notifyInboundLeadBySms;
   if ('smsInboxEnabled' in args) data.smsInboxEnabled = !!args.smsInboxEnabled;
 
   // Une boîte de réception sans numéro ni clé API n'a rien à afficher et ne peut
@@ -281,18 +272,15 @@ export const updateSmsSettings = async (
 
   // Refuse to enable a channel with no destination — otherwise the toggle reads
   // as "on" while silently notifying nobody.
-  if (
-    data.notifySmsReplyByEmail || data.notifySmsReplyBySms
-    || data.notifyInboundLeadByEmail || data.notifyInboundLeadBySms
-  ) {
+  if (data.notifySmsReplyByEmail || data.notifySmsReplyBySms) {
     const c = await context.entities.Company.findUnique({
       where: { id: companyId },
       select: { email: true, phone: true },
     });
-    if ((data.notifySmsReplyByEmail || data.notifyInboundLeadByEmail) && !c?.email?.trim()) {
+    if (data.notifySmsReplyByEmail && !c?.email?.trim()) {
       throw new HttpError(400, "Ajoutez d'abord un courriel d'entreprise dans l'onglet Entreprise.");
     }
-    if ((data.notifySmsReplyBySms || data.notifyInboundLeadBySms) && !c?.phone?.trim()) {
+    if (data.notifySmsReplyBySms && !c?.phone?.trim()) {
       throw new HttpError(400, "Ajoutez d'abord un téléphone d'entreprise dans l'onglet Entreprise.");
     }
   }
