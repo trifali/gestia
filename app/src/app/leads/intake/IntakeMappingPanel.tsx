@@ -504,9 +504,14 @@ export function IntakeMappingPanel({
           bouton se retrouvait sous la ligne de flottaison de la modale : on
           réglait une correspondance sans voir comment l'enregistrer. Les marges
           négatives compensent le `px-6 py-5` du corps de la modale pour que la
-          barre aille d'un bord à l'autre. */}
+          barre aille d'un bord à l'autre.
+
+          `-bottom-5` et non `bottom-0` : le collage se mesure sur la **boîte des
+          marges**, et un `-mb-5` avec un décalage nul faisait descendre la barre
+          de ces 20 px sous le bas de la zone qui défile — la moitié du bouton
+          passait dessous. Le décalage négatif rend exactement la marge reprise. */}
       {isAdmin && (
-        <div className='sticky bottom-0 -mx-6 -mb-5 flex items-center justify-end gap-3 border-t border-line bg-white/95 px-6 py-3 backdrop-blur-sm'>
+        <div className='sticky -bottom-5 -mx-6 -mb-5 flex items-center justify-end gap-3 border-t border-line bg-white/95 px-6 py-3 backdrop-blur-sm'>
           <button type='button' className='btn-primary gap-2' onClick={save} disabled={saving}>
             {saving ? <LuLoader size={16} className='animate-spin' /> : <LuSave size={16} />}
             Enregistrer la correspondance

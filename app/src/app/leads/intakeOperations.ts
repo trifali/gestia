@@ -552,7 +552,14 @@ export const replayIntakeEvent = async (
   });
   if (!event) throw new HttpError(404, 'Appel introuvable.');
   if (event.status === 'ok' && event.leadIds.length > 0) {
-    throw new HttpError(400, 'Cet appel a déjà créé un prospect.');
+    // Le garde-fou porte sur les fiches, pas sur la trace. `leadIds` conserve les
+    // identifiants d'origine et la suppression d'une carte ne les efface pas :
+    // s'en tenir au statut refusait de recréer un prospect qui n'existe plus, et
+    // le journal n'offrait alors aucun moyen de revenir en arrière.
+    const alive = await context.entities.Lead.count({
+      where: { id: { in: event.leadIds }, searchId },
+    });
+    if (alive > 0) throw new HttpError(400, 'Cet appel a déjà créé un prospect.');
   }
 
   const { leads, warnings } = applyMapping(event.payload, webhook.mapping as LeadIntakeMapping);

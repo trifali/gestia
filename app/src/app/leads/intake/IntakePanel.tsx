@@ -134,6 +134,7 @@ export function IntakePanel({
         'La correspondance est enregistrée. L\'appel qui a servi d\'exemple peut maintenant '
         + 'devenir une vraie carte sur le tableau.',
       confirmLabel: 'Créer le prospect',
+      cancelLabel: 'Non, merci',
       variant: 'primary',
     });
     if (replay) {

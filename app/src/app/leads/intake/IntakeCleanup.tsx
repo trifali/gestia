@@ -1,11 +1,13 @@
 // L'éditeur de nettoyage d'un champ : la suite d'opérations qui sépare ce qu'on a
 // reçu de ce qui sera écrit.
 //
-// Il occupe **toute la largeur** du panneau, jamais une colonne de tableau. Une
-// première version le logeait dans la cellule « Nettoyage » : à 672 px de modale,
-// la liste déroulante affichait « full_n∨ » et l'assistant écrivait un mot par
-// ligne. Un éditeur ne tient pas dans une cellule — c'est la ligne du tableau qui
-// s'ouvre pour lui faire de la place (voir `IntakeMappingPanel`).
+// La ligne du tableau ne montre que **la chaîne** : la valeur reçue, une pastille
+// par étape, le résultat. Le réglage d'une étape s'ouvre dans une modale — on
+// clique la pastille, on règle, on ferme. Une première version dépliait ce réglage
+// sous la chaîne : l'éditeur d'expression régulière y prenait plus de place que
+// tout le reste de la ligne, et la ligne sautait à chaque changement de sélection.
+// Ce qu'on garde sous les yeux en permanence, c'est l'enchaînement ; le détail
+// d'une étape est un aparté.
 //
 // L'expression régulière a son propre éditeur, et il est délibérément direct :
 // deux champs en police fixe, les correspondances surlignées sur la valeur réelle,
@@ -40,6 +42,7 @@ import {
   type TransformOp,
   type TransformStep,
 } from '../../../shared/leadIntakeTransforms';
+import { Modal } from '../../../client/ui';
 
 /**
  * Les deux opérations qui portent une expression régulière. Séparées du reste dans
@@ -124,13 +127,14 @@ export function CleanupEditor({
   disabled: boolean;
   onChange: (transforms: Transform[]) => void;
 }) {
-  // La dernière opération est sélectionnée d'office : c'est celle qu'on vient
-  // d'ajouter neuf fois sur dix, et celle qu'on veut régler.
-  const [selected, setSelected] = useState<number>(Math.max(0, transforms.length - 1));
+  // Rien d'ouvert au départ : la ligne montre la chaîne, la modale ne s'ouvre que
+  // sur un clic — ou d'office quand on vient d'ajouter une étape, puisqu'une étape
+  // neuve est toujours à régler.
+  const [editing, setEditing] = useState<number | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
 
-  const index = Math.min(selected, transforms.length - 1);
-  const current = transforms[index];
+  const index = editing !== null && editing < transforms.length ? editing : null;
+  const current = index === null ? undefined : transforms[index];
   const full = transforms.length >= MAX_TRANSFORMS;
 
   function update(at: number, transform: Transform) {
@@ -139,13 +143,13 @@ export function CleanupEditor({
 
   function add(op: TransformOp) {
     onChange([...transforms, blankTransform(op)]);
-    setSelected(transforms.length);
+    setEditing(transforms.length);
     setMenuOpen(false);
   }
 
   function remove(at: number) {
     onChange(transforms.filter((_, i) => i !== at));
-    setSelected(Math.max(0, at - 1));
+    setEditing(null);
   }
 
   function move(at: number, delta: number) {
@@ -154,7 +158,7 @@ export function CleanupEditor({
     const next = [...transforms];
     [next[at], next[target]] = [next[target], next[at]];
     onChange(next);
-    setSelected(target);
+    setEditing(target);
   }
 
   return (
@@ -178,15 +182,33 @@ export function CleanupEditor({
           return (
             <span key={i} className='flex items-center gap-1.5'>
               <LuArrowRight size={12} className='shrink-0 text-muted' />
-              <button
-                type='button'
-                onClick={() => setSelected(i)}
-                className={`inline-flex max-w-[16rem] items-center gap-1 truncate rounded px-2 py-1 text-xs font-medium ring-1 transition-colors ${tone}`}
+              {/* Deux boutons dans une même pastille : le corps ouvre le réglage,
+                  la croix retire l'étape. Imbriquer l'un dans l'autre serait du
+                  HTML invalide — d'où l'enveloppe qui porte le fond et l'anneau. */}
+              <span
+                className={`inline-flex max-w-[16rem] items-center rounded text-xs font-medium ring-1 transition-colors ${tone}`}
               >
-                {step?.invalid && <LuTriangleAlert size={10} className='shrink-0' />}
-                {REGEX_OPS.includes(transform.op) && <LuRegex size={11} className='shrink-0 opacity-70' />}
-                <span className='truncate'>{describeTransform(transform)}</span>
-              </button>
+                <button
+                  type='button'
+                  title='Régler cette étape'
+                  onClick={() => setEditing(i)}
+                  className='inline-flex min-w-0 items-center gap-1 py-1 pl-2 pr-1'
+                >
+                  {step?.invalid && <LuTriangleAlert size={10} className='shrink-0' />}
+                  {REGEX_OPS.includes(transform.op) && <LuRegex size={11} className='shrink-0 opacity-70' />}
+                  <span className='truncate'>{describeTransform(transform)}</span>
+                </button>
+                {!disabled && (
+                  <button
+                    type='button'
+                    title='Supprimer cette étape'
+                    onClick={() => remove(i)}
+                    className='shrink-0 rounded-r py-1 pl-0.5 pr-1.5 opacity-50 transition-opacity hover:opacity-100'
+                  >
+                    <LuX size={11} />
+                  </button>
+                )}
+              </span>
             </span>
           );
         })}
@@ -245,71 +267,148 @@ export function CleanupEditor({
         </p>
       )}
 
-      {/* ── Le réglage de l'opération sélectionnée ── */}
-      {current && (
-        <div className='rounded-lg border border-line bg-canvas-100 p-3'>
-          <div className='mb-2.5 flex items-center justify-between gap-2'>
-            <span className='text-xs font-semibold uppercase tracking-wide text-muted'>
-              Étape {index + 1} — {TRANSFORM_LABELS[current.op]}
-            </span>
-            {!disabled && (
-              <div className='flex items-center gap-0.5'>
-                {/* L'ordre compte : « retirer p: » puis « format téléphone »
-                    marche, l'inverse non. */}
-                <IconButton title='Déplacer avant' disabled={index === 0} onClick={() => move(index, -1)}>
-                  <LuChevronLeft size={13} />
-                </IconButton>
-                <IconButton title='Déplacer après' disabled={index === transforms.length - 1} onClick={() => move(index, 1)}>
-                  <LuChevronRight size={13} />
-                </IconButton>
-                <IconButton title='Supprimer cette étape' onClick={() => remove(index)}>
-                  <LuTrash2 size={13} />
-                </IconButton>
-              </div>
-            )}
-          </div>
-
-          {isRegexTransform(current) ? (
-            <RegexParams
-              transform={current}
-              // Le motif s'applique à ce qui sort de l'étape précédente, pas à la
-              // valeur d'origine : surligner sur `raw` mentirait dès qu'un
-              // « retirer p: » le précède.
-              input={index === 0 ? raw : (steps[index - 1]?.value ?? raw)}
-              fieldLabel={fieldLabel}
-              path={path}
-              disabled={disabled}
-              onChange={t => update(index, t)}
-            />
-          ) : (
-            <FormatParams transform={current} disabled={disabled} onChange={t => update(index, t)} />
-          )}
-
-          <div className='mt-2.5 border-t border-line pt-2 text-xs'>
-            {steps[index]?.invalid ? (
-              <p className='flex items-start gap-1.5 text-amber-800'>
-                <LuTriangleAlert size={12} className='mt-0.5 shrink-0' />
-                {steps[index]?.invalid} Cette étape est ignorée.
-              </p>
-            ) : (
-              <p className='text-muted'>
-                Après cette étape :{' '}
-                <span className='font-mono text-ink'>
-                  {steps[index]?.value || <span className='italic text-muted'>vide</span>}
-                </span>
-                {steps[index]?.noop && <span className='ml-1'>— inchangé</span>}
-              </p>
-            )}
-          </div>
-        </div>
-      )}
-
       {transforms.length === 0 && (
         <p className='text-xs text-muted'>
           Aucun nettoyage : la valeur est reprise telle quelle.
         </p>
       )}
+
+      {current && index !== null && (
+        <StepModal
+          label={`Étape ${index + 1} — ${TRANSFORM_LABELS[current.op]}`}
+          transform={current}
+          // Une étape s'applique à ce qui sort de la précédente, pas à la valeur
+          // d'origine : surligner sur `raw` mentirait dès qu'un « retirer p: » la
+          // précède.
+          input={index === 0 ? raw : (steps[index - 1]?.value ?? raw)}
+          step={steps[index]}
+          fieldLabel={fieldLabel}
+          path={path}
+          disabled={disabled}
+          canMoveBefore={index > 0}
+          canMoveAfter={index < transforms.length - 1}
+          onMove={delta => move(index, delta)}
+          onRemove={() => remove(index)}
+          onChange={t => update(index, t)}
+          onClose={() => setEditing(null)}
+        />
+      )}
     </div>
+  );
+}
+
+// ─── Le réglage d'une étape, en modale ────────────────────────────────────────
+
+/**
+ * Une étape à la fois, avec sous les yeux ce qui entre et ce qui sort d'elle.
+ *
+ * Il n'y a rien à valider : chaque frappe remonte au parent, qui recalcule la
+ * chaîne. La modale n'est qu'un endroit où poser un éditeur trop grand pour la
+ * ligne — fermer ne défait rien, et c'est la croix de la pastille qui supprime.
+ */
+function StepModal({
+  label,
+  transform,
+  input,
+  step,
+  fieldLabel,
+  path,
+  disabled,
+  canMoveBefore,
+  canMoveAfter,
+  onMove,
+  onRemove,
+  onChange,
+  onClose,
+}: {
+  label: string;
+  transform: Transform;
+  input: string;
+  step: TransformStep | undefined;
+  fieldLabel: string;
+  path: string;
+  disabled: boolean;
+  canMoveBefore: boolean;
+  canMoveAfter: boolean;
+  onMove: (delta: number) => void;
+  onRemove: () => void;
+  onChange: (transform: Transform) => void;
+  onClose: () => void;
+}) {
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title={label}
+      // L'éditeur d'expression met le motif et le remplacement côte à côte ; à la
+      // largeur habituelle, les deux champs en police fixe sont trop étroits pour
+      // relire ce qu'on écrit.
+      size='lg'
+      headerRight={
+        !disabled && (
+          <div className='mr-1 flex items-center gap-0.5'>
+            {/* L'ordre compte : « retirer p: » puis « format téléphone » marche,
+                l'inverse non. */}
+            <IconButton title='Déplacer avant' disabled={!canMoveBefore} onClick={() => onMove(-1)}>
+              <LuChevronLeft size={15} />
+            </IconButton>
+            <IconButton title='Déplacer après' disabled={!canMoveAfter} onClick={() => onMove(1)}>
+              <LuChevronRight size={15} />
+            </IconButton>
+            <IconButton title='Supprimer cette étape' onClick={onRemove}>
+              <LuTrash2 size={15} />
+            </IconButton>
+          </div>
+        )
+      }
+      footer={
+        <button type='button' className='btn-primary' onClick={onClose}>
+          Terminé
+        </button>
+      }
+    >
+      <div className='space-y-3'>
+        {/* ── Ce que cette étape reçoit, ce qu'elle rend ── */}
+        <div className='flex flex-wrap items-center gap-1.5'>
+          <span className='rounded bg-canvas-200 px-2 py-1 font-mono text-xs text-muted'>
+            {input || 'vide'}
+          </span>
+          <LuArrowRight size={12} className='shrink-0 text-muted' />
+          <span
+            className={`rounded px-2 py-1 font-mono text-xs font-medium ring-1 ${
+              step?.invalid
+                ? 'bg-amber-50 text-amber-900 ring-amber-200'
+                : step?.noop
+                  ? 'bg-canvas-200 text-muted ring-line'
+                  : 'bg-emerald-50 text-emerald-800 ring-emerald-200'
+            }`}
+          >
+            {step?.value || 'vide'}
+          </span>
+          {step?.noop && !step.invalid && <span className='text-xs text-muted'>inchangé</span>}
+        </div>
+
+        {isRegexTransform(transform) ? (
+          <RegexParams
+            transform={transform}
+            input={input}
+            fieldLabel={fieldLabel}
+            path={path}
+            disabled={disabled}
+            onChange={onChange}
+          />
+        ) : (
+          <FormatParams transform={transform} disabled={disabled} onChange={onChange} />
+        )}
+
+        {step?.invalid && (
+          <p className='flex items-start gap-1.5 border-t border-line pt-2 text-xs text-amber-800'>
+            <LuTriangleAlert size={12} className='mt-0.5 shrink-0' />
+            {step.invalid} Cette étape est ignorée.
+          </p>
+        )}
+      </div>
+    </Modal>
   );
 }
 

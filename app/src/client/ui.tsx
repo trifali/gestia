@@ -93,6 +93,10 @@ type ConfirmState = {
   message: string;
   description?: string;
   confirmLabel?: string;
+  // « Annuler » pour une suppression qu'on abandonne. Mais toutes les questions ne
+  // sont pas des avertissements : quand on propose quelque chose en plus, refuser
+  // n'est pas annuler, et l'étiquette doit pouvoir le dire.
+  cancelLabel?: string;
   variant?: ConfirmVariant;
   resolve: (v: boolean) => void;
 };
@@ -116,7 +120,9 @@ function ConfirmDialog({ state, onAnswer }: { state: ConfirmState; onAnswer: (v:
           </div>
         </div>
         <div className='flex justify-end gap-2'>
-          <button className='btn-secondary' onClick={() => onAnswer(false)}>Annuler</button>
+          <button className='btn-secondary' onClick={() => onAnswer(false)}>
+            {state.cancelLabel ?? 'Annuler'}
+          </button>
           <button className={isDanger ? 'btn-danger' : 'btn-primary'} onClick={() => onAnswer(true)}>
             {state.confirmLabel ?? (isDanger ? 'Supprimer' : 'Confirmer')}
           </button>
@@ -132,7 +138,7 @@ export function useConfirm() {
 
   const ask = (
     message: string,
-    opts?: string | { confirmLabel?: string; variant?: ConfirmVariant; description?: string },
+    opts?: string | { confirmLabel?: string; cancelLabel?: string; variant?: ConfirmVariant; description?: string },
   ): Promise<boolean> =>
     new Promise((resolve) => {
       const normalized = typeof opts === 'string' ? { confirmLabel: opts } : opts || {};
