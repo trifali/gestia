@@ -81,9 +81,12 @@ export function IntakeEventLog({
         {events.map(ev => {
           const badge = STATUS_LABEL[ev.status] ?? { label: ev.status, className: 'badge-neutral' };
           const isOpen = expanded === ev.id;
-          // Un appel qui a déjà produit un prospect ne se rejoue pas : ce serait
-          // fabriquer un doublon à la main.
-          const canReplay = isAdmin && configured && ev.leadIds.length === 0 && ev.status !== 'duplicate';
+          // Un appel dont le prospect est encore sur le tableau ne se rejoue pas :
+          // ce serait fabriquer un doublon à la main. Mais une carte supprimée
+          // rouvre la porte — c'est même le seul moyen de la faire revenir, et
+          // `leadIds` seul, qui garde la trace des identifiants d'origine, la
+          // condamnait pour toujours.
+          const canReplay = isAdmin && configured && ev.liveLeadCount === 0 && ev.status !== 'duplicate';
 
           return (
             <div key={ev.id} className='px-3 py-2.5'>

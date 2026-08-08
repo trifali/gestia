@@ -835,7 +835,7 @@ query revealLeadIntakeSecret {
 }
 query getLeadIntakeEvents {
   fn: import { getLeadIntakeEvents } from "@src/app/leads/intakeOperations",
-  entities: [User, LeadSearch, LeadInboundWebhook, LeadInboundEvent]
+  entities: [User, LeadSearch, Lead, LeadInboundWebhook, LeadInboundEvent]
 }
 query getLatestIntakeSample {
   fn: import { getLatestIntakeSample } from "@src/app/leads/intakeOperations",

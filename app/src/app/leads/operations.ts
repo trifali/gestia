@@ -1561,7 +1561,7 @@ export const createLead = async (
     return t ? t : null;
   };
 
-  return insertLeadOnTop(context.entities, {
+  const row = await insertLeadOnTop(context.entities, {
     searchId: args.searchId,
     status,
     data: {
@@ -1574,7 +1574,30 @@ export const createLead = async (
       source: args.source?.trim() || 'manual',
     },
   });
+  await syncTotalFound(context.entities, args.searchId);
+  return row;
 };
+
+// ─── totalFound ───────────────────────────────────────────────────────────────
+
+/**
+ * Remet `LeadSearch.totalFound` sur le compte réel des prospects.
+ *
+ * La colonne est un cache : c'est elle qu'affiche la vignette d'un tableau tant
+ * que ses prospects ne sont pas chargés. Elle était tenue à coups d'`increment`
+ * aux seules créations en lot — une suppression ne la touchait pas, une saisie
+ * manuelle non plus, et le compte n'avait plus qu'un rapport lointain avec le
+ * tableau. Supprimer puis rejouer un appel entrant la faisait monter deux fois.
+ *
+ * Recompter plutôt que décrémenter : c'est exact quel que soit l'écart déjà
+ * accumulé, donc chaque passage répare le passé. Les créations en lot gardent
+ * leur `increment` — elles sont justes, et le point d'entrée d'un webhook n'a pas
+ * à payer un `count` par appel reçu.
+ */
+async function syncTotalFound(entities: any, searchId: string): Promise<void> {
+  const totalFound = await entities.Lead.count({ where: { searchId } });
+  await entities.LeadSearch.update({ where: { id: searchId }, data: { totalFound } });
+}
 
 // ─── deleteLead ───────────────────────────────────────────────────────────────
 
@@ -1589,6 +1612,7 @@ export const deleteLead = async (
   });
   if (!lead || lead.search.companyId !== companyId) throw new HttpError(404);
   await context.entities.Lead.delete({ where: { id: leadId } });
+  await syncTotalFound(context.entities, lead.searchId);
   return { deleted: true };
 };
 
@@ -1602,10 +1626,19 @@ export const deleteLeads = async (
   const ids = [...new Set(leadIds ?? [])];
   if (ids.length === 0) return { deleted: 0 };
   // The company scope lives on the parent search, so it is part of the filter —
-  // ids belonging to another company are simply never matched.
+  // ids belonging to another company are simply never matched. Reading the rows
+  // first is what tells us which boards to recount afterwards: once deleted, the
+  // ids no longer say where they lived.
+  const doomed = await context.entities.Lead.findMany({
+    where: { id: { in: ids }, search: { companyId } },
+    select: { searchId: true },
+  });
   const { count } = await context.entities.Lead.deleteMany({
     where: { id: { in: ids }, search: { companyId } },
   });
+  for (const searchId of new Set(doomed.map((l: { searchId: string }) => l.searchId))) {
+    await syncTotalFound(context.entities, searchId as string);
+  }
   return { deleted: count };
 };
 
@@ -1769,6 +1802,7 @@ export const deleteLeadByToken = async (
   });
   if (!lead || lead.search.id !== shareToken.searchId) throw new HttpError(403);
   await context.entities.Lead.delete({ where: { id: leadId } });
+  await syncTotalFound(context.entities, lead.searchId);
   return { deleted: true };
 };
 

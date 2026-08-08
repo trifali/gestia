@@ -213,6 +213,15 @@ export type IntakeEvent = {
   dedupeKey: string | null;
   sourceIp: string | null;
   leadIds: string[];
+  /**
+   * Combien des prospects créés par cet appel existent encore.
+   *
+   * `leadIds` est une trace, pas un état : supprimer une carte du tableau ne la
+   * retire pas de la liste. C'est ce compte, et non la longueur de `leadIds`, qui
+   * dit si l'appel a encore quelque chose sur le tableau — donc s'il peut être
+   * rejoué.
+   */
+  liveLeadCount: number;
   payload: JsonValue;
 };
 
@@ -221,7 +230,7 @@ export const getLeadIntakeEvents = async (
   context: any,
 ): Promise<IntakeEvent[]> => {
   const { webhook } = await requireIntake(context, searchId);
-  return context.entities.LeadInboundEvent.findMany({
+  const events = await context.entities.LeadInboundEvent.findMany({
     where: { webhookId: webhook.id },
     orderBy: { createdAt: 'desc' },
     take: Math.min(Math.max(limit ?? 50, 1), 200),
@@ -236,6 +245,23 @@ export const getLeadIntakeEvents = async (
       payload: true,
     },
   });
+
+  // Une seule requête pour toute la page, quelle que soit sa longueur : les
+  // identifiants de tous les appels d'un coup, puis on répartit.
+  const ids = [...new Set(events.flatMap((e: { leadIds: string[] }) => e.leadIds))];
+  const alive = ids.length
+    ? new Set(
+        (await context.entities.Lead.findMany({
+          where: { id: { in: ids }, searchId },
+          select: { id: true },
+        })).map((l: { id: string }) => l.id),
+      )
+    : new Set<string>();
+
+  return events.map((e: Omit<IntakeEvent, 'liveLeadCount'>) => ({
+    ...e,
+    liveLeadCount: e.leadIds.filter(id => alive.has(id)).length,
+  }));
 };
 
 export type IntakeSample = {
