@@ -484,8 +484,12 @@ function TemplatesModal({
   const statusLabel = (key: string | null) =>
     statusConfigs.find(s => s.key === key)?.label ?? key ?? '';
 
+  // Pas de hauteur ni d'`overflow` propres sur la racine : `Modal` fournit déjà
+  // le seul conteneur défilant (son corps est `overflow-y-auto` sous un panneau
+  // `max-h-[90vh]`). Un second cadre imbriqué en 80vh découpait l'aperçu complet
+  // sans jamais laisser défiler jusqu'au bas du courriel.
   return (
-    <div className='flex flex-col gap-0' style={{ maxHeight: '80vh', overflow: 'hidden' }}>
+    <div className='flex flex-col gap-0'>
       {/* Channel tabs */}
       <div className='flex items-center gap-2 pb-3 border-b border-line'>
         <div className='flex items-center border border-line rounded-lg overflow-hidden text-xs font-medium'>
@@ -587,7 +591,7 @@ function TemplatesModal({
         </button>
       </div>
 
-      <div className='flex-1 overflow-y-auto flex flex-col gap-4 pr-1'>
+      <div className='flex flex-col gap-4 pt-3'>
         {preview ? (
           isSms ? (
             <div className='rounded-xl border border-line overflow-hidden'>
