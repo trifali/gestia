@@ -15,7 +15,7 @@
 // pour afficher l'aperçu de la carte pendant qu'on règle la correspondance. Les
 // deux voient donc rigoureusement le même résultat.
 
-import { normalizeLeadSource, type LeadSourceKey } from './leadSources';
+import { slugifyLeadSource, type LeadSourceKey } from './leadSources';
 import {
   applyTransforms,
   previewTransforms,
@@ -136,7 +136,14 @@ export type MappedLead = {
   website: string | null;
   address: string | null;
   category: string | null;
-  source: LeadSourceKey;
+  // Une clé de provenance, plus forcément une des huit d'origine : une
+  // correspondance câblée sur la charge utile peut en produire de nouvelles.
+  source: string;
+  // La valeur telle qu'elle est arrivée, avant d'être réduite en clé. Sert
+  // d'étiquette quand le serveur enregistre une provenance encore inconnue :
+  // « Salon Habitation 2026 » se lit mieux que la clé remise en forme, qui aurait
+  // perdu les majuscules et les accents en chemin.
+  sourceLabel: string | null;
   notes: string | null;
   externalId: string | null;
 };
@@ -677,6 +684,7 @@ export function applyMapping(payload: unknown, mapping: LeadIntakeMapping): Appl
     // `suggestMapping` mais jamais imposée.
     const phone = CLEAN(resolveRule(item, mapping.fields.phone));
     const company = CLEAN(resolveRule(item, mapping.fields.category));
+    const rawSource = CLEAN(resolveRule(item, mapping.fields.source));
 
     // `Lead.name` est non nul en base : la chaîne de repli ne doit jamais rendre
     // vide, sinon l'insertion échoue et le prospect est perdu.
@@ -702,7 +710,14 @@ export function applyMapping(payload: unknown, mapping: LeadIntakeMapping): Appl
       website: CLEAN(resolveRule(item, mapping.fields.website)),
       address: CLEAN(resolveRule(item, mapping.fields.address)),
       category: company,
-      source: normalizeLeadSource(resolveRule(item, mapping.fields.source)),
+      // `slugify` et non plus une liste fermée : la provenance est désormais un
+      // champ câblable comme les autres, et « Salon Habitation 2026 » venu de la
+      // charge utile doit survivre au trajet. Les transformations de nettoyage se
+      // sont déjà appliquées dans `resolveRule` — c'est ce qui permet de découper
+      // `fb_salon_2026` avant que la clé ne soit figée. Le serveur décide ensuite
+      // s'il enregistre cette clé au registre : voir `registerLeadSources`.
+      source: slugifyLeadSource(rawSource),
+      sourceLabel: rawSource,
       notes: buildNotes(item, mapping),
       externalId: CLEAN(toText(getByPath(item, mapping.dedupePath))),
     });

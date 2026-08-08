@@ -120,6 +120,7 @@ model Company {
   leadSearches        LeadSearch[]
   prospectStatuses    ProspectStatus[]
   leadStatusConfigs   LeadStatusConfig[]
+  leadSourceConfigs   LeadSourceConfig[]
   leadNotes           LeadNote[]
   leadEmailLogs       LeadEmailLog[]
   leadEmailDrafts     LeadEmailDraft[]
@@ -529,9 +530,13 @@ model Lead {
   isOpen          Boolean?
   notes           String?
   status          String    @default("nouveau") // nouveau | contacte | qualifie | rejete
-  // Where the prospect came from: google_maps | manual | facebook | instagram |
-  // linkedin | referral | website | other. Existing rows predate manual entry,
-  // so they all came from the Google Maps search.
+  // D'où vient le prospect. Une clé de `LeadSourceConfig` — les huit d'origine
+  // (google_maps, manual, facebook, …) sont semées comme provenances système, mais
+  // l'entreprise peut en définir les siennes et un appel entrant peut en faire
+  // naître automatiquement. Pas de contrainte de clé étrangère : une provenance
+  // supprimée réaffecte ses prospects avant de partir, et une carte ne doit jamais
+  // devenir ininsérable parce que son registre a bougé.
+  // Les lignes antérieures à la saisie manuelle viennent toutes de Google Maps.
   source          String    @default("google_maps")
   statusUpdatedAt DateTime?
   order           Int       @default(0) // manual position inside its kanban column
@@ -597,6 +602,44 @@ model LeadStatusConfig {
   @@unique([companyId, searchId, key])
   @@index([companyId])
   @@index([searchId])
+}
+
+// La provenance d'un prospect : d'où il vient, pas où il est rangé.
+//
+// Pas de `searchId`, contrairement à `LeadStatusConfig` : un statut décrit une
+// étape du tableau et se surcharge légitimement d'un tableau à l'autre, alors
+// qu'une provenance décrit une origine, qui ne change pas selon l'écran depuis
+// lequel on la regarde. Un « Salon Habitation 2026 » vaut pour toute l'entreprise.
+//
+// Trois façons pour une ligne d'apparaître : semée (`isSystem`, les huit d'origine),
+// créée à la main dans « Provenances », ou apprise à la réception (`learned`) quand
+// une correspondance câble la provenance sur une valeur de la charge utile.
+model LeadSourceConfig {
+  id        String   @id @default(uuid())
+  createdAt DateTime @default(now())
+
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  companyId String
+
+  key   String // e.g. "facebook", "salon_habitation_2026"
+  label String // e.g. "Facebook", "Salon Habitation 2026"
+  color String @default("#6366f1")
+  order Int    @default(0)
+
+  // Une des provenances d'origine : sa clé est figée et elle ne se supprime pas.
+  // Son étiquette et sa couleur, elles, se modifient — « Ajout manuel » peut
+  // devenir « Saisie bureau » sans que les cartes existantes ne bougent.
+  isSystem Boolean @default(false)
+
+  // Née d'un appel entrant plutôt que d'une décision humaine. Sert uniquement à
+  // l'affichage : l'écran signale ces lignes pour qu'une correspondance mal câblée
+  // se repère et se nettoie. Repasse à faux dès qu'un humain la modifie.
+  learned Boolean @default(false)
+
+  // Aucun NULL dans cette contrainte, contrairement aux statuts : elle protège
+  // donc réellement les lignes entre elles.
+  @@unique([companyId, key])
+  @@index([companyId])
 }
 
 // Persistent status/notes for a prospect across all searches

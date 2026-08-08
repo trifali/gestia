@@ -36,7 +36,7 @@ import {
   type LeadIntakeMapping,
 } from '../../shared/leadIntake';
 import { resolveIntakeStatus } from '../../app/leads/operations';
-import { insertMappedLead } from './persist';
+import { insertMappedLead, registerLeadSources } from './persist';
 
 /**
  * Plafond horaire par tableau. Le point d'entrée est anonyme au sens où
@@ -265,6 +265,20 @@ export const leadIntakeReceive = async (req: Request, res: Response, context: an
     }
 
     const status = await resolveIntakeStatus(entities, webhook.companyId, webhook.searchId);
+
+    // Les provenances du lot d'un coup : un appel qui porte cent lignes de
+    // tableur ne doit pas relire le registre cent fois.
+    const { resolved: sourceMap, skipped } = await registerLeadSources(
+      entities,
+      webhook.companyId,
+      usable,
+    );
+    if (skipped.length > 0) {
+      warnings.push(
+        `Provenances non enregistrées (maximum atteint), « Autre » utilisée : ${skipped.slice(0, 5).join(', ')}${skipped.length > 5 ? '…' : ''}`,
+      );
+    }
+
     const created: string[] = [];
     for (const lead of usable) {
       const row = await insertMappedLead(entities, {
@@ -273,6 +287,7 @@ export const leadIntakeReceive = async (req: Request, res: Response, context: an
         status,
         lead,
         fallbackExternalId: dedupeKey,
+        sourceMap,
       });
       created.push(row.id);
     }

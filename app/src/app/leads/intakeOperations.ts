@@ -13,7 +13,7 @@ import { randomBytes } from 'crypto';
 import { z } from 'zod';
 import { requireAdmin } from '../../server/tenant';
 import { resolveIntakeStatus } from './operations';
-import { insertMappedLead } from '../../server/leadIntake/persist';
+import { insertMappedLead, registerLeadSources } from '../../server/leadIntake/persist';
 import {
   applyMapping,
   flattenPaths,
@@ -600,6 +600,11 @@ export const replayIntakeEvent = async (
   }
 
   const status = await resolveIntakeStatus(context.entities, companyId, searchId);
+  const { resolved: sourceMap } = await registerLeadSources(
+    context.entities,
+    companyId,
+    usable,
+  );
   const created: string[] = [];
   for (const lead of usable) {
     const row = await insertMappedLead(context.entities, {
@@ -608,6 +613,7 @@ export const replayIntakeEvent = async (
       status,
       lead,
       fallbackExternalId: event.dedupeKey,
+      sourceMap,
     });
     created.push(row.id);
   }

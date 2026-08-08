@@ -614,7 +614,7 @@ action searchLeads {
 }
 action updateLead {
   fn: import { updateLead } from "@src/app/leads/operations",
-  entities: [User, LeadSearch, Lead, ProspectStatus]
+  entities: [User, LeadSearch, Lead, ProspectStatus, LeadSourceConfig]
 }
 action reorderLeads {
   fn: import { reorderLeads } from "@src/app/leads/operations",
@@ -630,7 +630,7 @@ action updateLeadSearch {
 }
 action exportLeads {
   fn: import { exportLeads } from "@src/app/leads/operations",
-  entities: [User, LeadSearch, Lead]
+  entities: [User, LeadSearch, Lead, LeadSourceConfig]
 }
 query getLeadStatusConfigs {
   fn: import { getLeadStatusConfigs } from "@src/app/leads/operations",
@@ -662,6 +662,33 @@ action deleteLeadStatusConfig {
 action reorderLeadStatusConfigs {
   fn: import { reorderLeadStatusConfigs } from "@src/app/leads/operations",
   entities: [User, LeadStatusConfig]
+}
+
+// Provenances : le registre de l'entreprise. Pas de portée par tableau — une
+// provenance dit d'où vient le prospect, pas où on le regarde.
+query getLeadSourceConfigs {
+  fn: import { getLeadSourceConfigs } from "@src/app/leads/operations",
+  entities: [User, LeadSourceConfig, Lead]
+}
+query getLeadSourceUsage {
+  fn: import { getLeadSourceUsage } from "@src/app/leads/operations",
+  entities: [User, Lead]
+}
+action createLeadSourceConfig {
+  fn: import { createLeadSourceConfig } from "@src/app/leads/operations",
+  entities: [User, LeadSourceConfig, Lead]
+}
+action updateLeadSourceConfig {
+  fn: import { updateLeadSourceConfig } from "@src/app/leads/operations",
+  entities: [User, LeadSourceConfig]
+}
+action deleteLeadSourceConfig {
+  fn: import { deleteLeadSourceConfig } from "@src/app/leads/operations",
+  entities: [User, LeadSourceConfig, Lead]
+}
+action reorderLeadSourceConfigs {
+  fn: import { reorderLeadSourceConfigs } from "@src/app/leads/operations",
+  entities: [User, LeadSourceConfig]
 }
 query getLeadNotes {
   fn: import { getLeadNotes } from "@src/app/leads/operations",
@@ -806,7 +833,7 @@ action fetchMoreLeads {
 }
 action createLead {
   fn: import { createLead } from "@src/app/leads/operations",
-  entities: [User, LeadSearch, Lead]
+  entities: [User, LeadSearch, Lead, LeadSourceConfig]
 }
 action deleteLead {
   fn: import { deleteLead } from "@src/app/leads/operations",
@@ -861,7 +888,7 @@ action simulateLeadIntakeCall {
 }
 action replayIntakeEvent {
   fn: import { replayIntakeEvent } from "@src/app/leads/intakeOperations",
-  entities: [User, LeadSearch, Lead, LeadNote, LeadStatusConfig, LeadInboundWebhook, LeadInboundEvent]
+  entities: [User, LeadSearch, Lead, LeadNote, LeadStatusConfig, LeadSourceConfig, LeadInboundWebhook, LeadInboundEvent]
 }
 query getLeadShareToken {
   fn: import { getLeadShareToken } from "@src/app/leads/operations",
@@ -877,7 +904,7 @@ action revokeLeadShareToken {
 }
 query getLeadSearchByToken {
   fn: import { getLeadSearchByToken } from "@src/app/leads/operations",
-  entities: [LeadSearch, Lead, LeadSearchShareToken, LeadStatusConfig, LeadNote]
+  entities: [LeadSearch, Lead, LeadSearchShareToken, LeadStatusConfig, LeadSourceConfig, LeadNote]
 }
 action updateLeadByToken {
   fn: import { updateLeadByToken } from "@src/app/leads/operations",
@@ -1043,7 +1070,7 @@ apiNamespace leadIntakeWebhooks {
 api leadIntakeReceive {
   fn: import { leadIntakeReceive } from "@src/server/leadIntake/webhook",
   httpRoute: (POST, "/webhooks/prospects/:publicId"),
-  entities: [Company, LeadSearch, Lead, LeadNote, LeadStatusConfig, LeadInboundWebhook, LeadInboundEvent],
+  entities: [Company, LeadSearch, Lead, LeadNote, LeadStatusConfig, LeadSourceConfig, LeadInboundWebhook, LeadInboundEvent],
   auth: false
 }
 

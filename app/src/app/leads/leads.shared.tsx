@@ -38,10 +38,19 @@ export { formatMontrealTime };
 // valider la provenance annoncée par un appel entrant ; réexporté ici pour que
 // les appelants existants n'aient pas à changer d'import.
 
-import { leadSourceLabel } from '../../shared/leadSources';
+import { leadSourceColor, leadSourceLabel, type LeadSourceOption } from '../../shared/leadSources';
 
-export { LEAD_SOURCES, leadSourceLabel, normalizeLeadSource } from '../../shared/leadSources';
-export type { LeadSourceKey } from '../../shared/leadSources';
+export {
+  DEFAULT_LEAD_SOURCES,
+  LEAD_SOURCES,
+  FALLBACK_SOURCE_KEY,
+  leadSourceColor,
+  leadSourceLabel,
+  humanizeSourceKey,
+  normalizeLeadSource,
+  slugifyLeadSource,
+} from '../../shared/leadSources';
+export type { LeadSourceKey, LeadSourceOption } from '../../shared/leadSources';
 
 // ─── Note thread (timeline + composer) ───────────────────────────────────────
 // Used in NoteModal for both the authenticated page and the public portal.
@@ -308,6 +317,7 @@ export function LeadCardInfo({
   lead,
   actions,
   selection,
+  sources,
 }: {
   lead: {
     name: string;
@@ -323,6 +333,13 @@ export function LeadCardInfo({
   actions?: ReactNode;
   /** Optional selection checkbox rendered next to the name. */
   selection?: ReactNode;
+  /**
+   * Le registre des provenances, passé en prop et jamais lu par `useQuery` ici :
+   * ce composant est rendu dans le `cardTemplate` de Syncfusion, hors de l'arbre
+   * React normal, où les hooks de Wasp n'ont pas de contexte. Absent, on retombe
+   * sur les étiquettes d'origine puis sur la clé dé-sluggifiée.
+   */
+  sources?: readonly LeadSourceOption[] | null;
 }) {
   const movedAt = lead.statusUpdatedAt ? new Date(lead.statusUpdatedAt) : null;
   const movedLabel = movedAt
@@ -348,10 +365,14 @@ export function LeadCardInfo({
           </div>
         )}
         <span
-          className='text-[9px] leading-none px-1 py-[1px] rounded bg-canvas border border-line text-muted whitespace-nowrap'
-          title={`Provenance : ${leadSourceLabel(lead.source)}`}
+          className='flex items-center gap-1 text-[9px] leading-none px-1 py-[1px] rounded bg-canvas border border-line text-muted whitespace-nowrap'
+          title={`Provenance : ${leadSourceLabel(lead.source, sources)}`}
         >
-          {leadSourceLabel(lead.source)}
+          <span
+            className='w-1.5 h-1.5 rounded-full shrink-0'
+            style={{ backgroundColor: leadSourceColor(lead.source, sources) }}
+          />
+          {leadSourceLabel(lead.source, sources)}
         </span>
       </div>
       <div className='space-y-0.5'>
@@ -634,11 +655,14 @@ export function LeadKanbanBoard({
   selectedIds,
   onToggleSelect,
   onSelectMany,
+  sources,
   cssClass = 'gestia-kanban',
 }: {
   /** Already-filtered leads to display. */
   leads: any[];
   statusConfigs: any[];
+  /** Le registre des provenances, pour l'étiquette et la pastille des cartes. */
+  sources?: readonly LeadSourceOption[] | null;
   /** API call only — no toast, no refetch. Throws on error. */
   updateStatus: (leadId: string, newStatus: string) => Promise<void>;
   /**
@@ -689,6 +713,8 @@ export function LeadKanbanBoard({
   onToggleSelectRef.current = onToggleSelect;
   const onSelectManyRef = useRef(onSelectMany);
   onSelectManyRef.current = onSelectMany;
+  const sourcesRef = useRef(sources);
+  sourcesRef.current = sources;
   const boardRef = useRef<HTMLDivElement>(null);
   const rootRef = useRef<HTMLDivElement>(null);
 
@@ -875,6 +901,10 @@ export function LeadKanbanBoard({
     .catch(() => {});
   }
 
+  // `sources` est une vraie dépendance et non une lecture par ref : le registre
+  // arrive d'une requête, donc après le premier rendu des cartes. Passer par une
+  // ref laisserait les pastilles sur leur étiquette de repli jusqu'au prochain
+  // rafraîchissement du tableau.
   const cardTemplate = useCallback(
     (lead: any): React.ReactElement => (
       <CardClickShell onClick={onCardClickRef.current ? () => onCardClickRef.current!(lead) : undefined}>
@@ -882,10 +912,11 @@ export function LeadKanbanBoard({
           lead={lead}
           actions={cardActionsRef.current(lead)}
           selection={renderSelection(lead)}
+          sources={sourcesRef.current}
         />
       </CardClickShell>
     ),
-    [renderSelection],
+    [renderSelection, sources],
   );
 
   const columnHeaderTemplate = useCallback(
@@ -964,6 +995,7 @@ export function LeadKanbanBoard({
                             lead={lead}
                             actions={cardActions(lead)}
                             selection={renderSelection(lead)}
+                            sources={sources}
                           />
                         </CardClickShell>
                       </div>

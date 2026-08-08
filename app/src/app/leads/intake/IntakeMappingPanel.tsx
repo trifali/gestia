@@ -39,9 +39,10 @@ import {
   LuTrash2,
   LuX,
 } from 'react-icons/lu';
-import { saveLeadIntakeMapping } from 'wasp/client/operations';
+// @ts-ignore -- généré par Wasp au prochain redémarrage
+import { saveLeadIntakeMapping, getLeadSourceConfigs, useQuery } from 'wasp/client/operations';
 import { LeadCardInfo } from '../leads.shared';
-import { LEAD_SOURCES } from '../../../shared/leadSources';
+import { leadSourceLabel, type LeadSourceOption } from '../../../shared/leadSources';
 import {
   applyMapping,
   EMPTY_MAPPING,
@@ -70,20 +71,23 @@ const FIELD_ORDER: MappedFieldKey[] = [
   'website',
   'address',
   'category',
+  'source',
 ];
 
 /**
  * Une destination possible pour une valeur reçue.
  *
- * `source` n'en fait pas partie : la provenance se choisit dans une liste de
- * valeurs connues, pas en la branchant sur un champ de la charge utile.
+ * `source` en fait partie désormais : une provenance n'est plus une liste fermée,
+ * et un appel qui transporte sa campagne dans `campaign.name` doit pouvoir y
+ * brancher la provenance plutôt que de coller la même étiquette à tout le tableau.
+ * Choisir « Valeur fixe » retrouve exactement l'ancien comportement.
  * `note` en fait partie depuis que les notes se composent ligne par ligne : c'est
  * une destination comme une autre, et l'exclure obligeait à choisir ses lignes
  * dans une liste séparée de celle où on lit les valeurs.
  */
-type SlotKey = Exclude<MappedFieldKey, 'source'> | 'dedupe' | 'note';
+type SlotKey = MappedFieldKey | 'dedupe' | 'note';
 
-const SLOTS: SlotKey[] = ['name', 'email', 'phone', 'website', 'address', 'category', 'note', 'dedupe'];
+const SLOTS: SlotKey[] = ['name', 'email', 'phone', 'website', 'address', 'category', 'source', 'note', 'dedupe'];
 
 const SLOT_LABELS: Record<SlotKey, string> = {
   name: MAPPED_FIELD_LABELS.name,
@@ -92,6 +96,7 @@ const SLOT_LABELS: Record<SlotKey, string> = {
   website: MAPPED_FIELD_LABELS.website,
   address: MAPPED_FIELD_LABELS.address,
   category: MAPPED_FIELD_LABELS.category,
+  source: MAPPED_FIELD_LABELS.source,
   note: 'Note',
   dedupe: 'Anti-doublon',
 };
@@ -165,6 +170,11 @@ export function IntakeMappingPanel({
   /** Câblage mis en évidence de part et d'autre, au survol. */
   const [hoverPath, setHoverPath] = useState<string | null>(null);
   const [hoverSlot, setHoverSlot] = useState<SlotKey | null>(null);
+
+  // Le registre des provenances : il alimente la liste de « Valeur fixe » et
+  // l'étiquette de la pastille dans l'aperçu.
+  const { data: sourceConfigs } = useQuery(getLeadSourceConfigs);
+  const sources: LeadSourceOption[] = (sourceConfigs as LeadSourceOption[] | undefined) ?? [];
 
   // Le même calcul que celui du serveur, sur le même échantillon : l'aperçu ne
   // peut pas diverger de ce qui sera réellement créé.
@@ -343,6 +353,7 @@ export function IntakeMappingPanel({
                     category: lead.category,
                     source: lead.source,
                   } as any}
+                  sources={sources}
                 />
                 {lead.notes && (
                   <div className='border-t border-line px-3 pb-3 pt-2'>
@@ -378,6 +389,7 @@ export function IntakeMappingPanel({
                     rule={mapping.fields[key] ?? EMPTY_MAPPING.fields[key]}
                     paths={paths}
                     item={item}
+                    sources={sources}
                     disabled={!isAdmin}
                     open={sameRow(openRow, { kind: 'field', key })}
                     lit={isSlotLit(key as SlotKey, hoverPath, hoverSlot, wiring)}
@@ -422,22 +434,9 @@ export function IntakeMappingPanel({
           />
 
           {/* ── Les réglages qui ne concernent pas un champ ── */}
-          <div className='grid gap-4 sm:grid-cols-3'>
-            <div>
-              <label className='label'>{MAPPED_FIELD_LABELS.source}</label>
-              <select
-                className='input'
-                value={mapping.fields.source?.kind === 'const' ? mapping.fields.source.value : 'other'}
-                disabled={!isAdmin}
-                onChange={e => setField('source', { kind: 'const', value: e.target.value })}
-              >
-                {LEAD_SOURCES.map(s => (
-                  <option key={s.key} value={s.key}>{s.label}</option>
-                ))}
-              </select>
-              <p className='mt-1 text-xs text-muted'>Identique pour tous les prospects de ce tableau.</p>
-            </div>
-
+          {/* La provenance n'est plus ici : elle est devenue un champ câblable comme
+              les autres, avec son nettoyage, et vit dans la liste ci-dessus. */}
+          <div className='grid gap-4 sm:grid-cols-2'>
             <div
               onMouseEnter={() => setHoverSlot('dedupe')}
               onMouseLeave={() => setHoverSlot(null)}
@@ -583,6 +582,7 @@ function FieldRow({
   rule,
   paths,
   item,
+  sources,
   disabled,
   open,
   lit,
@@ -595,6 +595,8 @@ function FieldRow({
   paths: DetectedPath[];
   /** Le prospect de l'échantillon, pour calculer les valeurs. */
   item: unknown;
+  /** Le registre des provenances — seul `source` s'en sert. */
+  sources: LeadSourceOption[];
   disabled: boolean;
   open: boolean;
   lit: boolean;
@@ -712,19 +714,61 @@ function FieldRow({
               )}
 
               {rule.kind === 'const' && (
-                <input
-                  className='input mt-2'
-                  placeholder='Valeur identique pour tous les prospects'
-                  value={rule.value}
-                  disabled={disabled}
-                  onChange={e => onChange({ ...rule, value: e.target.value })}
-                />
+                fieldKey === 'source' ? (
+                  // La provenance fixe se choisit dans le registre plutôt qu'en
+                  // texte libre : c'est le cas courant, et une clé saisie à la main
+                  // créerait une provenance de plus à chaque faute de frappe.
+                  <select
+                    className='input mt-2'
+                    value={rule.value}
+                    disabled={disabled}
+                    onChange={e => onChange({ ...rule, value: e.target.value })}
+                  >
+                    {/* Une correspondance enregistrée avant que la provenance ne
+                        disparaisse du registre garde sa valeur affichée : la
+                        remplacer en silence changerait le comportement sans le dire. */}
+                    {!sources.some(s => s.key === rule.value) && rule.value && (
+                      <option value={rule.value}>{leadSourceLabel(rule.value, sources)}</option>
+                    )}
+                    {sources.map(s => (
+                      <option key={s.key} value={s.key}>{s.label}</option>
+                    ))}
+                  </select>
+                ) : (
+                  <input
+                    className='input mt-2'
+                    placeholder='Valeur identique pour tous les prospects'
+                    value={rule.value}
+                    disabled={disabled}
+                    onChange={e => onChange({ ...rule, value: e.target.value })}
+                  />
+                )
               )}
 
               {fieldKey === 'name' && rule.kind === 'none' && (
                 <p className='mt-1.5 text-xs text-muted'>
                   Sans association, Gestia prendra l'entreprise, puis le courriel, puis le
                   téléphone.
+                </p>
+              )}
+
+              {fieldKey === 'source' && rule.kind === 'const' && (
+                <p className='mt-1.5 text-xs text-muted'>
+                  Identique pour tous les prospects de ce tableau. Choisissez un champ reçu
+                  ci-dessus pour que chaque prospect garde la sienne.
+                </p>
+              )}
+
+              {fieldKey === 'source' && (rule.kind === 'path' || rule.kind === 'template') && (
+                <p className='mt-1.5 text-xs text-muted'>
+                  Une provenance encore inconnue sera créée automatiquement à la première
+                  réception, puis modifiable dans « Provenances ».
+                </p>
+              )}
+
+              {fieldKey === 'source' && rule.kind === 'none' && (
+                <p className='mt-1.5 text-xs text-muted'>
+                  Sans association, les prospects arriveront avec la provenance « Autre ».
                 </p>
               )}
             </div>

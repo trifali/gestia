@@ -1,5 +1,16 @@
 import { HttpError } from 'wasp/server';
 import { UNKNOWN_STATUS_KEY } from '../../shared/leadStatus';
+import {
+  DEFAULT_LEAD_SOURCES,
+  FALLBACK_SOURCE_KEY,
+  MAX_SOURCES_PER_COMPANY,
+  MAX_SOURCE_LABEL_CHARS,
+  cleanSourceLabel,
+  humanizeSourceKey,
+  leadSourceLabel,
+  normalizeLeadSource,
+  slugifyLeadSource,
+} from '../../shared/leadSources';
 import { randomBytes } from 'crypto';
 import { sendEmailWithAttachment, companySmtp } from '../../server/mail';
 import { sendSms, toE164, resolveSmsCredentials, isDirectIdentifier } from '../../server/sms';
@@ -469,6 +480,11 @@ export const updateLead: UpdateLead<
   });
   if (!lead || (lead as any).search.companyId !== companyId) throw new HttpError(404);
 
+  // La provenance vient d'un `<select>` alimenté par le registre : une clé hors
+  // registre n'est pas une saisie à rattraper, c'est un appel forgé ou un bogue.
+  const safeSource =
+    source === undefined ? undefined : await requireKnownSource(context.entities, companyId, source);
+
   const updated = await context.entities.Lead.update({
     where: { id },
     data: {
@@ -480,7 +496,7 @@ export const updateLead: UpdateLead<
       ...(website !== undefined && { website }),
       ...(address !== undefined && { address }),
       ...(category !== undefined && { category }),
-      ...(source !== undefined && { source }),
+      ...(safeSource !== undefined && { source: safeSource }),
     },
   });
 
@@ -588,6 +604,10 @@ export const exportLeads: ExportLeads<{ searchId: string }, { csv: string }> = a
   });
   if (!search || search.companyId !== companyId) throw new HttpError(404);
 
+  // Les étiquettes plutôt que les clés : un tableur ouvert par un humain doit
+  // afficher « Salon Habitation 2026 », pas `salon_habitation_2026`.
+  const sourceConfigs = await effectiveSourceConfigs(context.entities, companyId);
+
   const headers = ['Nom', 'Catégorie', 'Adresse', 'Téléphone', 'Courriel', 'Site web', 'Note', 'Avis', 'Statut', 'Provenance', 'Notes', 'Google Maps'];
   const rows = (search.leads as Lead[]).map(l => [
     l.name,
@@ -599,7 +619,7 @@ export const exportLeads: ExportLeads<{ searchId: string }, { csv: string }> = a
     l.rating?.toString() ?? '',
     l.reviewCount?.toString() ?? '',
     l.status,
-    (l as any).source ?? '',
+    (l as any).source ? leadSourceLabel((l as any).source, sourceConfigs) : '',
     l.notes ?? '',
     l.mapsUrl ?? '',
   ]);
@@ -891,6 +911,245 @@ export const reorderLeadStatusConfigs = async (
       })
     )
   );
+};
+
+// ─── Provenances ──────────────────────────────────────────────────────────────
+
+/**
+ * Le registre des provenances de l'entreprise, semé au premier accès.
+ *
+ * Même patron que `effectiveStatusConfigs`, sans la notion de portée : une
+ * provenance décrit d'où vient le prospect, ce qui ne dépend pas du tableau
+ * depuis lequel on le regarde.
+ *
+ * L'amorçage fait deux choses, et la seconde compte autant que la première.
+ * Après les huit provenances d'origine, on balaie les valeurs de `Lead.source`
+ * déjà en base pour enregistrer celles qui n'y figurent pas : `createLead` et
+ * `updateLead` n'ont jamais validé ce champ, donc des clés hors liste peuvent
+ * exister depuis longtemps. Sans ce rattrapage elles deviendraient des onglets
+ * sans étiquette et des cartes impossibles à reclasser.
+ *
+ * Ce balayage ne tourne qu'une fois, quand l'entreprise n'a encore aucune ligne.
+ */
+export async function effectiveSourceConfigs(entities: any, companyId: string): Promise<any[]> {
+  const existing = await entities.LeadSourceConfig.findMany({
+    where: { companyId },
+    orderBy: { order: 'asc' },
+  });
+  if (existing.length > 0) return existing;
+
+  await entities.LeadSourceConfig.createMany({
+    data: DEFAULT_LEAD_SOURCES.map(s => ({
+      companyId,
+      key: s.key,
+      label: s.label,
+      color: s.color,
+      order: s.order,
+      isSystem: true,
+    })),
+    skipDuplicates: true,
+  });
+
+  const seen = new Set<string>(DEFAULT_LEAD_SOURCES.map(s => s.key));
+  const inUse = await entities.Lead.findMany({
+    where: { search: { companyId } },
+    select: { source: true },
+    distinct: ['source'],
+  });
+  const strays = inUse
+    .map((l: any) => slugifyLeadSource(l.source))
+    .filter((key: string) => key && !seen.has(key));
+
+  if (strays.length > 0) {
+    await entities.LeadSourceConfig.createMany({
+      data: [...new Set<string>(strays)].map((key, i) => ({
+        companyId,
+        key,
+        label: humanizeSourceKey(key),
+        color: '#6366f1',
+        order: DEFAULT_LEAD_SOURCES.length + i,
+        learned: true,
+      })),
+      skipDuplicates: true,
+    });
+  }
+
+  return entities.LeadSourceConfig.findMany({ where: { companyId }, orderBy: { order: 'asc' } });
+}
+
+/** Les clés acceptables pour un `source` choisi dans une liste. */
+async function allowedSourceKeys(entities: any, companyId: string): Promise<string[]> {
+  const configs = await effectiveSourceConfigs(entities, companyId);
+  return configs.map((c: any) => c.key);
+}
+
+/**
+ * Valide un `source` reçu d'un `<select>` et lève une 400 s'il est inconnu.
+ *
+ * Les deux appelants (`createLead`, `updateLead`) alimentent leur liste depuis le
+ * registre : une clé hors registre y signale un bogue client ou un appel forgé,
+ * pas une saisie maladroite à rattraper en silence.
+ */
+async function requireKnownSource(entities: any, companyId: string, source: string): Promise<string> {
+  const key = normalizeLeadSource(source, await allowedSourceKeys(entities, companyId));
+  if (!key) throw new HttpError(400, `Provenance inconnue : « ${source} »`);
+  return key;
+}
+
+function ensureSourceAdmin(user: any): void {
+  if (!(user?.role === 'admin' || user?.isAdmin === true)) {
+    throw new HttpError(403, 'Réservé aux administrateurs');
+  }
+}
+
+export const getLeadSourceConfigs = async (_args: any, context: any): Promise<any[]> => {
+  const companyId = ensureCompany(context.user);
+  return effectiveSourceConfigs(context.entities, companyId);
+};
+
+export const createLeadSourceConfig = async (
+  { label, color }: { label: string; color?: string },
+  context: any,
+): Promise<any> => {
+  const companyId = ensureCompany(context.user);
+  ensureSourceAdmin(context.user);
+
+  const trimmed = cleanSourceLabel(label);
+  if (!trimmed) throw new HttpError(400, 'Nom requis');
+  if ((label ?? '').trim().length > MAX_SOURCE_LABEL_CHARS) {
+    throw new HttpError(400, `Nom trop long (maximum ${MAX_SOURCE_LABEL_CHARS} caractères).`);
+  }
+
+  // La clé se déduit de l'étiquette plutôt que d'être saisie : contrairement aux
+  // statuts, une provenance n'est jamais désignée par sa clé dans l'interface, et
+  // demander les deux ferait saisir deux fois la même chose.
+  const key = slugifyLeadSource(trimmed);
+  if (key === FALLBACK_SOURCE_KEY && trimmed.toLowerCase() !== 'autre') {
+    throw new HttpError(400, 'Ce nom ne produit aucune clé utilisable.');
+  }
+
+  const configs = await effectiveSourceConfigs(context.entities, companyId);
+  if (configs.some((c: any) => c.key === key)) {
+    throw new HttpError(400, `La provenance « ${trimmed} » existe déjà.`);
+  }
+  if (configs.length >= MAX_SOURCES_PER_COMPANY) {
+    throw new HttpError(400, `Maximum ${MAX_SOURCES_PER_COMPANY} provenances par entreprise.`);
+  }
+
+  return context.entities.LeadSourceConfig.create({
+    data: {
+      companyId,
+      key,
+      label: trimmed,
+      color: color ?? '#6366f1',
+      order: Math.max(-1, ...configs.map((c: any) => c.order)) + 1,
+    },
+  });
+};
+
+/**
+ * Renomme ou recolore une provenance.
+ *
+ * La clé ne bouge jamais — c'est elle qui est écrite sur chaque prospect, et la
+ * renommer imposerait de réécrire toutes les cartes pour un changement purement
+ * cosmétique. Une provenance système garde donc sa clé mais s'habille librement :
+ * « Ajout manuel » peut devenir « Saisie bureau ».
+ */
+export const updateLeadSourceConfig = async (
+  { id, label, color, order }: { id: string; label?: string; color?: string; order?: number },
+  context: any,
+): Promise<any> => {
+  const companyId = ensureCompany(context.user);
+  ensureSourceAdmin(context.user);
+
+  const config = await context.entities.LeadSourceConfig.findUnique({ where: { id } });
+  if (!config || config.companyId !== companyId) throw new HttpError(404);
+
+  const trimmed = label === undefined ? undefined : cleanSourceLabel(label);
+  if (label !== undefined && !trimmed) throw new HttpError(400, 'Nom requis');
+  if ((label ?? '').trim().length > MAX_SOURCE_LABEL_CHARS) {
+    throw new HttpError(400, `Nom trop long (maximum ${MAX_SOURCE_LABEL_CHARS} caractères).`);
+  }
+
+  return context.entities.LeadSourceConfig.update({
+    where: { id },
+    data: {
+      ...(trimmed !== undefined && { label: trimmed }),
+      ...(color !== undefined && { color }),
+      ...(order !== undefined && { order }),
+      // Un humain vient de s'en occuper : la ligne n'est plus « détectée
+      // automatiquement », et la pastille qui invitait à faire le ménage disparaît.
+      learned: false,
+    },
+  });
+};
+
+/**
+ * Supprime une provenance en réaffectant ses prospects.
+ *
+ * `mergeInto` compte plus ici que pour les statuts : les provenances apprises
+ * arrivent en variantes proches d'une même campagne (`salon_2026`,
+ * `salon_habitation_2026`), et tout renvoyer vers « Autre » perdrait justement ce
+ * qu'on cherchait à distinguer. Sans cible explicite, repli sur « Autre ».
+ *
+ * La réaffectation précède la suppression : dans l'autre ordre, un échec en cours
+ * de route laisserait des cartes pointant sur une clé disparue.
+ */
+export const deleteLeadSourceConfig = async (
+  { id, mergeInto }: { id: string; mergeInto?: string },
+  context: any,
+): Promise<{ id: string; moved: number }> => {
+  const companyId = ensureCompany(context.user);
+  ensureSourceAdmin(context.user);
+
+  const config = await context.entities.LeadSourceConfig.findUnique({ where: { id } });
+  if (!config || config.companyId !== companyId) throw new HttpError(404);
+  if (config.key === FALLBACK_SOURCE_KEY) {
+    throw new HttpError(400, '« Autre » ne peut pas être supprimée : elle sert de repli.');
+  }
+  if (config.isSystem) {
+    throw new HttpError(400, 'Une provenance d’origine ne peut pas être supprimée. Renommez-la.');
+  }
+
+  const target = mergeInto ?? FALLBACK_SOURCE_KEY;
+  if (target === config.key) throw new HttpError(400, 'Cible de fusion invalide.');
+  const known = await allowedSourceKeys(context.entities, companyId);
+  if (!known.includes(target)) throw new HttpError(400, 'Cible de fusion inconnue.');
+
+  const { count } = await context.entities.Lead.updateMany({
+    where: { source: config.key, search: { companyId } },
+    data: { source: target },
+  });
+
+  await context.entities.LeadSourceConfig.delete({ where: { id } });
+  return { id, moved: count };
+};
+
+export const reorderLeadSourceConfigs = async (
+  { items }: { items: { id: string; order: number }[] },
+  context: any,
+): Promise<void> => {
+  const companyId = ensureCompany(context.user);
+  ensureSourceAdmin(context.user);
+  await Promise.all(
+    items.map(({ id, order }) =>
+      context.entities.LeadSourceConfig.updateMany({ where: { id, companyId }, data: { order } }),
+    ),
+  );
+};
+
+/** Le nombre de prospects portant chaque provenance — pour l'écran « Provenances ». */
+export const getLeadSourceUsage = async (
+  _args: any,
+  context: any,
+): Promise<Record<string, number>> => {
+  const companyId = ensureCompany(context.user);
+  const rows = await context.entities.Lead.groupBy({
+    by: ['source'],
+    where: { search: { companyId } },
+    _count: { _all: true },
+  });
+  return Object.fromEntries(rows.map((r: any) => [r.source, r._count._all]));
 };
 
 // ─── Lead notes (timeline) ────────────────────────────────────────────────────
@@ -1571,7 +1830,9 @@ export const createLead = async (
       website: clean(args.website),
       address: clean(args.address),
       category: clean(args.category),
-      source: args.source?.trim() || 'manual',
+      source: args.source?.trim()
+        ? await requireKnownSource(context.entities, companyId, args.source)
+        : 'manual',
     },
   });
   await syncTotalFound(context.entities, args.searchId);
@@ -1738,6 +1999,12 @@ export const getLeadSearchByToken = async (
     hasNotes: noteCountMap.has(l.placeId ?? l.id),
   }));
 
+  // Le portail n'est pas authentifié, donc il ne peut pas interroger le registre
+  // des provenances lui-même. Sans ces lignes, la pastille d'une carte afficherait
+  // `salon_habitation_2026` dès qu'un appel entrant invente une provenance — soit
+  // exactement les tableaux qu'on partage le plus.
+  const sourceConfigs = await effectiveSourceConfigs(context.entities, search.companyId);
+
   return {
     search: {
       id: search.id,
@@ -1747,6 +2014,7 @@ export const getLeadSearchByToken = async (
     },
     leads: leadsWithFlags,
     statusConfigs,
+    sourceConfigs,
   };
 };
 
