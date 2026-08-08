@@ -194,9 +194,8 @@ export const leadIntakeReceive = async (req: Request, res: Response, context: an
   // Écrit avant tout traitement : une relivraison casse ici sur la contrainte
   // d'unicité et ne peut donc pas produire un second prospect. C'est la même
   // discipline que `providerId @unique` côté Telnyx.
-  let event: { id: string };
-  try {
-    event = await entities.LeadInboundEvent.create({
+  const createEvent = () =>
+    entities.LeadInboundEvent.create({
       data: {
         webhookId: webhook.id,
         companyId: webhook.companyId,
@@ -206,16 +205,33 @@ export const leadIntakeReceive = async (req: Request, res: Response, context: an
         sourceIp: clientIp(req),
       },
       select: { id: true },
-    });
+    }) as Promise<{ id: string }>;
+
+  let event: { id: string };
+  try {
+    event = await createEvent();
   } catch (err: any) {
-    if (err?.code === 'P2002') {
+    if (err?.code !== 'P2002') {
+      console.error('[intake] échec d\'écriture du journal', err);
+      // 500 : le seul cas où une nouvelle tentative de l'émetteur est utile.
+      res.status(500).json({ ok: false, error: 'Erreur interne.' });
+      return;
+    }
+
+    // La clé a déjà servi. Reste à savoir si ce qu'elle a produit existe encore.
+    if (!(await releaseDedupeKeyIfLeadsGone(entities, webhook.id, dedupeKey))) {
       res.status(200).json({ ok: true, duplicate: true });
       return;
     }
-    console.error('[intake] échec d\'écriture du journal', err);
-    // 500 : le seul cas où une nouvelle tentative de l'émetteur est utile.
-    res.status(500).json({ ok: false, error: 'Erreur interne.' });
-    return;
+
+    try {
+      event = await createEvent();
+    } catch {
+      // Deux envois simultanés portant la même clé : le premier l'a reprise,
+      // celui-ci est un vrai doublon.
+      res.status(200).json({ ok: true, duplicate: true });
+      return;
+    }
   }
 
   // Pas encore de correspondance : c'est l'état « test ». On garde l'appel comme
@@ -284,6 +300,63 @@ export const leadIntakeReceive = async (req: Request, res: Response, context: an
     res.status(500).json({ ok: false, error: 'Erreur interne lors de la création du prospect.' });
   }
 };
+
+/**
+ * Rend une clé anti-doublon réutilisable quand ce qu'elle avait créé n'existe
+ * plus.
+ *
+ * Le cas concret, et il n'est pas rare : on supprime un prospect dans Gestia,
+ * puis on vide la cellule témoin « Gestia » du tableur pour que le script le
+ * renvoie. Avant, l'appel butait sur la contrainte d'unicité, repartait en
+ * `200 { duplicate: true }` — et le script, voyant un 200, réinscrivait la date.
+ * La ligne était donc grillée définitivement : rien créé, plus jamais réessayé,
+ * aucune erreur nulle part.
+ *
+ * La correction tient à distinguer deux choses que la contrainte confondait :
+ *
+ *   · **Relivraison accidentelle** — Zapier qui retente parce qu'il n'a pas noté
+ *     notre 200. Le prospect existe toujours, on refuse. C'est l'idempotence,
+ *     et elle est intacte.
+ *   · **Renvoi délibéré** — le prospect a été supprimé, quelqu'un le redemande.
+ *     Rien à protéger : la clé est libérée et l'appel suit son cours normal.
+ *
+ * L'événement d'origine reste au journal pour l'historique ; il perd seulement
+ * sa réservation sur la clé. `updateMany` conditionné à `dedupeKey` fait office
+ * de verrou : de deux appels simultanés, un seul verra `count === 1`.
+ */
+async function releaseDedupeKeyIfLeadsGone(
+  entities: any,
+  webhookId: string,
+  dedupeKey: string | null,
+): Promise<boolean> {
+  // Sans clé, aucun conflit d'unicité n'était possible : le P2002 venait
+  // d'ailleurs, et libérer quoi que ce soit n'aurait pas de sens.
+  if (!dedupeKey) return false;
+
+  const previous = await entities.LeadInboundEvent.findFirst({
+    where: { webhookId, dedupeKey },
+    select: { id: true, leadIds: true },
+  });
+  if (!previous) return false;
+
+  // Un envoi qui n'a jamais rien créé — capturé avant la correspondance, rejeté,
+  // en erreur — n'a rien à protéger. Le rejouer est exactement ce qu'on veut.
+  if (previous.leadIds.length > 0) {
+    const alive = await entities.Lead.count({ where: { id: { in: previous.leadIds } } });
+    if (alive > 0) return false;
+  }
+
+  const { count } = await entities.LeadInboundEvent.updateMany({
+    where: { id: previous.id, dedupeKey },
+    data: {
+      dedupeKey: null,
+      errorMsg:
+        `Clé anti-doublon « ${dedupeKey} » libérée : le prospect créé par cet appel `
+        + `n'existait plus dans Gestia, le renvoi a donc été accepté.`,
+    },
+  });
+  return count === 1;
+}
 
 function textOrNull(value: unknown): string | null {
   if (value == null) return null;

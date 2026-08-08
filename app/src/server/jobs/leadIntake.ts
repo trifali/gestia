@@ -7,6 +7,7 @@
 
 import { config } from 'wasp/server';
 import { sendEmailWithAttachment, companySmtp } from '../mail';
+import { resolveSmsCredentials, sendSms, toE164 } from '../sms';
 
 /** Au-delà, un appel journalisé n'aide plus personne à diagnostiquer quoi que ce soit. */
 const RETENTION_DAYS = 90;
@@ -104,25 +105,82 @@ export const notifyInboundLeads = async (_args: unknown, context: any) => {
     const company = await context.entities.Company.findUnique({
       where: { id: webhook.companyId },
       select: {
-        id: true, name: true, email: true,
+        id: true, name: true, email: true, phone: true,
+        notifyInboundLeadByEmail: true, notifyInboundLeadBySms: true,
+        telnyxPhoneNumber: true, telnyxApiKey: true,
         smtpHost: true, smtpPort: true, smtpUsername: true, smtpPassword: true,
         smtpFromName: true, smtpFromEmail: true,
       },
     });
     if (!company) continue;
 
-    const ok = await deliverInboundAlert(company, webhook.search.title, unseen);
+    // Les deux canaux sont éteints : rien à envoyer, et surtout on ne pose pas
+    // `notifiedAt`. Réactiver l'alerte doit pouvoir rattraper ce qui est arrivé
+    // entre-temps, ce qu'un repère avancé dans le vide interdirait.
+    if (!company.notifyInboundLeadByEmail && !company.notifyInboundLeadBySms) continue;
+
+    let delivered = false;
+    if (company.notifyInboundLeadByEmail) {
+      delivered = await deliverInboundAlert(company, webhook.search.title, unseen);
+    }
+    if (company.notifyInboundLeadBySms) {
+      delivered = (await deliverInboundSms(company, webhook.search.title, unseen)) || delivered;
+    }
+
     // La date est posée même en cas d'échec d'envoi : sans cela, un SMTP mal
     // configuré ferait retenter le même lot toutes les cinq minutes, sans fin.
     await context.entities.LeadInboundWebhook.update({
       where: { id: webhook.id },
       data: { notifiedAt: new Date() },
     });
-    if (ok) sent += 1;
+    if (delivered) sent += 1;
   }
 
   return { sent };
 };
+
+/**
+ * L'alerte par SMS.
+ *
+ * Court et sans lien : un SMS est facturé au segment, et l'adresse de Gestia ne
+ * tient pas dans le budget utile. Le message dit combien et sur quel tableau ;
+ * l'application dit le reste.
+ *
+ * Les mêmes garde-fous que les alertes de réponse (`jobs/smsReplyAlerts`), pour
+ * la même raison : écrire à notre propre numéro Telnyx rentrerait dans le webhook
+ * entrant et créerait une conversation avec nous-mêmes.
+ */
+async function deliverInboundSms(company: any, boardTitle: string, leads: any[]): Promise<boolean> {
+  const credentials = resolveSmsCredentials(company);
+  const target = toE164(company.phone ?? '');
+
+  if (!credentials) {
+    console.warn('[intake] alerte SMS demandée mais identifiants Telnyx absents.');
+    return false;
+  }
+  if (!target) {
+    console.warn('[intake] alerte SMS demandée mais aucun téléphone d\'entreprise valide.');
+    return false;
+  }
+  if (target === credentials.from) {
+    console.warn('[intake] alerte SMS ignorée : le téléphone d\'entreprise est le numéro Telnyx.');
+    return false;
+  }
+
+  const count = leads.length;
+  const head = leads[0];
+  const text = count === 1
+    ? `Gestia — nouveau prospect sur « ${boardTitle} » : ${head.name}.`
+    : `Gestia — ${count} nouveaux prospects sur « ${boardTitle} ».`;
+
+  try {
+    await sendSms({ to: target, text, credentials });
+    return true;
+  } catch (err) {
+    console.error('[intake] alerte SMS échouée', err);
+    return false;
+  }
+}
 
 async function deliverInboundAlert(company: any, boardTitle: string, leads: any[]): Promise<boolean> {
   const to = (company.email ?? '').trim();

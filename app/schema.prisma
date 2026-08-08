@@ -90,6 +90,14 @@ model Company {
   notifySmsReplyByEmail Boolean @default(true)
   notifySmsReplyBySms   Boolean @default(false)
 
+  // Idem pour un prospect arrivé par webhook (voir jobs/leadIntake).
+  // Le courriel est à `true` par défaut : c'était le comportement inconditionnel
+  // avant que ces deux options existent, et une mise à jour ne doit pas éteindre
+  // en silence une alerte sur laquelle quelqu'un compte. Le SMS est à `false` —
+  // il est facturé, il s'active donc en connaissance de cause.
+  notifyInboundLeadByEmail Boolean @default(true)
+  notifyInboundLeadBySms   Boolean @default(false)
+
   // Boîte SMS universelle : la bulle flottante qui réunit tous les fils, y
   // compris ceux qui ne sont rattachés à aucun prospect. Opt-in — une entreprise
   // qui n'utilise Telnyx que pour la prospection n'en veut pas.

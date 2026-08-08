@@ -1690,7 +1690,12 @@ function TestSender({
 
 // ─── SMS (Telnyx) panel ───────────────────────────────────────────────────────
 
-type SmsToggleField = 'notifySmsReplyByEmail' | 'notifySmsReplyBySms' | 'smsInboxEnabled';
+type SmsToggleField =
+  | 'notifySmsReplyByEmail'
+  | 'notifySmsReplyBySms'
+  | 'notifyInboundLeadByEmail'
+  | 'notifyInboundLeadBySms'
+  | 'smsInboxEnabled';
 
 function SmsSettingsPanel({ settings, refetch }: { settings: any; refetch: () => void }) {
   const s = settings;
@@ -1908,8 +1913,48 @@ function SmsSettingsPanel({ settings, refetch }: { settings: any; refetch: () =>
         </dl>
       </PanelSection>
 
+      {/* Les prospects reçus par webhook n'ont rien à voir avec Telnyx pour la
+          partie courriel — mais le volet SMS dépend du numéro et de la clé réglés
+          à l'étape 1, et l'alerte se règle donc là où se règle son canal. */}
       <PanelSection
-        title='5. Messagerie intégrée'
+        title="5. Alertes à l'arrivée d'un prospect"
+        hint={<>Pour les tableaux alimentés par un webhook — formulaire Facebook, site web, tableur. Les coordonnées utilisées sont celles de l'entreprise, modifiables dans l'onglet <strong>Entreprise</strong>.</>}
+      >
+        <p className='text-xs text-muted mb-3'>
+          Un prospect reçu apparaît immédiatement sur son tableau. Les alertes
+          ci-dessous préviennent l'entreprise <em>en dehors</em> de l'application, et
+          seulement si personne n'a touché au prospect dans les dix minutes qui
+          suivent son arrivée.
+        </p>
+        <div className='grid sm:grid-cols-2 gap-2'>
+          <NotifyToggle
+            label='Par courriel'
+            target={s.companyEmail}
+            missingHint="Aucun courriel d'entreprise"
+            checked={s.notifyInboundLeadByEmail}
+            disabled={saving}
+            onChange={next => toggle('notifyInboundLeadByEmail', next)}
+          />
+          <NotifyToggle
+            label='Par SMS'
+            target={s.companyPhone}
+            missingHint="Aucun téléphone d'entreprise"
+            checked={s.notifyInboundLeadBySms}
+            disabled={saving || !s.canSend}
+            onChange={next => toggle('notifyInboundLeadBySms', next)}
+            extraHint={!s.canSend ? "Configurez l'envoi à l'étape 1." : undefined}
+          />
+        </div>
+        <p className='mt-3 rounded-lg border border-line bg-canvas-100 px-3 py-2.5 text-xs text-muted'>
+          Une seule alerte par tableau et par vague, jamais une par prospect : dix
+          lignes arrivées ensemble donnent un courriel, ou{' '}
+          <strong className='text-ink'>un seul SMS facturé</strong>. Un prospect déjà
+          déplacé de sa colonne d'arrivée est considéré comme vu et ne déclenche rien.
+        </p>
+      </PanelSection>
+
+      <PanelSection
+        title='6. Messagerie intégrée'
         hint={
           <>
             Ajoute une bulle de discussion en bas à droite de l'application. Vos membres y
