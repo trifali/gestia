@@ -258,6 +258,21 @@ export function StatusBadge({ status, map }: { status: string; map: Record<strin
   return <span className={item.className}>{item.label}</span>;
 }
 
+/**
+ * Largeurs disponibles. `md` est le défaut historique et reste la bonne réponse
+ * pour un formulaire : au-delà, une ligne de saisie devient trop longue à lire.
+ *
+ * `xl` existe pour les écrans qui mettent plusieurs colonnes en regard — le
+ * réglage d'une correspondance de webhook, par exemple, où l'on doit voir à la
+ * fois ce qui est reçu, ce qu'on en fait et ce qui en sort. Comprimer ça dans
+ * 672 px tronquait les listes déroulantes et empilait un mot par ligne.
+ */
+const MODAL_WIDTHS = {
+  md: 'sm:max-w-2xl',
+  lg: 'sm:max-w-4xl',
+  xl: 'sm:max-w-[84rem]',
+} as const;
+
 export function Modal({
   open,
   onClose,
@@ -265,6 +280,7 @@ export function Modal({
   children,
   footer,
   headerRight,
+  size = 'md',
 }: {
   open: boolean;
   onClose: () => void;
@@ -272,11 +288,12 @@ export function Modal({
   children: ReactNode;
   footer?: ReactNode;
   headerRight?: ReactNode;
+  size?: keyof typeof MODAL_WIDTHS;
 }) {
   if (!open) return null;
   return createPortal(
     <div className='modal-backdrop'>
-      <div className='modal-panel' onClick={(e) => e.stopPropagation()}>
+      <div className={`modal-panel ${MODAL_WIDTHS[size]}`} onClick={(e) => e.stopPropagation()}>
         <div className='shrink-0 px-6 py-4 border-b border-line flex items-center justify-between'>
           <h2 className='font-semibold text-lg'>{title}</h2>
           <div className='flex items-center gap-1'>

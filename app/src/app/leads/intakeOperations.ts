@@ -25,6 +25,12 @@ import {
   type JsonValue,
   type LeadIntakeMapping,
 } from '../../shared/leadIntake';
+import {
+  isSafeRegexSource,
+  isValidPattern,
+  MAX_PATTERN_CHARS,
+  MAX_TRANSFORMS,
+} from '../../shared/leadIntakeTransforms';
 
 function ensureCompany(user: any): string {
   if (!user) throw new HttpError(401);
@@ -271,12 +277,78 @@ export const getLatestIntakeSample = async (
 
 // ─── Écriture ─────────────────────────────────────────────────────────────────
 
+/**
+ * Un motif d'expression régulière, refusé s'il ne compile pas ou si son coût peut
+ * exploser.
+ *
+ * Le contrôle a lieu **à l'enregistrement**, pas à la réception : une regex
+ * fautive doit donner un message dans l'écran de correspondance, là où
+ * l'administrateur peut la corriger. La découvrir à la réception voudrait dire
+ * l'apprendre par un prospect abîmé, ou par un point d'entrée qui rame.
+ */
+const patternSchema = z
+  .string()
+  .min(1, 'Indiquez une expression régulière.')
+  .max(MAX_PATTERN_CHARS, `Expression régulière trop longue (${MAX_PATTERN_CHARS} caractères au plus).`)
+  .refine(source => isSafeRegexSource(source), {
+    message: 'Expression régulière trop coûteuse (quantificateur imbriqué).',
+  })
+  .refine(source => isValidPattern(source), { message: 'Expression régulière invalide.' });
+
+/** Drapeaux acceptés — `y` est exclu, il rend le motif dépendant de `lastIndex`. */
+const flagsSchema = z.string().max(5).regex(/^[gimsu]*$/, 'Drapeau non reconnu.').optional();
+
+const transformSchema = z.discriminatedUnion('op', [
+  z.object({ op: z.literal('trim') }),
+  z.object({ op: z.literal('case'), to: z.enum(['lower', 'upper', 'title']) }),
+  z.object({
+    op: z.literal('strip'),
+    prefix: z.string().max(60).optional(),
+    suffix: z.string().max(60).optional(),
+  }),
+  z.object({ op: z.literal('remove'), chars: z.string().max(60) }),
+  z.object({ op: z.literal('keep'), only: z.enum(['digits', 'letters', 'alnum']) }),
+  // `find` n'est un motif que si `regex` est vrai : un remplacement littéral peut
+  // parfaitement contenir `(` ou `*` sans être une expression régulière fautive.
+  z.object({
+    op: z.literal('replace'),
+    find: z
+      .string()
+      .min(1, 'Indiquez le texte à rechercher.')
+      .max(MAX_PATTERN_CHARS, `Recherche trop longue (${MAX_PATTERN_CHARS} caractères au plus).`),
+    replace: z.string().max(200).default(''),
+    regex: z.boolean().optional(),
+    flags: flagsSchema,
+  }).refine(t => !t.regex || isValidPattern(t.find, t.flags), {
+    message: 'Expression régulière invalide ou trop coûteuse.',
+    path: ['find'],
+  }),
+  z.object({
+    op: z.literal('extract'),
+    pattern: patternSchema,
+    flags: flagsSchema,
+    group: z.number().int().min(0).max(9).optional(),
+  }),
+  z.object({ op: z.literal('phone') }),
+  z.object({ op: z.literal('date'), to: z.enum(['day', 'daytime', 'iso']) }),
+  z.object({ op: z.literal('truncate'), max: z.number().int().min(1).max(2000) }),
+  z.object({ op: z.literal('fallback'), value: z.string().max(200) }),
+]);
+
+const transformsSchema = z.array(transformSchema).max(MAX_TRANSFORMS).optional();
+
 const fieldRuleSchema = z.discriminatedUnion('kind', [
-  z.object({ kind: z.literal('path'), path: z.string().min(1).max(400) }),
-  z.object({ kind: z.literal('template'), template: z.string().min(1).max(800) }),
-  z.object({ kind: z.literal('const'), value: z.string().max(200) }),
+  z.object({ kind: z.literal('path'), path: z.string().min(1).max(400), transforms: transformsSchema }),
+  z.object({ kind: z.literal('template'), template: z.string().min(1).max(800), transforms: transformsSchema }),
+  z.object({ kind: z.literal('const'), value: z.string().max(200), transforms: transformsSchema }),
   z.object({ kind: z.literal('none') }),
 ]);
+
+const noteEntrySchema = z.object({
+  path: z.string().min(1).max(400),
+  label: z.string().max(80).optional(),
+  transforms: transformsSchema,
+});
 
 const mappingSchema = z.object({
   version: z.literal(1),
@@ -293,7 +365,12 @@ const mappingSchema = z.object({
   }),
   notes: z.object({
     mode: z.enum(['unmapped', 'selected', 'none']),
+    // Ancienne forme, encore acceptée en écriture : une correspondance
+    // enregistrée avant `entries` est renvoyée telle quelle par
+    // `getLeadIntakeConfig`, et la refuser au premier réenregistrement ferait
+    // échouer une sauvegarde qui n'a rien changé.
     paths: z.array(z.string().max(400)).max(200).optional(),
+    entries: z.array(noteEntrySchema).max(200).optional(),
   }),
 });
 
@@ -304,7 +381,12 @@ export const saveLeadIntakeMapping = async (
   const { webhook } = await requireIntake(context, searchId, { admin: true });
   const parsed = mappingSchema.safeParse(mapping);
   if (!parsed.success) {
-    throw new HttpError(400, 'Correspondance invalide : ' + parsed.error.issues[0]?.message);
+    // L'emplacement autant que le motif : « Correspondance invalide : expression
+    // régulière invalide » laisserait chercher laquelle parmi sept champs et une
+    // liste de notes.
+    const issue = parsed.error.issues[0];
+    const where = issue?.path?.length ? ` (${issue.path.join(' › ')})` : '';
+    throw new HttpError(400, `Correspondance invalide${where} : ${issue?.message}`);
   }
   await context.entities.LeadInboundWebhook.update({
     where: { id: webhook.id },

@@ -93,7 +93,14 @@ export function NewBoardModal({
     : 'Nouveau tableau';
 
   return (
-    <Modal open={open} onClose={close} title={modalTitle}>
+    <Modal
+      open={open}
+      onClose={close}
+      title={modalTitle}
+      // Élargi à l'étape « réception » seulement : le choix du nom et de la
+      // source est un formulaire court, que 1 344 px rendraient creux.
+      size={step === 'intake' ? 'xl' : 'md'}
+    >
       {step === 'choose' && (
         <div className='space-y-5'>
           <div>

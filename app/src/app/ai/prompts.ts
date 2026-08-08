@@ -448,3 +448,117 @@ export function buildProspectSmsTemplatePrompts(
 
   return { system, user };
 }
+
+// ─── Nettoyage d'un champ reçu par webhook ────────────────────────────────────
+
+/**
+ * Traduire une consigne en français en une liste d'opérations de nettoyage.
+ *
+ * Le modèle n'écrit **jamais** la valeur nettoyée : il écrit la règle qui la
+ * produira, et cette règle est ensuite validée puis appliquée par
+ * `shared/leadIntakeTransforms`. La différence est tout l'intérêt de l'assistant.
+ * Un modèle à qui on demande « nettoie 936579352756071 » répond une valeur
+ * plausible pour cet échantillon-là, et l'appel suivant, avec une autre valeur,
+ * n'en bénéficie pas. Un modèle à qui on demande la règle produit quelque chose
+ * de relisible, de corrigible et de réutilisable — et dont on voit l'effet dans
+ * l'aperçu avant d'enregistrer quoi que ce soit.
+ *
+ * Une ligne par opération plutôt que du JSON : les modèles ouverts servis par
+ * Replicate produisent bien plus fiablement des lignes `CLÉ: valeur` que du JSON
+ * imbriqué valide, et une ligne mal formée se jette toute seule sans emporter la
+ * réponse entière.
+ */
+export type FieldCleanupContext = {
+  /** Le champ visé : « Téléphone », « Courriel », ou l'intitulé d'une ligne de note. */
+  fieldLabel: string;
+  /** Le chemin d'où vient la valeur, tel qu'affiché dans l'écran. */
+  path: string;
+  /** Jusqu'à trois valeurs réellement reçues. */
+  samples: string[];
+  /** Ce que l'utilisateur a demandé, en français. Vide = « propose ce qui convient ». */
+  instruction: string;
+  /**
+   * `regex` quand la demande vient de l'éditeur d'expression régulière : le modèle
+   * doit alors écrire un motif, pas contourner la question par une opération
+   * dédiée. C'est tout l'intérêt de cet éditeur — on y va justement parce qu'on
+   * veut une expression, et se faire répondre « OP: keep | digits » n'est pas une
+   * réponse à la question posée.
+   *
+   * `auto` (défaut) laisse le modèle choisir l'opération la plus simple.
+   */
+  prefer?: 'auto' | 'regex';
+};
+
+export function buildFieldCleanupPrompts(ctx: FieldCleanupContext): { system: string; user: string } {
+  const regexOnly = ctx.prefer === 'regex';
+
+  const system = [
+    regexOnly
+      ? `Tu écris une expression régulière JavaScript qui transforme la valeur d'un champ selon une consigne.`
+      : `Tu convertis une consigne de nettoyage en une suite d'opérations appliquées à la valeur d'un champ.`,
+    ``,
+    `FORMAT DE RÉPONSE OBLIGATOIRE — une opération par ligne, rien d'autre, aucun préambule :`,
+    `OP: <nom> | <paramètres>`,
+    ``,
+    ...(regexOnly
+      ? [
+          `LES DEUX SEULES OPÉRATIONS QUE TU PEUX ÉCRIRE :`,
+          `OP: replace | regex ; find=<motif> ; replace=<remplacement>   (remplace ce que le motif trouve ; $1 renvoie au groupe 1, remplacement vide = suppression)`,
+          `OP: extract | pattern=<motif> ; group=<n>                     (ne garde QUE ce que le motif trouve, ou son groupe n)`,
+          ``,
+          `RÈGLES :`,
+          `1. Réponds UNE SEULE ligne.`,
+          `2. Choisis « extract » quand la consigne dit de ne garder qu'une partie, « replace » quand elle dit d'enlever ou de remplacer quelque chose.`,
+          `3. Écris le motif en syntaxe JavaScript, sans les barres obliques autour : \\d+ et non /\\d+/.`,
+          `4. N'écris JAMAIS la valeur nettoyée elle-même : uniquement le motif qui la produit.`,
+          `5. Le motif doit fonctionner sur TOUTES les valeurs d'exemple, pas seulement la première.`,
+          `6. Aucun quantificateur imbriqué du genre (a+)+ ni (\\d*)* : ils seront refusés.`,
+          `7. Aucune explication, aucun commentaire, aucun bloc de code.`,
+        ]
+      : [
+          `OPÉRATIONS DISPONIBLES ET LEURS PARAMÈTRES — n'en invente aucune autre :`,
+          `OP: trim                       (retire les espaces de tête et de fin, réduit les suites d'espaces)`,
+          `OP: case | lower               (ou upper, ou title)`,
+          `OP: strip | prefix=<texte>     (retire ce début exact ; suffix=<texte> pour une fin ; les deux séparés par une virgule)`,
+          `OP: remove | chars=<liste>     (supprime chacun de ces caractères, écrits à la suite)`,
+          `OP: keep | digits              (ou letters, ou alnum)`,
+          `OP: replace | find=<texte> ; replace=<texte>            (recherche littérale)`,
+          `OP: replace | regex ; find=<motif> ; replace=<texte>    (expression régulière ; $1 renvoie au groupe 1)`,
+          `OP: extract | pattern=<motif> ; group=<n>               (ne garde que le groupe n, ou le motif entier si group est absent)`,
+          `OP: phone                      (met le numéro au format +15145551234)`,
+          `OP: date | day                 (ou daytime, ou iso)`,
+          `OP: truncate | max=<n>`,
+          `OP: fallback | value=<texte>   (valeur utilisée si le résultat est vide)`,
+          ``,
+          `RÈGLES :`,
+          `1. Cinq opérations au maximum, dans l'ordre où elles doivent s'appliquer.`,
+          `2. Préfère toujours l'opération dédiée à une expression régulière : « strip » pour retirer un début connu, « keep | digits » pour ne garder que les chiffres, « phone » pour un numéro. N'utilise « replace | regex » ou « extract » que si aucune autre ne fait le travail.`,
+          `3. N'écris JAMAIS la valeur nettoyée elle-même : uniquement les opérations qui la produisent.`,
+          `4. Tes motifs doivent fonctionner sur toutes les valeurs d'exemple, pas seulement la première. Aucun quantificateur imbriqué du genre (a+)+.`,
+          `5. Si la consigne est déjà satisfaite par la valeur reçue, réponds la seule ligne : OP: trim`,
+          `6. Aucune explication, aucun commentaire, aucun bloc de code, aucune ligne vide.`,
+        ]),
+  ].join('\n');
+
+  const samples = ctx.samples
+    .filter(s => s.trim())
+    .slice(0, 3)
+    .map((s, i) => `Exemple ${i + 1} : ${s.slice(0, 200)}`)
+    .join('\n');
+
+  const user = [
+    `Champ de destination : ${ctx.fieldLabel}`,
+    `Chemin reçu : ${ctx.path}`,
+    samples || `Aucune valeur d'exemple disponible.`,
+    ``,
+    ctx.instruction.trim()
+      ? `Consigne : ${ctx.instruction.trim()}`
+      : regexOnly
+        ? `Consigne : écris l'expression régulière qui met cette valeur en forme, en te fiant à ce que les exemples ont en commun.`
+        : `Consigne : propose le nettoyage qui convient à ce champ, en te fiant à la forme des valeurs reçues.`,
+    ``,
+    regexOnly ? `Retourne uniquement la ligne OP:.` : `Retourne uniquement les lignes OP:.`,
+  ].join('\n');
+
+  return { system, user };
+}

@@ -146,8 +146,12 @@ body {
   .modal-backdrop {
     @apply fixed inset-0 bg-ink/40 backdrop-blur-sm z-40 flex items-end sm:items-center justify-center sm:p-4;
   }
+  /* Sans largeur maximale : c'est `Modal` qui la fournit, parce qu'elle dépend du
+     contenu. Deux classes Tailwind `sm:max-w-*` sur le même élément ont la même
+     spécificité et c'est l'ordre de la feuille générée qui trancherait — donc
+     surcharger celle d'ici depuis le composant ne serait pas fiable. */
   .modal-panel {
-    @apply bg-white w-full sm:rounded-2xl sm:max-w-2xl sm:max-h-[90vh] max-h-[92vh] shadow-xl flex flex-col overflow-hidden;
+    @apply bg-white w-full sm:rounded-2xl sm:max-h-[90vh] max-h-[92vh] shadow-xl flex flex-col overflow-hidden;
   }
 }
 

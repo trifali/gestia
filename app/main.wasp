@@ -990,6 +990,13 @@ action generateDocumentDraft {
   fn: import { generateDocumentDraft } from "@src/app/ai/operations",
   entities: [User, Company, Client, Project]
 }
+// Traduit une consigne de nettoyage en français en opérations appliquées à un
+// champ reçu par webhook. Ne lit ni n'écrit aucune entité : elle propose une
+// règle, c'est `saveLeadIntakeMapping` qui l'enregistre.
+action suggestFieldCleanup {
+  fn: import { suggestFieldCleanup } from "@src/app/ai/operations",
+  entities: []
+}
 
 // ─── Telnyx SMS webhooks ──────────────────────────────────────────────────────
 // Prospect replies and delivery receipts. Both URLs go to the same idempotent

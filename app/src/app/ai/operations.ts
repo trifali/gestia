@@ -10,7 +10,15 @@ import {
   buildProspectEmailTemplatePrompts,
   buildProspectSmsTemplatePrompts,
   buildDocumentDraftPrompts,
+  buildFieldCleanupPrompts,
 } from './prompts';
+import { requireAdmin } from '../../server/tenant';
+import {
+  isValidPattern,
+  MAX_PATTERN_CHARS,
+  type Transform,
+  type TransformOp,
+} from '../../shared/leadIntakeTransforms';
 
 // ─── magicCorrect ─────────────────────────────────────────────────────────────
 
@@ -502,4 +510,252 @@ export const generateProspectEmailTemplate = async (
 
   if (!subject && !body) throw new HttpError(502, "La génération n'a pas retourné de contenu.");
   return { subject, body };
+};
+
+// ─── suggestFieldCleanup ─────────────────────────────────────────────────────
+//
+// « Enlève le p: devant le numéro » → une suite d'opérations de nettoyage,
+// affichée dans l'écran de correspondance avec son effet sur l'échantillon, et
+// enregistrée seulement si l'utilisateur la garde.
+//
+// Deux garde-fous encadrent la réponse du modèle, parce qu'elle finira par
+// s'exécuter sur chaque appel entrant :
+//
+//   · Chaque ligne est relue par `parseTransformLine`, qui n'accepte que les
+//     opérations connues et jette silencieusement le reste. Un modèle qui invente
+//     `OP: uppercase_first` perd sa ligne, pas la réponse entière.
+//   · Les motifs passent par `isValidPattern` — celui-là même que
+//     `saveLeadIntakeMapping` applique. Un modèle ne peut donc pas faire entrer
+//     une expression coûteuse par une porte que la validation d'écriture aurait
+//     fermée.
+//
+// L'action ne touche à aucune entité : elle propose une règle, elle n'enregistre
+// rien.
+
+const CLEANUP_MODEL = 'meta/meta-llama-3-70b-instruct';
+const CLEANUP_URL = `https://api.replicate.com/v1/models/${CLEANUP_MODEL}/predictions`;
+
+/** Au-delà, ce n'est plus un nettoyage de champ mais un programme. */
+const MAX_SUGGESTED_TRANSFORMS = 5;
+const MAX_INSTRUCTION_CHARS = 400;
+
+type FieldCleanupArgs = {
+  fieldLabel: string;
+  path: string;
+  samples?: string[];
+  instruction?: string;
+  /** `regex` quand la demande vient de l'éditeur d'expression régulière. */
+  prefer?: 'auto' | 'regex';
+};
+type FieldCleanupResult = { transforms: Transform[] };
+
+/**
+ * `nom=valeur ; autre=valeur` → `{ nom: 'valeur', autre: 'valeur' }`.
+ *
+ * Le point-virgule sépare, jamais la virgule : un `remove | chars=,.` ou un
+ * `replace | replace=, ` sont des consignes parfaitement légitimes, et couper sur
+ * la virgule les détruirait. Le premier `=` seulement fait paramètre — une valeur
+ * peut en contenir (`replace | find==`).
+ */
+function parseParams(rest: string): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const chunk of rest.split(';')) {
+    const part = chunk.trim();
+    if (!part) continue;
+    const eq = part.indexOf('=');
+    if (eq === -1) {
+      // Paramètre positionnel : `case | lower`, `keep | digits`, `replace | regex`.
+      out[part.toLowerCase()] = '';
+      continue;
+    }
+    out[part.slice(0, eq).trim().toLowerCase()] = part.slice(eq + 1).trim();
+  }
+  return out;
+}
+
+/** Retire les guillemets et accolades dont le modèle habille volontiers ses valeurs. */
+function unquote(value: string): string {
+  return value.replace(/^["'`«»\s]+|["'`«»\s]+$/g, '');
+}
+
+/**
+ * Une ligne `OP: …` → une opération, ou `null` si elle n'est pas reconnue.
+ *
+ * Tout ce qui n'est pas explicitement accepté est rejeté : le modèle propose, ce
+ * module décide. C'est la même liste blanche que le schéma zod d'écriture, à
+ * dessein — une suggestion qui passerait ici mais échouerait à l'enregistrement
+ * ne serait qu'une déception différée.
+ */
+function parseTransformLine(line: string): Transform | null {
+  const match = /^\s*OP\s*:\s*([a-z_]+)\s*(?:\|\s*(.*))?$/i.exec(line.trim());
+  if (!match) return null;
+
+  const op = match[1].toLowerCase() as TransformOp;
+  const params = parseParams(match[2] ?? '');
+  const has = (key: string) => key in params;
+  const value = (key: string) => unquote(params[key] ?? '');
+
+  switch (op) {
+    case 'trim':
+      return { op: 'trim' };
+
+    case 'case': {
+      const to = has('to') ? value('to') : ['lower', 'upper', 'title'].find(has);
+      return to === 'lower' || to === 'upper' || to === 'title' ? { op: 'case', to } : null;
+    }
+
+    case 'strip': {
+      const prefix = value('prefix');
+      const suffix = value('suffix');
+      if (!prefix && !suffix) return null;
+      return { op: 'strip', ...(prefix ? { prefix } : {}), ...(suffix ? { suffix } : {}) };
+    }
+
+    case 'remove': {
+      const chars = value('chars');
+      return chars ? { op: 'remove', chars: chars.slice(0, 60) } : null;
+    }
+
+    case 'keep': {
+      const only = has('only') ? value('only') : ['digits', 'letters', 'alnum'].find(has);
+      return only === 'digits' || only === 'letters' || only === 'alnum' ? { op: 'keep', only } : null;
+    }
+
+    case 'replace': {
+      const find = value('find');
+      if (!find || find.length > MAX_PATTERN_CHARS) return null;
+      const isRegex = has('regex');
+      if (isRegex && !isValidPattern(find)) return null;
+      return {
+        op: 'replace',
+        find,
+        replace: value('replace').slice(0, 200),
+        ...(isRegex ? { regex: true } : {}),
+      };
+    }
+
+    case 'extract': {
+      const pattern = value('pattern') || value('find');
+      if (!isValidPattern(pattern)) return null;
+      const group = Number.parseInt(value('group'), 10);
+      return {
+        op: 'extract',
+        pattern,
+        ...(Number.isInteger(group) && group >= 0 && group <= 9 ? { group } : {}),
+      };
+    }
+
+    case 'phone':
+      return { op: 'phone' };
+
+    case 'date': {
+      const to = has('to') ? value('to') : ['day', 'daytime', 'iso'].find(has);
+      return to === 'day' || to === 'daytime' || to === 'iso' ? { op: 'date', to } : null;
+    }
+
+    case 'truncate': {
+      const max = Number.parseInt(value('max'), 10);
+      return Number.isInteger(max) && max >= 1 && max <= 2000 ? { op: 'truncate', max } : null;
+    }
+
+    case 'fallback': {
+      const fallback = value('value');
+      return fallback ? { op: 'fallback', value: fallback.slice(0, 200) } : null;
+    }
+
+    default:
+      return null;
+  }
+}
+
+export const suggestFieldCleanup = async (
+  args: FieldCleanupArgs,
+  context: any,
+): Promise<FieldCleanupResult> => {
+  if (!context.user) throw new HttpError(401);
+  // Régler une correspondance est réservé aux administrateurs (`requireIntake`) ;
+  // en proposer le nettoyage ne doit pas être plus ouvert, sinon l'action devient
+  // un accès au modèle pour n'importe quel membre.
+  requireAdmin(context.user);
+
+  const token = process.env.REPLICATE_API_TOKEN;
+  if (!token) throw new HttpError(500, 'REPLICATE_API_TOKEN manquant.');
+
+  const { system, user: userPrompt } = buildFieldCleanupPrompts({
+    fieldLabel: (args.fieldLabel ?? 'Champ').toString().slice(0, 80),
+    path: (args.path ?? '').toString().slice(0, 200),
+    samples: (args.samples ?? []).map(s => (s ?? '').toString()).filter(Boolean).slice(0, 3),
+    instruction: (args.instruction ?? '').toString().slice(0, MAX_INSTRUCTION_CHARS),
+    prefer: args.prefer === 'regex' ? 'regex' : 'auto',
+  });
+
+  // En mode expression régulière, la réponse tient sur une ligne. Le plafond
+  // strict évite qu'un modèle bavard remplisse l'éditeur de motifs de trois
+  // opérations dont on n'a pas voulu.
+  const maxTransforms = args.prefer === 'regex' ? 1 : MAX_SUGGESTED_TRANSFORMS;
+
+  let res: Response;
+  try {
+    res = await fetch(CLEANUP_URL, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+        Prefer: 'wait=30',
+      },
+      body: JSON.stringify({
+        // Température basse : on veut une règle reproductible, pas une variation
+        // créative sur le thème de l'expression régulière.
+        input: { prompt: userPrompt, system_prompt: system, max_tokens: 300, temperature: 0.1, top_p: 0.9 },
+      }),
+    });
+  } catch {
+    throw new HttpError(502, 'Service IA indisponible.');
+  }
+
+  if (!res.ok) {
+    const errBody = await res.text().catch(() => '');
+    throw new HttpError(502, `Replicate ${res.status}: ${errBody.slice(0, 200)}`);
+  }
+
+  const json = (await res.json()) as { output?: string | string[]; error?: string | null; status?: string };
+  if (json.error) throw new HttpError(502, json.error);
+  if (json.status && json.status !== 'succeeded') throw new HttpError(504, 'Génération expirée, réessayez.');
+
+  const raw = Array.isArray(json.output) ? json.output.join('') : (json.output ?? '');
+
+  const transforms: Transform[] = [];
+  for (const line of raw.split('\n')) {
+    const parsed = parseTransformLine(line);
+    // En mode expression régulière, une opération dédiée (`keep | digits`) est une
+    // esquive de la question posée : l'éditeur attend un motif, et le reste n'y a
+    // pas de place pour s'afficher.
+    if (parsed && (args.prefer !== 'regex' || parsed.op === 'replace' || parsed.op === 'extract')) {
+      // Un modèle qui oublie le marqueur `regex` sur une ligne demandée en mode
+      // expression donnerait un remplacement littéral : `\d+` chercherait alors
+      // la chaîne « \d+ », qu'aucune valeur ne contient. On rétablit l'intention,
+      // mais seulement si le motif compile — sinon la ligne est jetée comme les
+      // autres, plutôt que promue en regex fautive.
+      if (args.prefer === 'regex' && parsed.op === 'replace' && !parsed.regex) {
+        if (!isValidPattern(parsed.find)) continue;
+        transforms.push({ ...parsed, regex: true });
+      } else {
+        transforms.push(parsed);
+      }
+    }
+    if (transforms.length >= maxTransforms) break;
+  }
+
+  if (!transforms.length) {
+    // Distingué d'une panne : le modèle a répondu, mais rien d'exploitable. La
+    // consigne est reformulable, ce que « service indisponible » ne suggère pas.
+    throw new HttpError(
+      422,
+      args.prefer === 'regex'
+        ? "L'assistant n'a pas produit d'expression exploitable. Précisez ce qu'il faut garder ou enlever."
+        : "L'assistant n'a pas produit de nettoyage exploitable. Reformulez la consigne.",
+    );
+  }
+
+  return { transforms };
 };

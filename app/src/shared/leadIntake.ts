@@ -16,6 +16,13 @@
 // deux voient donc rigoureusement le même résultat.
 
 import { normalizeLeadSource, type LeadSourceKey } from './leadSources';
+import {
+  applyTransforms,
+  previewTransforms,
+  suggestTransforms,
+  type Transform,
+  type TransformStep,
+} from './leadIntakeTransforms';
 
 // ─── Contrat HTTP ─────────────────────────────────────────────────────────────
 
@@ -36,16 +43,35 @@ export const LEAD_INTAKE_SECRET_HEADER = 'x-gestia-secret';
  */
 export type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
 
-/** Comment un champ du prospect est alimenté depuis la charge utile reçue. */
+/**
+ * Comment un champ du prospect est alimenté depuis la charge utile reçue.
+ *
+ * `transforms` retouche la valeur obtenue, après résolution et avant écriture :
+ * retirer le `p:` que Meta colle devant un téléphone, mettre un courriel en
+ * minuscules, réécrire une date lisiblement. Optionnel et absent des
+ * correspondances déjà enregistrées, qui continuent donc de se comporter à
+ * l'identique — voir `leadIntakeTransforms`.
+ */
 export type FieldRule =
   /** Une valeur, désignée par son chemin : `email`, `contact.email`, `field_data[name=email].values[0]`. */
-  | { kind: 'path'; path: string }
+  | { kind: 'path'; path: string; transforms?: Transform[] }
   /** Plusieurs valeurs assemblées : `{{first_name}} {{last_name}}`, `{{city}}, {{province}}`. */
-  | { kind: 'template'; template: string }
+  | { kind: 'template'; template: string; transforms?: Transform[] }
   /** Une valeur fixe, indépendante de la charge utile — typiquement la provenance. */
-  | { kind: 'const'; value: string }
+  | { kind: 'const'; value: string; transforms?: Transform[] }
   /** Champ laissé vide. */
   | { kind: 'none' };
+
+/** Les opérations d'une règle, quelle qu'en soit la sorte. */
+export function ruleTransforms(rule: FieldRule | undefined): Transform[] {
+  return rule && rule.kind !== 'none' ? (rule.transforms ?? []) : [];
+}
+
+/** La même règle, avec une autre liste d'opérations. `none` n'en porte pas. */
+export function withTransforms(rule: FieldRule, transforms: Transform[]): FieldRule {
+  if (rule.kind === 'none') return rule;
+  return transforms.length ? { ...rule, transforms } : ({ ...rule, transforms: undefined } as FieldRule);
+}
 
 export type MappedFieldKey =
   | 'name'
@@ -59,9 +85,28 @@ export type MappedFieldKey =
 export type NotesMode =
   /** Tout ce qui n'a servi à aucun autre champ (défaut : rien ne se perd). */
   | 'unmapped'
-  /** Seulement les chemins choisis. */
+  /** Seulement les lignes choisies, dans l'ordre choisi. */
   | 'selected'
   | 'none';
+
+/**
+ * Une ligne de la note, en mode `selected`.
+ *
+ * `label` remplace l'intitulé déduit du chemin. Ce n'est pas de la coquetterie :
+ * un formulaire Meta nomme ses questions personnalisées
+ * `quel_est_le_meilleur_moment_pour_vous_joindre_?`, et l'humaniser
+ * automatiquement donne « Quel est le meilleur moment pour vous joindre ? » en
+ * tête d'une note de trois lignes. « Rappel souhaité » dit la même chose et
+ * laisse la place à la réponse.
+ *
+ * `transforms` sert au même endroit : la réponse à cette question arrive en
+ * `2026-04-13T14:00:00+0000`, ce qui n'est pas un moment pour un humain.
+ */
+export type NoteEntry = {
+  path: string;
+  label?: string;
+  transforms?: Transform[];
+};
 
 export type LeadIntakeMapping = {
   version: 1;
@@ -70,7 +115,18 @@ export type LeadIntakeMapping = {
   /** Chemin de la clé anti-doublon (`external_id`, `leadgen_id`, numéro de ligne…). */
   dedupePath?: string | null;
   fields: Record<MappedFieldKey, FieldRule>;
-  notes: { mode: NotesMode; paths?: string[] };
+  notes: {
+    mode: NotesMode;
+    /**
+     * Ancienne forme du mode `selected` : de simples chemins, sans intitulé ni
+     * nettoyage. Toujours lue (`noteEntries`) pour ne pas casser une
+     * correspondance enregistrée avant `entries`, jamais écrite.
+     *
+     * @deprecated Utiliser `entries`.
+     */
+    paths?: string[];
+    entries?: NoteEntry[];
+  };
 };
 
 export type MappedLead = {
@@ -119,6 +175,20 @@ export const MAPPED_FIELD_LABELS: Record<MappedFieldKey, string> = {
 export function isMappingConfigured(mapping: unknown): mapping is LeadIntakeMapping {
   const m = mapping as LeadIntakeMapping | null;
   return !!m && typeof m === 'object' && (m as any).version === 1 && !!m.fields;
+}
+
+/**
+ * Les lignes de la note en mode `selected`, quelle que soit la forme enregistrée.
+ *
+ * Point unique de lecture : le moteur, l'écran et l'aperçu passent tous par ici,
+ * donc une correspondance d'avant `entries` se comporte exactement comme une
+ * neuve. La conversion reste en lecture — réécrire la colonne au premier
+ * affichage transformerait une consultation en migration silencieuse.
+ */
+export function noteEntries(mapping: LeadIntakeMapping): NoteEntry[] {
+  const { entries, paths } = mapping.notes;
+  if (entries?.length) return entries;
+  return (paths ?? []).map(path => ({ path }));
 }
 
 // ─── Lecture par chemin ───────────────────────────────────────────────────────
@@ -338,7 +408,21 @@ export function suggestMapping(
   paths: DetectedPath[],
   defaultSource: LeadSourceKey = inferSource(paths),
 ): LeadIntakeMapping {
-  const rule = (path: string | null): FieldRule => (path ? { kind: 'path', path } : NO_RULE);
+  /**
+   * Une règle sur un chemin, avec le nettoyage que l'échantillon appelle.
+   *
+   * C'est ici que le cas Meta se règle sans intervention : le téléphone arrive en
+   * `p:+14184787765`, et proposer d'emblée « retirer `p:` » puis « format
+   * téléphone » vaut mieux que de laisser découvrir le préfixe sur la première
+   * fiche créée. Comme le reste de `suggestMapping`, ce n'est qu'une proposition —
+   * chaque étape est visible et se retire d'un clic.
+   */
+  const rule = (path: string | null, hint?: 'phone' | 'email' | 'date'): FieldRule => {
+    if (!path) return NO_RULE;
+    const sample = paths.find(p => p.path === path)?.sample ?? '';
+    const transforms = suggestTransforms(sample, hint);
+    return transforms.length ? { kind: 'path', path, transforms } : { kind: 'path', path };
+  };
 
   // Nom : `full_name` s'il existe, sinon prénom + nom assemblés, sinon rien —
   // le repli vers l'entreprise/courriel/téléphone est appliqué à l'exécution.
@@ -368,8 +452,8 @@ export function suggestMapping(
     dedupePath: findPath(paths, ALIASES.dedupe),
     fields: {
       name: nameRule,
-      email: rule(findPath(paths, ALIASES.email)),
-      phone: rule(findPath(paths, ALIASES.phone)),
+      email: rule(findPath(paths, ALIASES.email), 'email'),
+      phone: rule(findPath(paths, ALIASES.phone), 'phone'),
       website: rule(findPath(paths, ALIASES.website)),
       address: addressRule,
       category: rule(findPath(paths, ALIASES.category)),
@@ -387,7 +471,13 @@ export function suggestMapping(
  */
 const NOISE_KEY = /^(zap|bundle|_meta|__|hook|webhook_|querystring)/i;
 
-function resolveRule(payload: unknown, rule: FieldRule | undefined): string {
+/**
+ * La valeur telle qu'elle arrive, avant tout nettoyage. Séparée de `resolveRule`
+ * parce que l'écran de correspondance montre les deux côte à côte : sans le
+ * « avant », un nettoyage qui se trompe est indiscernable d'un chemin qui se
+ * trompe.
+ */
+function rawValue(payload: unknown, rule: FieldRule | undefined): string {
   if (!rule) return '';
   switch (rule.kind) {
     case 'path':
@@ -401,6 +491,30 @@ function resolveRule(payload: unknown, rule: FieldRule | undefined): string {
     default:
       return '';
   }
+}
+
+function resolveRule(payload: unknown, rule: FieldRule | undefined): string {
+  return applyTransforms(rawValue(payload, rule), ruleTransforms(rule));
+}
+
+/** Une règle décomposée : ce qui est arrivé, chaque étape, ce qui en sort. */
+export type RulePreview = {
+  raw: string;
+  steps: TransformStep[];
+  final: string;
+};
+
+/**
+ * Ce que l'écran de correspondance affiche en trois colonnes.
+ *
+ * Le même chemin de code que `resolveRule`, à la trace près : ce qu'on voit
+ * étape par étape est ce que le serveur calculera, sinon l'aperçu ne servirait
+ * qu'à rassurer.
+ */
+export function previewRule(payload: unknown, rule: FieldRule | undefined): RulePreview {
+  const raw = rawValue(payload, rule);
+  const { final, steps } = previewTransforms(raw, ruleTransforms(rule));
+  return { raw, steps, final };
 }
 
 function renderTemplate(payload: unknown, template: string): string {
@@ -460,20 +574,45 @@ function consumedPaths(mapping: LeadIntakeMapping): Set<string> {
  * Sans rien à dire, pas de note du tout.
  */
 function buildNotes(item: unknown, mapping: LeadIntakeMapping): string | null {
-  if (mapping.notes.mode === 'none') return null;
+  const lines = noteLines(item, mapping).map(line => `${line.label} : ${line.value}`);
+  return lines.length > 0 ? lines.join('\n') : null;
+}
+
+/** Une ligne de note, décomposée — l'écran l'affiche, `buildNotes` l'assemble. */
+export type NoteLine = { path: string; label: string; raw: string; value: string };
+
+/**
+ * Les lignes que portera la note, dans l'ordre où elles y figureront.
+ *
+ * En mode `selected`, l'ordre est celui des entrées choisies, **pas** celui de la
+ * charge utile : c'est la seule différence de comportement qui compte pour qui
+ * s'en sert, puisqu'une note se lit de haut en bas et que la ligne la plus utile
+ * doit pouvoir être la première.
+ *
+ * Une ligne dont la valeur finit vide est écartée : une note qui annonce
+ * « Budget : » sans budget occupe de la place sans rien dire.
+ */
+export function noteLines(item: unknown, mapping: LeadIntakeMapping): NoteLine[] {
+  if (mapping.notes.mode === 'none') return [];
+
+  if (mapping.notes.mode === 'selected') {
+    return noteEntries(mapping)
+      .map(entry => {
+        const raw = toText(getByPath(item, entry.path));
+        return {
+          path: entry.path,
+          label: entry.label?.trim() || labelForPath(entry.path),
+          raw,
+          value: applyTransforms(raw, entry.transforms).trim(),
+        };
+      })
+      .filter(line => line.value.length > 0);
+  }
 
   const used = consumedPaths(mapping);
-  const paths = flattenPaths(item);
-  const chosen =
-    mapping.notes.mode === 'selected'
-      ? paths.filter(p => (mapping.notes.paths ?? []).includes(p.path))
-      : paths.filter(p => !used.has(p.path) && !NOISE_KEY.test(p.path));
-
-  const lines = chosen
-    .filter(p => p.sample.length > 0)
-    .map(p => `${humanizeLabel(p.label)} : ${p.sample}`);
-
-  return lines.length > 0 ? lines.join('\n') : null;
+  return flattenPaths(item)
+    .filter(p => !used.has(p.path) && !NOISE_KEY.test(p.path) && p.sample.length > 0)
+    .map(p => ({ path: p.path, label: humanizeLabel(p.label), raw: p.sample, value: p.sample }));
 }
 
 /** `phone_number` → « Phone number », `budget-estime` → « Budget estime ». */
@@ -481,6 +620,24 @@ function humanizeLabel(label: string): string {
   const last = label.split('.').pop() ?? label;
   const words = last.replace(/\[\d+\]/g, '').replace(/[_-]+/g, ' ').trim();
   return words.charAt(0).toUpperCase() + words.slice(1);
+}
+
+/**
+ * Intitulé lisible déduit d'un chemin complet.
+ *
+ * Nécessaire là où `humanizeLabel` ne suffit pas : le dernier segment de
+ * `field_data[name=budget].values[0]` est `values[0]`, ce qui donnerait « Values »
+ * en tête de ligne. On remonte donc jusqu'au premier segment qui nomme vraiment
+ * quelque chose — le sélecteur `[name=budget]` ici.
+ */
+export function labelForPath(path: string): string {
+  const segments = parsePath(path);
+  for (let i = segments.length - 1; i >= 0; i--) {
+    const seg = segments[i];
+    if (typeof seg !== 'string') return humanizeLabel(seg.value);
+    if (!/^\d+$/.test(seg) && seg !== 'values' && seg !== 'value') return humanizeLabel(seg);
+  }
+  return humanizeLabel(path);
 }
 
 export type ApplyResult = { leads: MappedLead[]; warnings: string[] };
@@ -512,9 +669,12 @@ export function applyMapping(payload: unknown, mapping: LeadIntakeMapping): Appl
   const leads: MappedLead[] = [];
   items.forEach((item, index) => {
     const email = CLEAN(resolveRule(item, mapping.fields.email));
-    // Le « + » est conservé tel quel : `toE164` s'en sert pour désarmer sa règle
-    // nord-américaine à dix chiffres. Le retirer transformerait silencieusement
-    // un numéro français en un numéro valide mais faux.
+    // Aucune normalisation d'office ici : le « + » traverse tel quel, parce que
+    // `toE164` s'en sert pour désarmer sa règle nord-américaine à dix chiffres, et
+    // que le retirer transformerait silencieusement un numéro français en un
+    // numéro valide mais faux. La mise au format E.164 est une opération de
+    // nettoyage qu'on choisit (`{ op: 'phone' }`), proposée d'emblée par
+    // `suggestMapping` mais jamais imposée.
     const phone = CLEAN(resolveRule(item, mapping.fields.phone));
     const company = CLEAN(resolveRule(item, mapping.fields.category));
 

@@ -2766,6 +2766,10 @@ function LeadsBoard({ searchId, onBack }: { searchId: string; onBack: () => void
         open={showDetails}
         title={isWebhookBoard ? 'Source de prospects' : 'Détails de la recherche'}
         onClose={() => setShowDetails(false)}
+        // La correspondance d'un webhook met trois colonnes en regard ; les
+        // critères Google sont un formulaire ordinaire et gardent la largeur
+        // habituelle.
+        size={isWebhookBoard ? 'xl' : 'md'}
       >
         {showDetails && (isWebhookBoard ? (
           <IntakePanel searchId={searchId} isAdmin={isAdmin} onLeadsCreated={refetch} />
