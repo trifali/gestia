@@ -35,7 +35,8 @@ import {
   LEAD_INTAKE_SECRET_HEADER,
   type LeadIntakeMapping,
 } from '../../shared/leadIntake';
-import { insertLeadOnTop, resolveIntakeStatus } from '../../app/leads/operations';
+import { resolveIntakeStatus } from '../../app/leads/operations';
+import { insertMappedLead } from './persist';
 
 /**
  * Plafond horaire par tableau. Le point d'entrée est anonyme au sens où
@@ -232,10 +233,7 @@ export const leadIntakeReceive = async (req: Request, res: Response, context: an
   }
 
   try {
-    const { leads, warnings } = applyMapping(body, mapping, {
-      boardLabel: webhook.search.title,
-      receivedAt: new Date(),
-    });
+    const { leads, warnings } = applyMapping(body, mapping);
     const usable = leads.filter(isUsableLead).slice(0, MAX_LEADS_PER_CALL);
 
     if (usable.length === 0) {
@@ -250,23 +248,15 @@ export const leadIntakeReceive = async (req: Request, res: Response, context: an
       return;
     }
 
-    const status = await resolveIntakeStatus(entities, webhook.companyId);
+    const status = await resolveIntakeStatus(entities, webhook.companyId, webhook.searchId);
     const created: string[] = [];
     for (const lead of usable) {
-      const row = await insertLeadOnTop(entities, {
+      const row = await insertMappedLead(entities, {
         searchId: webhook.searchId,
+        companyId: webhook.companyId,
         status,
-        data: {
-          name: lead.name,
-          email: lead.email,
-          phone: lead.phone,
-          website: lead.website,
-          address: lead.address,
-          category: lead.category,
-          notes: lead.notes,
-          source: lead.source,
-          externalId: lead.externalId ?? dedupeKey,
-        },
+        lead,
+        fallbackExternalId: dedupeKey,
       });
       created.push(row.id);
     }

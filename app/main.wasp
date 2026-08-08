@@ -634,11 +634,22 @@ action exportLeads {
 }
 query getLeadStatusConfigs {
   fn: import { getLeadStatusConfigs } from "@src/app/leads/operations",
-  entities: [User, LeadStatusConfig]
+  entities: [User, LeadStatusConfig, LeadSearch]
 }
 action createLeadStatusConfig {
   fn: import { createLeadStatusConfig } from "@src/app/leads/operations",
-  entities: [User, LeadStatusConfig]
+  entities: [User, LeadStatusConfig, LeadSearch]
+}
+
+// Surcharge des statuts par tableau : un tableau qui a les siens n'hérite plus
+// de ceux de l'entreprise, ni en tout ni en partie.
+action overrideBoardStatuses {
+  fn: import { overrideBoardStatuses } from "@src/app/leads/operations",
+  entities: [User, LeadStatusConfig, LeadSearch]
+}
+action resetBoardStatuses {
+  fn: import { resetBoardStatuses } from "@src/app/leads/operations",
+  entities: [User, LeadStatusConfig, LeadSearch, Lead]
 }
 action updateLeadStatusConfig {
   fn: import { updateLeadStatusConfig } from "@src/app/leads/operations",
@@ -646,7 +657,7 @@ action updateLeadStatusConfig {
 }
 action deleteLeadStatusConfig {
   fn: import { deleteLeadStatusConfig } from "@src/app/leads/operations",
-  entities: [User, LeadStatusConfig, Lead]
+  entities: [User, LeadStatusConfig, Lead, LeadSearch]
 }
 action reorderLeadStatusConfigs {
   fn: import { reorderLeadStatusConfigs } from "@src/app/leads/operations",
@@ -846,7 +857,7 @@ action simulateLeadIntakeCall {
 }
 action replayIntakeEvent {
   fn: import { replayIntakeEvent } from "@src/app/leads/intakeOperations",
-  entities: [User, LeadSearch, Lead, LeadStatusConfig, LeadInboundWebhook, LeadInboundEvent]
+  entities: [User, LeadSearch, Lead, LeadNote, LeadStatusConfig, LeadInboundWebhook, LeadInboundEvent]
 }
 query getLeadShareToken {
   fn: import { getLeadShareToken } from "@src/app/leads/operations",
@@ -1021,7 +1032,7 @@ apiNamespace leadIntakeWebhooks {
 api leadIntakeReceive {
   fn: import { leadIntakeReceive } from "@src/server/leadIntake/webhook",
   httpRoute: (POST, "/webhooks/prospects/:publicId"),
-  entities: [Company, LeadSearch, Lead, LeadStatusConfig, LeadInboundWebhook, LeadInboundEvent],
+  entities: [Company, LeadSearch, Lead, LeadNote, LeadStatusConfig, LeadInboundWebhook, LeadInboundEvent],
   auth: false
 }
 

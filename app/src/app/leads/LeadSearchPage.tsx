@@ -16,6 +16,8 @@ import {
   exportLeads,
   getLeadStatusConfigs,
   createLeadStatusConfig,
+  overrideBoardStatuses,
+  resetBoardStatuses,
   updateLeadStatusConfig,
   deleteLeadStatusConfig,
   getCurrentCompany,
@@ -1400,16 +1402,70 @@ function NoteModal({ lead, onClose }: { lead: Lead; onClose: () => void }) {
 
 // ─── Manage statuses modal ────────────────────────────────────────────────────
 
+/**
+ * Réglage des colonnes du kanban, à deux portées.
+ *
+ * Sans `searchId` (bouton « Statuts » de la page Prospection) : les statuts de
+ * l'entreprise, que suivent tous les tableaux. Avec (bouton « Statuts » d'un
+ * tableau ouvert) : ceux de ce tableau, qui remplacent entièrement ceux de
+ * l'entreprise dès qu'il en possède. Le même écran, parce que c'est le même
+ * geste — seule la portée change, et le bandeau du haut la rend explicite.
+ */
 function ManageStatusesModal({
   configs,
+  searchId,
   onRefresh,
   onClose,
 }: {
   configs: LeadStatusConfig[];
+  /** Portée tableau. Absent = portée entreprise. */
+  searchId?: string;
   onRefresh: () => void;
   onClose: () => void;
 }) {
   const unknownEntry = configs.find(c => c.key === UNKNOWN_STATUS_KEY);
+  // Les lignes portent leur portée : si elles sont rattachées à ce tableau, il a
+  // ses propres statuts. Rien de plus à demander au serveur.
+  const overridden = !!searchId && configs.some(c => (c as any).searchId === searchId);
+  const [switching, setSwitching] = useState(false);
+
+  // Depuis un tableau, on ne modifie que *ses* statuts. Tant qu'il suit ceux de
+  // l'entreprise, la liste est en lecture seule : changer les colonnes de tous
+  // les tableaux depuis l'un d'eux serait un effet de bord invisible, et se règle
+  // de toute façon à sa place, sur la page Prospection.
+  const canEdit = !searchId || overridden;
+
+  async function enableOverride() {
+    if (!searchId) return;
+    setSwitching(true);
+    try {
+      await overrideBoardStatuses({ searchId });
+      toast.success('Ce tableau a maintenant ses propres statuts.');
+      onRefresh();
+    } catch (err: any) {
+      toast.error(err?.message ?? 'Impossible de personnaliser les statuts');
+    } finally {
+      setSwitching(false);
+    }
+  }
+
+  async function disableOverride() {
+    if (!searchId) return;
+    setSwitching(true);
+    try {
+      const res = await resetBoardStatuses({ searchId });
+      toast.success(
+        res.orphaned > 0
+          ? `Retour aux statuts de l'entreprise. ${res.orphaned} prospect(s) déplacé(s) vers « Statut inconnu ».`
+          : "Retour aux statuts de l'entreprise.",
+      );
+      onRefresh();
+    } catch (err: any) {
+      toast.error(err?.message ?? 'Impossible de revenir aux statuts de l\'entreprise');
+    } finally {
+      setSwitching(false);
+    }
+  }
 
   // Local ordered list for instant visual feedback
   const [ordered, setOrdered] = useState(() => configs.filter(c => c.key !== UNKNOWN_STATUS_KEY));
@@ -1428,6 +1484,7 @@ function ManageStatusesModal({
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
 
   function startEdit(c: LeadStatusConfig) {
+    if (!canEdit) return;
     setEditId(c.id);
     setEditLabel(c.label);
     setEditColor(c.color);
@@ -1462,11 +1519,13 @@ function ManageStatusesModal({
   }
 
   async function handleCreate(e: React.FormEvent) {
+    if (!canEdit) { e.preventDefault(); return; }
     e.preventDefault();
     if (!newLabel.trim()) return;
     setSaving(true);
     try {
       await createLeadStatusConfig({
+        searchId,
         key: newLabel,
         label: newLabel.trim(),
         color: newColor,
@@ -1483,6 +1542,7 @@ function ManageStatusesModal({
   }
 
   function handleDragStart(index: number) {
+    if (!canEdit) return;
     dragIndex.current = index;
   }
 
@@ -1510,20 +1570,72 @@ function ManageStatusesModal({
 
   return (
     <div className='space-y-4'>
-      <div className='flex items-start gap-2.5 rounded-xl border border-amber-200 bg-amber-50 px-3.5 py-3 text-sm text-amber-800'>
-        <LuTriangleAlert size={15} className='shrink-0 mt-0.5' />
-        <p>Toute modification (renommage, réordonnancement, suppression) s'applique immédiatement à tous les prospects existants.</p>
-      </div>
+      {/* Portée : ce qu'on est en train de modifier, et pour qui. Sans ce
+          bandeau, deux écrans identiques régleraient deux choses différentes. */}
+      {searchId && (
+        overridden ? (
+          <div className='flex items-start gap-2.5 rounded-xl border border-accent-200 bg-accent-50 px-3.5 py-3 text-sm'>
+            <LuSlidersHorizontal size={15} className='shrink-0 mt-0.5 text-accent-700' />
+            <div className='flex-1 min-w-0'>
+              <p className='text-ink font-medium'>Statuts propres à ce tableau</p>
+              <p className='text-muted text-xs mt-0.5'>
+                Ce tableau ne suit plus les statuts de l'entreprise. Les modifier ici n'affecte
+                aucun autre tableau.
+              </p>
+            </div>
+            <button
+              type='button'
+              className='btn-secondary text-xs px-2 py-1 shrink-0'
+              onClick={disableOverride}
+              disabled={switching}
+            >
+              {switching ? <LuLoader size={12} className='animate-spin' /> : 'Revenir à ceux de l\'entreprise'}
+            </button>
+          </div>
+        ) : (
+          <div className='flex items-start gap-2.5 rounded-xl border border-line bg-canvas-100 px-3.5 py-3 text-sm'>
+            <LuLock size={15} className='shrink-0 mt-0.5 text-muted' />
+            <div className='flex-1 min-w-0'>
+              <p className='text-ink font-medium'>Statuts hérités de l'entreprise</p>
+              <p className='text-muted text-xs mt-0.5'>
+                Ce tableau suit les statuts communs, en lecture seule ici. Ils se modifient depuis
+                « Statuts » sur la page Prospection, ce qui change <strong>tous</strong> les
+                tableaux — ou donnez à celui-ci ses propres statuts.
+              </p>
+            </div>
+            <button
+              type='button'
+              className='btn-primary text-xs px-2 py-1 shrink-0 gap-1.5'
+              onClick={enableOverride}
+              disabled={switching}
+            >
+              {switching ? <LuLoader size={12} className='animate-spin' /> : 'Personnaliser pour ce tableau'}
+            </button>
+          </div>
+        )
+      )}
+
+      {canEdit && (
+        <div className='flex items-start gap-2.5 rounded-xl border border-amber-200 bg-amber-50 px-3.5 py-3 text-sm text-amber-800'>
+          <LuTriangleAlert size={15} className='shrink-0 mt-0.5' />
+          <p>
+            Toute modification (renommage, réordonnancement, suppression) s'applique immédiatement
+            aux prospects existants
+            {overridden ? ' de ce tableau.' : ' de tous les tableaux concernés.'}
+          </p>
+        </div>
+      )}
+
       <div className='space-y-2'>
       {ordered.map((c, index) => {
         const isSystem = c.key === 'nouveau' || c.key === 'qualifie';
         return (
         <div
           key={c.id}
-          draggable={!isSystem}
-          onDragStart={() => !isSystem && handleDragStart(index)}
-          onDragEnter={() => !isSystem && handleDragEnter(index)}
-          onDragEnd={!isSystem ? handleDragEnd : undefined}
+          draggable={canEdit && !isSystem}
+          onDragStart={() => canEdit && !isSystem && handleDragStart(index)}
+          onDragEnter={() => canEdit && !isSystem && handleDragEnter(index)}
+          onDragEnd={canEdit && !isSystem ? handleDragEnd : undefined}
           onDragOver={e => e.preventDefault()}
           className={`flex items-center gap-2 p-2.5 rounded-xl border transition-colors ${
             dragOverIndex === index ? 'border-accent-400 bg-accent-50' : 'border-line'
@@ -1554,7 +1666,10 @@ function ManageStatusesModal({
           ) : (
             <>
               {/* Drag handle */}
-              <span className='text-muted cursor-grab active:cursor-grabbing shrink-0' title='Glisser pour réordonner'>
+              <span
+                className={`text-muted shrink-0 ${canEdit ? 'cursor-grab active:cursor-grabbing' : 'opacity-40'}`}
+                title={canEdit ? 'Glisser pour réordonner' : undefined}
+              >
                 <LuGripVertical size={16} />
               </span>
               <div className='w-4 h-4 rounded-full shrink-0' style={{ backgroundColor: c.color }} />
@@ -1582,7 +1697,7 @@ function ManageStatusesModal({
                     Non
                   </button>
                 </div>
-              ) : (
+              ) : canEdit ? (
                 <>
                   <IconBtn title='Modifier' onClick={() => startEdit(c)}>
                     <LuPencil size={14} />
@@ -1591,7 +1706,7 @@ function ManageStatusesModal({
                     <LuTrash2 size={14} />
                   </IconBtn>
                 </>
-              )}
+              ) : null}
             </>
           )}
         </div>
@@ -1610,29 +1725,33 @@ function ManageStatusesModal({
       )}
       </div>
 
-      <hr className='border-line' />
+      {canEdit && (
+        <>
+          <hr className='border-line' />
 
-      <form onSubmit={handleCreate} className='flex items-center gap-2'>
-        <input
-          type='color'
-          value={newColor}
-          onChange={e => setNewColor(e.target.value)}
-          className='w-7 h-7 rounded cursor-pointer border border-line shrink-0'
-          title='Couleur du statut'
-        />
-        <input
-          className='input flex-1'
-          placeholder='Ex : En négociation'
-          value={newLabel}
-          onChange={e => setNewLabel(e.target.value)}
-          required
-        />
-        <button type='submit' className='btn-primary gap-1.5 shrink-0' disabled={saving || !newLabel.trim()}>
-          <LuPlus size={14} />
-          Ajouter
-        </button>
-      </form>
-      <p className='text-xs text-muted'>La clé (identifiant interne) est générée automatiquement depuis le nom.</p>
+          <form onSubmit={handleCreate} className='flex items-center gap-2'>
+            <input
+              type='color'
+              value={newColor}
+              onChange={e => setNewColor(e.target.value)}
+              className='w-7 h-7 rounded cursor-pointer border border-line shrink-0'
+              title='Couleur du statut'
+            />
+            <input
+              className='input flex-1'
+              placeholder='Ex : En négociation'
+              value={newLabel}
+              onChange={e => setNewLabel(e.target.value)}
+              required
+            />
+            <button type='submit' className='btn-primary gap-1.5 shrink-0' disabled={saving || !newLabel.trim()}>
+              <LuPlus size={14} />
+              Ajouter
+            </button>
+          </form>
+          <p className='text-xs text-muted'>La clé (identifiant interne) est générée automatiquement depuis le nom.</p>
+        </>
+      )}
     </div>
   );
 }
@@ -2356,7 +2475,8 @@ function LeadsBoard({ searchId, onBack }: { searchId: string; onBack: () => void
     prevSearchUnread.current = searchUnreadCount;
     if (prev !== null && prev !== searchUnreadCount) refetch();
   }, [smsAlerts.loaded, searchUnreadCount, refetch]);
-  const { data: statusConfigs = [], refetch: refetchStatuses } = useQuery(getLeadStatusConfigs);
+  // Portée tableau : ses propres statuts s'il en a, ceux de l'entreprise sinon.
+  const { data: statusConfigs = [], refetch: refetchStatuses } = useQuery(getLeadStatusConfigs, { searchId });
   const { data: existingClients = [] } = useQuery(getClients);
   const existingClientNames = useMemo(
     () => new Set((existingClients as any[]).map((c: any) => c.name.toLowerCase())),
@@ -2437,6 +2557,7 @@ function LeadsBoard({ searchId, onBack }: { searchId: string; onBack: () => void
   const [showFetchMore, setShowFetchMore] = useState(false);
   const [fetchingMore, setFetchingMore] = useState(false);
   const [showShareModal, setShowShareModal] = useState(false);
+  const [showBoardStatuses, setShowBoardStatuses] = useState(false);
 
   // Seul un tableau issu d'une recherche Google a des critères : pour les deux
   // autres, tout ce qui relance une recherche ou en affiche les filtres n'a rien
@@ -2624,6 +2745,21 @@ function LeadsBoard({ searchId, onBack }: { searchId: string; onBack: () => void
           <NoteModal lead={noteTarget} onClose={() => { setNoteTarget(null); refetch(); }} />
         )}
       </Modal>
+      <Modal
+        open={showBoardStatuses}
+        title='Statuts de ce tableau'
+        onClose={() => setShowBoardStatuses(false)}
+      >
+        {showBoardStatuses && (
+          <ManageStatusesModal
+            configs={statusConfigs as LeadStatusConfig[]}
+            searchId={searchId}
+            onRefresh={() => { refetchStatuses(); refetch(); }}
+            onClose={() => setShowBoardStatuses(false)}
+          />
+        )}
+      </Modal>
+
       {/* Le même bouton mène à deux réglages selon la nature du tableau : les
           critères Google d'un côté, la source de réception de l'autre. */}
       <Modal
@@ -2778,6 +2914,13 @@ function LeadsBoard({ searchId, onBack }: { searchId: string; onBack: () => void
                   <LuEye size={14} />
                 </button>
               )}
+              <button
+                className='w-6 h-6 rounded flex items-center justify-center hover:bg-canvas text-muted hover:text-ink transition-colors shrink-0'
+                title='Statuts de ce tableau'
+                onClick={() => setShowBoardStatuses(true)}
+              >
+                <LuSlidersHorizontal size={14} />
+              </button>
             </div>
             {search.description && (
               <p className='text-sm text-muted italic'>{search.description}</p>

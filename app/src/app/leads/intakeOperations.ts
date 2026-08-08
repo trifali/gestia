@@ -12,7 +12,8 @@ import { HttpError, config } from 'wasp/server';
 import { randomBytes } from 'crypto';
 import { z } from 'zod';
 import { requireAdmin } from '../../server/tenant';
-import { insertLeadOnTop, resolveIntakeStatus } from './operations';
+import { resolveIntakeStatus } from './operations';
+import { insertMappedLead } from '../../server/leadIntake/persist';
 import {
   applyMapping,
   flattenPaths,
@@ -403,10 +404,7 @@ export const replayIntakeEvent = async (
     throw new HttpError(400, 'Cet appel a déjà créé un prospect.');
   }
 
-  const { leads, warnings } = applyMapping(event.payload, webhook.mapping as LeadIntakeMapping, {
-    boardLabel: webhook.search.title,
-    receivedAt: new Date(),
-  });
+  const { leads, warnings } = applyMapping(event.payload, webhook.mapping as LeadIntakeMapping);
   const usable = leads.filter(isUsableLead);
   if (usable.length === 0) {
     const reason = 'Aucun prospect exploitable avec la correspondance actuelle.';
@@ -417,23 +415,15 @@ export const replayIntakeEvent = async (
     throw new HttpError(422, reason);
   }
 
-  const status = await resolveIntakeStatus(context.entities, companyId);
+  const status = await resolveIntakeStatus(context.entities, companyId, searchId);
   const created: string[] = [];
   for (const lead of usable) {
-    const row = await insertLeadOnTop(context.entities, {
+    const row = await insertMappedLead(context.entities, {
       searchId,
+      companyId,
       status,
-      data: {
-        name: lead.name,
-        email: lead.email,
-        phone: lead.phone,
-        website: lead.website,
-        address: lead.address,
-        category: lead.category,
-        notes: lead.notes,
-        source: lead.source,
-        externalId: lead.externalId ?? event.dedupeKey,
-      },
+      lead,
+      fallbackExternalId: event.dedupeKey,
     });
     created.push(row.id);
   }

@@ -496,6 +496,7 @@ model LeadSearch {
   templates      ProspectTemplate[]
   shareToken     LeadSearchShareToken?
   inboundWebhook LeadInboundWebhook?
+  statusConfigs  LeadStatusConfig[]
 
   @@index([companyId])
 }
@@ -576,13 +577,26 @@ model LeadStatusConfig {
   company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
   companyId String
 
+  // Null : les statuts de l'entreprise, ceux que règle « Statuts » sur la page
+  // Prospection et que tous les tableaux suivent par défaut.
+  // Non nul : le jeu propre à ce tableau, qui **remplace entièrement** celui de
+  // l'entreprise. Tout ou rien, jamais une fusion des deux — un tableau qui
+  // hériterait de la moitié des colonnes serait impossible à raisonner, et
+  // renommer un statut d'entreprise donnerait des résultats imprévisibles.
+  search   LeadSearch? @relation(fields: [searchId], references: [id], onDelete: Cascade)
+  searchId String?
+
   key   String // e.g. "nouveau", "en_negociation"
   label String // e.g. "Nouveau", "En négociation"
   color String @default("#6366f1") // hex color for the column header
   order Int    @default(0)
 
-  @@unique([companyId, key])
+  // Postgres considère deux NULL comme distincts : cette contrainte ne protège
+  // donc pas les statuts d'entreprise entre eux. `createLeadStatusConfig` vérifie
+  // explicitement l'unicité de la clé — voir le commentaire qui l'accompagne.
+  @@unique([companyId, searchId, key])
   @@index([companyId])
+  @@index([searchId])
 }
 
 // Persistent status/notes for a prospect across all searches

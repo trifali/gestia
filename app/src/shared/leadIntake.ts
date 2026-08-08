@@ -15,7 +15,6 @@
 // pour afficher l'aperçu de la carte pendant qu'on règle la correspondance. Les
 // deux voient donc rigoureusement le même résultat.
 
-import { formatMontrealTime } from './format';
 import { normalizeLeadSource, type LeadSourceKey } from './leadSources';
 
 // ─── Contrat HTTP ─────────────────────────────────────────────────────────────
@@ -450,11 +449,17 @@ function consumedPaths(mapping: LeadIntakeMapping): Set<string> {
   return used;
 }
 
-function buildNotes(
-  item: unknown,
-  mapping: LeadIntakeMapping,
-  context: { boardLabel: string; receivedAt: Date },
-): string | null {
+/**
+ * Les champs reçus qui n'alimentent aucune colonne de la fiche.
+ *
+ * Rien que ça : ni en-tête, ni date, ni nom du tableau. Une note est faite pour
+ * porter ce que la fiche ne montre pas — la date de création et l'origine sont
+ * déjà lisibles sur le prospect lui-même, les répéter en tête de chaque note ne
+ * ferait que noyer la seule ligne qui apporte quelque chose.
+ *
+ * Sans rien à dire, pas de note du tout.
+ */
+function buildNotes(item: unknown, mapping: LeadIntakeMapping): string | null {
   if (mapping.notes.mode === 'none') return null;
 
   const used = consumedPaths(mapping);
@@ -468,8 +473,7 @@ function buildNotes(
     .filter(p => p.sample.length > 0)
     .map(p => `${humanizeLabel(p.label)} : ${p.sample}`);
 
-  const header = `Reçu de « ${context.boardLabel} » le ${formatMontrealTime(context.receivedAt)}`;
-  return [header, ...lines].join('\n');
+  return lines.length > 0 ? lines.join('\n') : null;
 }
 
 /** `phone_number` → « Phone number », `budget-estime` → « Budget estime ». */
@@ -488,12 +492,7 @@ export type ApplyResult = { leads: MappedLead[]; warnings: string[] };
  * incomplet et un avertissement lisible, pas une erreur 500 qui ferait retenter
  * l'appel indéfiniment.
  */
-export function applyMapping(
-  payload: unknown,
-  mapping: LeadIntakeMapping,
-  context: { boardLabel: string; receivedAt?: Date },
-): ApplyResult {
-  const receivedAt = context.receivedAt ?? new Date();
+export function applyMapping(payload: unknown, mapping: LeadIntakeMapping): ApplyResult {
   const warnings: string[] = [];
 
   // Un même appel peut porter plusieurs prospects (un lot de lignes de tableur).
@@ -544,7 +543,7 @@ export function applyMapping(
       address: CLEAN(resolveRule(item, mapping.fields.address)),
       category: company,
       source: normalizeLeadSource(resolveRule(item, mapping.fields.source)),
-      notes: buildNotes(item, mapping, { boardLabel: context.boardLabel, receivedAt }),
+      notes: buildNotes(item, mapping),
       externalId: CLEAN(toText(getByPath(item, mapping.dedupePath))),
     });
   });

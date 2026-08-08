@@ -632,58 +632,133 @@ const VIRTUAL_UNKNOWN: any = {
 };
 
 /**
+ * Les statuts qui font foi pour un tableau donné.
+ *
+ * Règle unique, d'où tout le reste découle : **un tableau qui possède ses propres
+ * statuts n'hérite plus de ceux de l'entreprise, pas même partiellement.** Un
+ * héritage partiel obligerait à fusionner deux jeux de colonnes ordonnées, et
+ * renommer un statut d'entreprise donnerait des résultats imprévisibles selon les
+ * tableaux. Tout ou rien se raisonne, se lit à l'écran, et se défait.
+ *
+ * Sans `searchId`, ou pour un tableau sans surcharge, ce sont les statuts de
+ * l'entreprise — semés au premier accès s'ils n'existent pas encore.
+ */
+export async function effectiveStatusConfigs(
+  entities: any,
+  companyId: string,
+  searchId?: string | null,
+): Promise<any[]> {
+  if (searchId) {
+    const own = await entities.LeadStatusConfig.findMany({
+      where: { companyId, searchId },
+      orderBy: { order: 'asc' },
+    });
+    if (own.length > 0) return own;
+  }
+
+  const shared = await entities.LeadStatusConfig.findMany({
+    where: { companyId, searchId: null },
+    orderBy: { order: 'asc' },
+  });
+  if (shared.length > 0) return shared;
+
+  // Premier accès de l'entreprise : on sème le jeu par défaut.
+  return Promise.all(
+    DEFAULT_STATUSES.map(status =>
+      entities.LeadStatusConfig.create({ data: { companyId, searchId: null, ...status } }),
+    ),
+  );
+}
+
+/**
  * La colonne où doit atterrir un prospect arrivé sans que personne ne choisisse.
  *
- * La première colonne de l'entreprise, pas « nouveau » en dur : une entreprise
- * qui a renommé ou réordonné ses statuts via « Gérer les statuts » attend que ses
- * arrivées tombent dans *sa* première colonne. Repli sur `nouveau` uniquement si
- * rien n'a encore été semé — jamais sur `unknown`, qui est une colonne virtuelle
- * de rattrapage et non une destination.
+ * La première colonne *du tableau concerné*, pas « nouveau » en dur : une
+ * entreprise qui a renommé ou réordonné ses statuts — ou un tableau qui a les
+ * siens — attend que ses arrivées tombent dans sa propre première colonne. Repli
+ * sur `nouveau` seulement si rien n'a encore été semé, et jamais sur `unknown`,
+ * qui est une colonne de rattrapage et non une destination.
  */
-export async function resolveIntakeStatus(entities: any, companyId: string): Promise<string> {
-  const first = await entities.LeadStatusConfig.findFirst({
-    where: { companyId, key: { not: UNKNOWN_STATUS_KEY } },
-    orderBy: { order: 'asc' },
-    select: { key: true },
-  });
-  return first?.key ?? 'nouveau';
+export async function resolveIntakeStatus(
+  entities: any,
+  companyId: string,
+  searchId?: string | null,
+): Promise<string> {
+  const configs = await effectiveStatusConfigs(entities, companyId, searchId);
+  return configs.find(c => c.key !== UNKNOWN_STATUS_KEY)?.key ?? 'nouveau';
 }
 
 // ─── Lead status config operations ───────────────────────────────────────────
 
-export const getLeadStatusConfigs: GetLeadStatusConfigs<void, LeadStatusConfig[]> = async (_args, context) => {
+/**
+ * Les colonnes du kanban.
+ *
+ * Sans `searchId` : les statuts de l'entreprise, ceux que règle « Statuts » sur
+ * la page Prospection. Avec : ceux qui s'appliquent réellement à ce tableau —
+ * les siens s'il en a, ceux de l'entreprise sinon. Les lignes portent leur
+ * `searchId`, ce qui suffit au client pour savoir s'il regarde une surcharge.
+ */
+export const getLeadStatusConfigs: GetLeadStatusConfigs<
+  { searchId?: string } | void,
+  LeadStatusConfig[]
+> = async (args, context) => {
   const companyId = ensureCompany(context.user);
-  const configs = await (context.entities as any).LeadStatusConfig.findMany({
-    where: { companyId },
-    orderBy: { order: 'asc' },
-  });
-  if (configs.length === 0) {
-    // Seed defaults on first access
-    const created = await Promise.all(
-      DEFAULT_STATUSES.map(s =>
-        (context.entities as any).LeadStatusConfig.create({
-          data: { companyId, ...s },
-        })
-      )
-    );
-    return [...created, VIRTUAL_UNKNOWN];
+  const searchId = (args as any)?.searchId as string | undefined;
+
+  if (searchId) {
+    const search = await context.entities.LeadSearch.findUnique({
+      where: { id: searchId },
+      select: { companyId: true },
+    });
+    if (!search || search.companyId !== companyId) throw new HttpError(404);
   }
+
+  const configs = await effectiveStatusConfigs(context.entities, companyId, searchId);
   // Always append the virtual unknown column at the end
   return [...configs, VIRTUAL_UNKNOWN];
 };
 
 export const createLeadStatusConfig: CreateLeadStatusConfig<
-  { key: string; label: string; color: string; order: number },
+  { key: string; label: string; color: string; order: number; searchId?: string },
   LeadStatusConfig
-> = async ({ key, label, color, order }, context) => {
+> = async ({ key, label, color, order, searchId }, context) => {
   const companyId = ensureCompany(context.user);
   // Normalise key: lowercase, spaces to underscores, only alphanumeric/_
   const safeKey = key.toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '');
   if (!safeKey) throw new HttpError(400, 'Clé invalide');
+  if (safeKey === UNKNOWN_STATUS_KEY) throw new HttpError(400, 'Cette clé est réservée');
+
+  const scope = await requireStatusScope(context, companyId, searchId);
+
+  // Vérification explicite plutôt que de s'en remettre à la contrainte d'unicité :
+  // `@@unique([companyId, searchId, key])` ne protège pas les statuts d'entreprise
+  // entre eux, Postgres considérant deux NULL comme distincts. Et un message clair
+  // vaut mieux qu'une P2002 remontée telle quelle.
+  const clash = await (context.entities as any).LeadStatusConfig.findFirst({
+    where: { companyId, searchId: scope, key: safeKey },
+    select: { id: true },
+  });
+  if (clash) throw new HttpError(400, `Le statut « ${safeKey} » existe déjà.`);
+
   return (context.entities as any).LeadStatusConfig.create({
-    data: { companyId, key: safeKey, label, color, order },
+    data: { companyId, searchId: scope, key: safeKey, label, color, order },
   });
 };
+
+/** Valide la portée demandée et renvoie le `searchId` à écrire (null = entreprise). */
+async function requireStatusScope(
+  context: any,
+  companyId: string,
+  searchId?: string,
+): Promise<string | null> {
+  if (!searchId) return null;
+  const search = await context.entities.LeadSearch.findUnique({
+    where: { id: searchId },
+    select: { companyId: true },
+  });
+  if (!search || search.companyId !== companyId) throw new HttpError(404);
+  return searchId;
+}
 
 export const updateLeadStatusConfig: UpdateLeadStatusConfig<
   { id: string; label?: string; color?: string; order?: number },
@@ -711,13 +786,96 @@ export const deleteLeadStatusConfig: DeleteLeadStatusConfig<{ id: string }, { id
   const config = await (context.entities as any).LeadStatusConfig.findUnique({ where: { id } });
   if (!config || config.companyId !== companyId) throw new HttpError(404);
   if (config.key === UNKNOWN_STATUS_KEY) throw new HttpError(400, 'Ce statut ne peut pas être supprimé');
-  // Reassign leads with this status to 'unknown'
-  await context.entities.Lead.updateMany({
-    where: { status: config.key, search: { companyId } },
-    data: { status: UNKNOWN_STATUS_KEY },
-  });
+
+  // Les prospects orphelins vont dans « Statut inconnu » — mais seulement ceux
+  // que ce statut concernait réellement.
+  //
+  //  · Statut propre à un tableau : ses prospects à lui, personne d'autre.
+  //  · Statut d'entreprise : tous les tableaux *sauf* ceux qui ont leurs propres
+  //    statuts. Ceux-là ne suivent plus l'entreprise ; déplacer leurs cartes
+  //    parce qu'une clé de même nom disparaît ailleurs serait un dégât collatéral
+  //    parfaitement invisible.
+  const where: any = { status: config.key };
+  if (config.searchId) {
+    where.searchId = config.searchId;
+  } else {
+    const overriding = await (context.entities as any).LeadStatusConfig.findMany({
+      where: { companyId, searchId: { not: null } },
+      select: { searchId: true },
+      distinct: ['searchId'],
+    });
+    where.search = { companyId };
+    const ids = overriding.map((o: any) => o.searchId).filter(Boolean);
+    if (ids.length) where.searchId = { notIn: ids };
+  }
+  await context.entities.Lead.updateMany({ where, data: { status: UNKNOWN_STATUS_KEY } });
+
   await (context.entities as any).LeadStatusConfig.delete({ where: { id } });
   return { id };
+};
+
+// ─── Surcharge des statuts par tableau ────────────────────────────────────────
+
+/**
+ * Donne à ce tableau ses propres statuts, recopiés de ceux qu'il applique déjà.
+ *
+ * On copie l'état effectif plutôt que de partir d'une liste vide : on part de ce
+ * qu'on a sous les yeux, aucune carte ne change de colonne au moment de basculer,
+ * et on ajuste ensuite. Commencer de zéro enverrait tous les prospects du tableau
+ * dans « Statut inconnu » d'un seul clic.
+ */
+export const overrideBoardStatuses = async (
+  { searchId }: { searchId: string },
+  context: any,
+): Promise<{ created: number }> => {
+  const companyId = ensureCompany(context.user);
+  const scope = await requireStatusScope(context, companyId, searchId);
+  if (!scope) throw new HttpError(400, 'Tableau requis');
+
+  const existing = await (context.entities as any).LeadStatusConfig.count({
+    where: { companyId, searchId: scope },
+  });
+  if (existing > 0) throw new HttpError(400, 'Ce tableau a déjà ses propres statuts.');
+
+  const source = await effectiveStatusConfigs(context.entities, companyId, null);
+  await Promise.all(
+    source.map((c: any) =>
+      (context.entities as any).LeadStatusConfig.create({
+        data: { companyId, searchId: scope, key: c.key, label: c.label, color: c.color, order: c.order },
+      }),
+    ),
+  );
+  return { created: source.length };
+};
+
+/**
+ * Ramène le tableau aux statuts de l'entreprise.
+ *
+ * Les prospects dont la colonne n'existe pas dans le jeu de l'entreprise sont
+ * déplacés vers « Statut inconnu » — la même convention que la suppression d'un
+ * statut. Ils restent visibles et rattrapables ; le compte est renvoyé pour que
+ * l'interface puisse l'annoncer *avant* de basculer.
+ */
+export const resetBoardStatuses = async (
+  { searchId }: { searchId: string },
+  context: any,
+): Promise<{ orphaned: number }> => {
+  const companyId = ensureCompany(context.user);
+  const scope = await requireStatusScope(context, companyId, searchId);
+  if (!scope) throw new HttpError(400, 'Tableau requis');
+
+  const shared = await effectiveStatusConfigs(context.entities, companyId, null);
+  const keptKeys = shared.map((c: any) => c.key);
+
+  const { count } = await context.entities.Lead.updateMany({
+    where: { searchId: scope, status: { notIn: [...keptKeys, UNKNOWN_STATUS_KEY] } },
+    data: { status: UNKNOWN_STATUS_KEY },
+  });
+
+  await (context.entities as any).LeadStatusConfig.deleteMany({
+    where: { companyId, searchId: scope },
+  });
+  return { orphaned: count };
 };
 
 export const reorderLeadStatusConfigs = async (
@@ -1522,10 +1680,13 @@ export const getLeadSearchByToken = async (
   });
   if (!search) throw new HttpError(404);
 
-  const statusConfigs = await (context.entities as any).LeadStatusConfig.findMany({
-    where: { companyId: search.companyId },
-    orderBy: { order: 'asc' },
-  });
+  // Ceux du tableau partagé, pas ceux de l'entreprise : un employé qui reçoit le
+  // lien doit voir exactement les colonnes que voit son patron.
+  const statusConfigs = await effectiveStatusConfigs(
+    context.entities,
+    search.companyId,
+    search.id,
+  );
 
   // Attach note counts
   const identifiers = (search as any).leads.map((l: any) => l.placeId ?? l.id);

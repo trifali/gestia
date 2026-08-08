@@ -246,7 +246,6 @@ export function IntakePanel({
       {tab === 'mapping' && sample && (
         <IntakeMappingPanel
           searchId={searchId}
-          boardTitle={cfg.boardTitle}
           payload={sample.payload}
           paths={sample.paths}
           // Une correspondance déjà enregistrée l'emporte sur la proposition

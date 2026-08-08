@@ -95,7 +95,6 @@ function assignmentsByPath(mapping: LeadIntakeMapping): Map<string, SlotKey[]> {
 
 export function IntakeMappingPanel({
   searchId,
-  boardTitle,
   payload,
   paths,
   initialMapping,
@@ -103,7 +102,6 @@ export function IntakeMappingPanel({
   onSaved,
 }: {
   searchId: string;
-  boardTitle: string;
   payload: JsonValue;
   paths: DetectedPath[];
   initialMapping: LeadIntakeMapping;
@@ -121,8 +119,8 @@ export function IntakeMappingPanel({
   // Le même calcul que celui du serveur, sur le même échantillon : l'aperçu ne
   // peut pas diverger de ce qui sera réellement créé.
   const preview = useMemo(
-    () => applyMapping(payload, mapping, { boardLabel: boardTitle }),
-    [payload, mapping, boardTitle],
+    () => applyMapping(payload, mapping),
+    [payload, mapping],
   );
   const lead = preview.leads[0];
   const wiring = useMemo(() => assignmentsByPath(mapping), [mapping]);
