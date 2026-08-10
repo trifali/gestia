@@ -328,6 +328,8 @@ export function LeadCardInfo({
     mapsUrl?: string | null;
     statusUpdatedAt?: string | Date | null;
     source?: string | null;
+    /** Première ouverture de la fiche. `null` = personne ne l'a encore regardée. */
+    viewedAt?: string | Date | null;
   };
   /** Optional button row rendered below contact info. */
   actions?: ReactNode;
@@ -348,11 +350,29 @@ export function LeadCardInfo({
       movedAt.toLocaleTimeString('fr-CA', { hour: '2-digit', minute: '2-digit' })
     : null;
 
+  // Personne n'a encore ouvert cette fiche. La même trace que celle qui retient
+  // l'alerte d'arrivée (`Lead.viewedAt`, voir jobs/leadIntake) : ce que le point
+  // signale sur la carte est exactement ce qui déclencherait la notification.
+  const unopened = !lead.viewedAt;
+
   return (
     <div className='p-3 space-y-2'>
       <div className='flex items-start gap-2'>
         {selection}
-        <div className='font-semibold text-sm leading-tight flex-1 min-w-0'>{lead.name}</div>
+        {unopened && (
+          <span
+            className='w-2 h-2 rounded-full bg-accent-500 shrink-0 mt-[5px]'
+            title='Jamais ouvert'
+            aria-label='Jamais ouvert'
+          />
+        )}
+        <div
+          className={`text-sm leading-tight flex-1 min-w-0 ${
+            unopened ? 'font-bold text-ink' : 'font-semibold'
+          }`}
+        >
+          {lead.name}
+        </div>
       </div>
       <div className='flex items-center gap-1.5 flex-wrap'>
         {movedLabel && (

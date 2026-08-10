@@ -843,6 +843,11 @@ action deleteLeads {
   fn: import { deleteLeads } from "@src/app/leads/operations",
   entities: [User, LeadSearch, Lead]
 }
+// Ouvrir une fiche vaut « vu » : c'est ce qui annule l'alerte d'arrivée.
+action markLeadViewed {
+  fn: import { markLeadViewed } from "@src/app/leads/operations",
+  entities: [User, LeadSearch, Lead]
+}
 
 // ─── Réception de prospects (assistant « Nouveau tableau », branche webhook) ───
 action createLeadBoard {

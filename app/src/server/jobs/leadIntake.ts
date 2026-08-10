@@ -58,8 +58,9 @@ const NOTIFY_MAX_AGE_MS = 12 * 60 * 60_000;
  * Un prospect qu'on ne voit pas est exactement le problème que cette
  * fonctionnalité existe pour résoudre : il ne suffit pas que la carte se crée,
  * encore faut-il que quelqu'un l'apprenne. L'alerte est différée et conditionnée
- * à `statusUpdatedAt` — dès que le prospect change de colonne, c'est que
- * quelqu'un s'en occupe, et l'alerte n'a plus lieu d'être.
+ * à deux traces : `viewedAt`, posée à l'ouverture de la fiche, et
+ * `statusUpdatedAt`, posée au changement de colonne. L'une ou l'autre suffit —
+ * dans les deux cas quelqu'un s'en occupe, et l'alerte n'a plus lieu d'être.
  *
  * Le sursis se lit sur chaque source (`alertDelayMinutes`). Une source réglée sur
  * « dès l'arrivée » a normalement déjà été traitée par le point d'entrée, qui a
@@ -107,19 +108,46 @@ export const notifyInboundLeads = async (_args: unknown, context: any) => {
     // Uniquement ce qui est arrivé depuis la dernière alerte : sans cette borne,
     // chaque passage réexpédierait tout l'historique de la journée.
     const since = webhook.notifiedAt ?? floor;
+
+    // Ce que la SOURCE a créé, et non tout ce qui est apparu sur le tableau.
+    //
+    // Le tableau accueille aussi les saisies manuelles et les rejeux du journal.
+    // Filtrer sur `searchId` seul les faisait annoncer comme des arrivées : on
+    // ajoutait un prospect à la main, et quatre minutes plus tard un SMS facturé
+    // venait apprendre à celui qui venait de le taper que ce prospect existait.
+    // Un prospect saisi ou rejoué a déjà quelqu'un devant lui — il n'est arrivé
+    // de nulle part, et il n'y a personne à prévenir.
+    //
+    // Le journal porte déjà le lien exact : chaque appel enregistre les cartes
+    // qu'il a créées. Bornée à `since`, la liste ne couvre que les appels non
+    // encore annoncés.
+    const events = await context.entities.LeadInboundEvent.findMany({
+      where: { webhookId: webhook.id, status: 'ok', createdAt: { gt: since } },
+      select: { leadIds: true },
+    });
+    const arrived = [...new Set(events.flatMap((e: { leadIds: string[] }) => e.leadIds))];
+    if (arrived.length === 0) continue;
+
     const fresh = await context.entities.Lead.findMany({
       where: {
+        id: { in: arrived },
         searchId: webhook.search.id,
         createdAt: { gt: since, lte: due },
       },
-      select: { id: true, name: true, email: true, phone: true, status: true, statusUpdatedAt: true, createdAt: true },
+      select: {
+        id: true, name: true, email: true, phone: true, status: true,
+        statusUpdatedAt: true, viewedAt: true, createdAt: true,
+      },
       orderBy: { createdAt: 'asc' },
       take: 50,
     });
 
-    // Un prospect déjà déplacé de sa colonne d'arrivée a été vu. Rien à annoncer.
+    // Un prospect dont la fiche a été ouverte, ou qui a déjà quitté sa colonne
+    // d'arrivée, a été vu. Rien à annoncer.
     const unseen = fresh.filter(
-      (l: any) => !l.statusUpdatedAt || l.statusUpdatedAt.getTime() <= l.createdAt.getTime() + 1000,
+      (l: any) =>
+        !l.viewedAt
+        && (!l.statusUpdatedAt || l.statusUpdatedAt.getTime() <= l.createdAt.getTime() + 1000),
     );
     if (unseen.length === 0) continue;
 

@@ -539,6 +539,12 @@ model Lead {
   // Les lignes antérieures à la saisie manuelle viennent toutes de Google Maps.
   source          String    @default("google_maps")
   statusUpdatedAt DateTime?
+  // Première ouverture de la fiche. Écrite une seule fois, jamais réécrite : elle
+  // ne sert pas d'historique de consultation mais de réponse à une seule question
+  // — « quelqu'un a-t-il déjà vu ce prospect ? » — dont dépend l'alerte d'arrivée
+  // (voir jobs/leadIntake). Le changement de statut ne suffisait pas : on peut
+  // très bien ouvrir une fiche, la traiter et la laisser dans sa colonne.
+  viewedAt        DateTime?
   order           Int       @default(0) // manual position inside its kanban column
 
   @@index([searchId])

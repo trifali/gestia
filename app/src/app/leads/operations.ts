@@ -1565,6 +1565,34 @@ export const getSmsReplyAlerts = async (
   return { total, bySearch, leadTotal, otherTotal: total - leadTotal, inboxEnabled };
 };
 
+/**
+ * Note qu'une fiche de prospect a été ouverte.
+ *
+ * Une seule écriture par prospect, pour toujours : `viewedAt: null` dans le
+ * `where` fait que les ouvertures suivantes ne touchent pas la base. Ce n'est pas
+ * un historique de consultation — la seule question posée est « quelqu'un l'a-t-il
+ * déjà vu ? », et c'est l'alerte d'arrivée (`jobs/leadIntake`) qui la pose.
+ *
+ * Portée par la requête plutôt que par une vérification préalable, comme
+ * `markLeadSmsRead` : un prospect d'une autre entreprise ne correspond
+ * simplement à rien, et l'appel est sans effet.
+ *
+ * `marked` dit si cette ouverture est bien la première. C'est ce qui permet à
+ * l'écran de ne recharger le tableau que dans ce cas — la pastille « jamais
+ * ouvert » vient de s'éteindre — au lieu d'à chaque consultation.
+ */
+export const markLeadViewed = async (
+  { leadId }: { leadId: string },
+  context: any,
+): Promise<{ ok: true; marked: boolean }> => {
+  const companyId = ensureCompany(context.user);
+  const { count } = await (context.entities as any).Lead.updateMany({
+    where: { id: leadId, viewedAt: null, search: { companyId } },
+    data: { viewedAt: new Date() },
+  });
+  return { ok: true, marked: count > 0 };
+};
+
 /** Clears the unread badge once someone has actually opened the thread. */
 export const markLeadSmsRead = async (
   { identifier }: { identifier: string },

@@ -405,8 +405,9 @@ function IntakeAlerts({
           </>
         ) : instant ? (
           <>
-            Envoyée dès l'arrivée. Un appel reçu vaut une alerte, même s'il porte plusieurs
-            prospects
+            Déclenchée par chaque appel reçu à l'adresse ci-dessus, et envoyée aussitôt : un appel
+            vaut une alerte, même s'il porte plusieurs prospects. Un prospect ajouté à la main
+            n'en déclenche aucune
             {notifyBySms ? (
               <>
                 {' '}— soit <strong className='text-ink'>un SMS facturé</strong>, au maximum un
@@ -417,8 +418,9 @@ function IntakeAlerts({
           </>
         ) : (
           <>
-            Envoyée 10 minutes après l'arrivée, et seulement si personne n'a touché au prospect
-            entre-temps. Une seule alerte par vague, pas une par prospect
+            Déclenchée par les appels reçus à l'adresse ci-dessus, et envoyée 10 minutes plus tard
+            — seulement si personne n'a ouvert ni déplacé le prospect entre-temps. Une seule alerte
+            par vague, pas une par prospect, et rien pour un prospect ajouté à la main
             {notifyBySms ? <> — soit <strong className='text-ink'>un SMS facturé</strong></> : null}.
           </>
         )}
