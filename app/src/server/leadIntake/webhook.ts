@@ -37,6 +37,7 @@ import {
 } from '../../shared/leadIntake';
 import { resolveIntakeStatus } from '../../app/leads/operations';
 import { insertMappedLead, registerLeadSources } from './persist';
+import { deliverIntakeAlerts } from './alerts';
 
 /**
  * Plafond horaire par tableau. Le point d'entrée est anonyme au sens où
@@ -154,6 +155,11 @@ export const leadIntakeReceive = async (req: Request, res: Response, context: an
       mapping: true,
       isActive: true,
       searchId: true,
+      // Réglages d'alerte : lus ici pour que la source réglée sur « dès
+      // l'arrivée » soit servie sans attendre le passage de `notifyInboundLeads`.
+      notifyByEmail: true,
+      notifyBySms: true,
+      alertDelayMinutes: true,
       search: { select: { id: true, companyId: true, title: true } },
     },
   });
@@ -279,7 +285,7 @@ export const leadIntakeReceive = async (req: Request, res: Response, context: an
       );
     }
 
-    const created: string[] = [];
+    const created: { id: string; name: string; email: string | null; phone: string | null }[] = [];
     for (const lead of usable) {
       const row = await insertMappedLead(entities, {
         searchId: webhook.searchId,
@@ -289,7 +295,7 @@ export const leadIntakeReceive = async (req: Request, res: Response, context: an
         fallbackExternalId: dedupeKey,
         sourceMap,
       });
-      created.push(row.id);
+      created.push(row);
     }
 
     await entities.LeadSearch.update({
@@ -302,10 +308,30 @@ export const leadIntakeReceive = async (req: Request, res: Response, context: an
     });
     await entities.LeadInboundEvent.update({
       where: { id: event.id },
-      data: { status: 'ok', leadIds: created, errorMsg: warnings.length ? warnings.join(' ') : null },
+      data: {
+        status: 'ok',
+        leadIds: created.map(l => l.id),
+        errorMsg: warnings.length ? warnings.join(' ') : null,
+      },
     });
 
     res.status(200).json({ ok: true, created: created.length, warnings });
+
+    // Alerte immédiate, si la source l'a demandée — après la réponse, jamais
+    // avant : l'émetteur (Zapier, un script Sheets, un `<form>`) n'a pas à
+    // attendre un SMTP lent ou l'API Telnyx pour savoir que ses prospects sont
+    // créés, et un échec d'alerte ne doit pas se lire comme un échec de
+    // réception. Le filet reste `notifyInboundLeads` : tant que `notifiedAt`
+    // n'a pas bougé, le prochain passage reprendra le lot.
+    //
+    // Le filtre « personne n'a touché au prospect » de la tâche n'a rien à faire
+    // ici : la carte a une seconde d'âge. Un appel reçu vaut une alerte, quel que
+    // soit le nombre de prospects qu'il porte.
+    if (webhook.alertDelayMinutes === 0 && created.length > 0) {
+      await deliverIntakeAlerts(entities, webhook, created).catch(err =>
+        console.error('[intake] alerte immédiate échouée', err),
+      );
+    }
   } catch (err: any) {
     console.error('[intake] échec de traitement', err);
     await entities.LeadInboundEvent.update({

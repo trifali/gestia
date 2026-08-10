@@ -108,7 +108,10 @@ export async function insertMappedLead(
      */
     sourceMap?: Map<string, string>;
   },
-): Promise<{ id: string }> {
+  // La carte créée, et non son seul identifiant : l'alerte immédiate a besoin de
+  // nommer les prospects qu'elle annonce, et les relire juste après les avoir
+  // écrits serait une requête pour rien.
+): Promise<{ id: string; name: string; email: string | null; phone: string | null }> {
   const { lead } = args;
 
   const source =

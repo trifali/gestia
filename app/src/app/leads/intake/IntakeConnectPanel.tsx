@@ -38,6 +38,7 @@ export function IntakeConnectPanel({
   onSimulated,
   notifyByEmail,
   notifyBySms,
+  alertDelayMinutes,
   alertEmail,
   alertPhone,
   canAlertBySms,
@@ -54,6 +55,8 @@ export function IntakeConnectPanel({
   onSimulated: () => void;
   notifyByEmail: boolean;
   notifyBySms: boolean;
+  /** Sursis avant l'envoi, en minutes. `0` = dès l'arrivée. */
+  alertDelayMinutes: number;
   /** Coordonnées de l'entreprise que les alertes viseraient. */
   alertEmail: string | null;
   alertPhone: string | null;
@@ -162,6 +165,7 @@ export function IntakeConnectPanel({
         isAdmin={isAdmin}
         notifyByEmail={notifyByEmail}
         notifyBySms={notifyBySms}
+        alertDelayMinutes={alertDelayMinutes}
         alertEmail={alertEmail}
         alertPhone={alertPhone}
         canAlertBySms={canAlertBySms}
@@ -283,12 +287,18 @@ export function IntakeConnectPanel({
  *
  * Les deux sont éteints par défaut. Une alerte est une interruption, et le SMS est
  * facturé : on les demande, on ne les subit pas.
+ *
+ * Le moment de l'envoi se règle ici aussi. « Après 10 minutes » laisse à qui a
+ * Gestia ouvert le temps de voir la carte arriver et regroupe une vague en une
+ * seule alerte ; « Dès l'arrivée » sert ceux qui rappellent tout de suite, et pour
+ * qui dix minutes de retard sont dix minutes de trop.
  */
 function IntakeAlerts({
   searchId,
   isAdmin,
   notifyByEmail,
   notifyBySms,
+  alertDelayMinutes,
   alertEmail,
   alertPhone,
   canAlertBySms,
@@ -298,20 +308,18 @@ function IntakeAlerts({
   isAdmin: boolean;
   notifyByEmail: boolean;
   notifyBySms: boolean;
+  alertDelayMinutes: number;
   alertEmail: string | null;
   alertPhone: string | null;
   canAlertBySms: boolean;
   onChanged: () => void;
 }) {
-  const [saving, setSaving] = useState<'email' | 'sms' | null>(null);
+  const [saving, setSaving] = useState<'email' | 'sms' | 'delay' | null>(null);
 
-  async function toggle(channel: 'email' | 'sms', next: boolean) {
-    setSaving(channel);
+  async function save(what: 'email' | 'sms' | 'delay', patch: Record<string, boolean | number>) {
+    setSaving(what);
     try {
-      await updateLeadIntakeWebhook({
-        searchId,
-        ...(channel === 'email' ? { notifyByEmail: next } : { notifyBySms: next }),
-      } as any);
+      await updateLeadIntakeWebhook({ searchId, ...patch } as any);
       onChanged();
     } catch (err: any) {
       toast.error(err?.message ?? 'Modification impossible');
@@ -320,7 +328,11 @@ function IntakeAlerts({
     }
   }
 
+  const toggle = (channel: 'email' | 'sms', next: boolean) =>
+    save(channel, channel === 'email' ? { notifyByEmail: next } : { notifyBySms: next });
+
   const none = !notifyByEmail && !notifyBySms;
+  const instant = alertDelayMinutes === 0;
 
   // Ce qui empêche un canal de servir, dit à l'endroit où on l'active — et non
   // pas seulement l'absence de destinataire. Un « Par SMS » grisé qui affiche
@@ -354,11 +366,54 @@ function IntakeAlerts({
           onChange={next => toggle('sms', next)}
         />
       </div>
+      {/* Le moment de l'envoi n'a de sens qu'une fois un canal choisi : sans
+          destinataire, régler « dès l'arrivée » ne règle rien. */}
+      {!none && (
+        <div className='mt-2 flex flex-wrap items-center gap-2'>
+          <span className='text-xs text-muted'>Envoi</span>
+          <div className='inline-flex rounded-xl border border-line p-0.5'>
+            {[
+              { value: 0, label: "Dès l'arrivée" },
+              { value: 10, label: 'Après 10 minutes' },
+            ].map(choice => (
+              <button
+                key={choice.value}
+                type='button'
+                disabled={!isAdmin || saving !== null}
+                onClick={() => {
+                  if (choice.value !== alertDelayMinutes) save('delay', { alertDelayMinutes: choice.value });
+                }}
+                className={`rounded-[10px] px-2.5 py-1 text-xs font-medium transition-colors ${
+                  choice.value === alertDelayMinutes
+                    ? 'bg-accent-500 text-white'
+                    : 'text-muted hover:text-ink disabled:hover:text-muted'
+                }`}
+              >
+                {choice.label}
+              </button>
+            ))}
+          </div>
+          {saving === 'delay' && <LuLoader size={11} className='animate-spin text-muted' />}
+        </div>
+      )}
+
       <p className='text-xs text-muted mt-1.5'>
         {none ? (
           <>
             Aucune alerte : les prospects apparaissent sur le tableau, sans notification hors de
             Gestia.
+          </>
+        ) : instant ? (
+          <>
+            Envoyée dès l'arrivée. Un appel reçu vaut une alerte, même s'il porte plusieurs
+            prospects
+            {notifyBySms ? (
+              <>
+                {' '}— soit <strong className='text-ink'>un SMS facturé</strong>, au maximum un
+                toutes les 2 minutes pour qu'une rafale ne se facture pas au prospect
+              </>
+            ) : null}
+            .
           </>
         ) : (
           <>

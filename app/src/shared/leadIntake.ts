@@ -32,6 +32,37 @@ export const LEAD_INTAKE_PATH = '/webhooks/prospects';
 /** En-tête portant le secret partagé. */
 export const LEAD_INTAKE_SECRET_HEADER = 'x-gestia-secret';
 
+// ─── Alertes d'arrivée ────────────────────────────────────────────────────────
+
+/**
+ * Les deux seuls sursis proposés, en minutes.
+ *
+ * `0` fait partir l'alerte depuis le point d'entrée lui-même, dès que les cartes
+ * sont créées. `10` la confie à la tâche `notifyInboundLeads`, qui laisse le
+ * temps de voir la carte arriver et regroupe une vague en une seule alerte.
+ *
+ * Deux valeurs et pas un champ libre : c'est un arbitrage entre « vite prévenu »
+ * et « pas interrompu », pas un réglage à accorder à la minute près.
+ */
+export const INTAKE_ALERT_DELAY_CHOICES = [0, 10] as const;
+
+/** Le sursis historique, appliqué à toute source qui n'a rien choisi. */
+export const INTAKE_ALERT_DELAY_DEFAULT = 10;
+
+/**
+ * Plancher entre deux SMS d'arrivée d'une même source.
+ *
+ * En mode immédiat, un appel reçu vaut une alerte : une source qui pousse ses
+ * lignes une par une enverrait sinon autant de segments facturés que de lignes.
+ * Le courriel, lui, n'est pas retenu — il ne coûte rien.
+ */
+export const INTAKE_SMS_FLOOR_MS = 2 * 60_000;
+
+/** Le sursis d'une source, en millisecondes, tolérant une valeur absente. */
+export function intakeAlertDelayMs(minutes: number | null | undefined): number {
+  return (minutes ?? INTAKE_ALERT_DELAY_DEFAULT) * 60_000;
+}
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 /**

@@ -17,6 +17,7 @@ import { insertMappedLead, registerLeadSources } from '../../server/leadIntake/p
 import {
   applyMapping,
   flattenPaths,
+  INTAKE_ALERT_DELAY_CHOICES,
   isMappingConfigured,
   isUsableLead,
   LEAD_INTAKE_PATH,
@@ -141,6 +142,8 @@ export type LeadIntakeConfig = {
   /** Alertes demandées pour cette source. */
   notifyByEmail: boolean;
   notifyBySms: boolean;
+  /** Sursis avant l'envoi, en minutes. `0` = dès l'arrivée. */
+  alertDelayMinutes: number;
   /**
    * Où partiraient ces alertes, et si c'est possible.
    *
@@ -188,6 +191,7 @@ export const getLeadIntakeConfig = async (
     errorCount,
     notifyByEmail: webhook.notifyByEmail,
     notifyBySms: webhook.notifyBySms,
+    alertDelayMinutes: webhook.alertDelayMinutes,
     alertEmail: company?.email?.trim() || null,
     alertPhone: company?.phone?.trim() || null,
     // Le SMS demande en plus un numéro et une clé Telnyx : c'est Gestia qui
@@ -475,20 +479,37 @@ export const updateLeadIntakeWebhook = async (
     isActive,
     notifyByEmail,
     notifyBySms,
+    alertDelayMinutes,
   }: {
     searchId: string;
     isActive?: boolean;
     notifyByEmail?: boolean;
     notifyBySms?: boolean;
+    alertDelayMinutes?: number;
   },
   context: any,
-): Promise<{ isActive: boolean; notifyByEmail: boolean; notifyBySms: boolean }> => {
+): Promise<{
+  isActive: boolean;
+  notifyByEmail: boolean;
+  notifyBySms: boolean;
+  alertDelayMinutes: number;
+}> => {
   const { companyId, webhook } = await requireIntake(context, searchId, { admin: true });
 
-  const data: Record<string, boolean> = {};
+  const data: Record<string, boolean | number> = {};
   if (isActive !== undefined) data.isActive = !!isActive;
   if (notifyByEmail !== undefined) data.notifyByEmail = !!notifyByEmail;
   if (notifyBySms !== undefined) data.notifyBySms = !!notifyBySms;
+
+  // Deux valeurs et pas un champ libre : l'écran n'en propose que deux, et un
+  // sursis arbitraire venu d'ailleurs ferait diverger ce que la tâche applique
+  // de ce que l'interface promet.
+  if (alertDelayMinutes !== undefined) {
+    if (!INTAKE_ALERT_DELAY_CHOICES.includes(alertDelayMinutes as any)) {
+      throw new HttpError(400, "Délai d'alerte non reconnu.");
+    }
+    data.alertDelayMinutes = alertDelayMinutes;
+  }
 
   // Refuser d'allumer un canal sans destination : sinon l'interrupteur affiche
   // « activé » alors que la tâche n'aura personne à prévenir, et l'utilisateur
@@ -514,7 +535,7 @@ export const updateLeadIntakeWebhook = async (
   const updated = await context.entities.LeadInboundWebhook.update({
     where: { id: webhook.id },
     data,
-    select: { isActive: true, notifyByEmail: true, notifyBySms: true },
+    select: { isActive: true, notifyByEmail: true, notifyBySms: true, alertDelayMinutes: true },
   });
   return updated;
 };

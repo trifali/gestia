@@ -4,10 +4,12 @@
 // immédiatement, sans file d'attente ni rattrapage. C'est l'avantage structurel
 // de recevoir plutôt que d'aller chercher. Ces deux tâches ne font que borner la
 // croissance du journal, et prévenir quand personne ne regarde.
+//
+// L'envoi de l'alerte, lui, vit dans `leadIntake/alerts` : une source réglée sur
+// « dès l'arrivée » est servie par le point d'entrée, sans passer par ici.
 
-import { config } from 'wasp/server';
-import { sendEmailWithAttachment, companySmtp } from '../mail';
-import { resolveSmsCredentials, sendSms, toE164 } from '../sms';
+import { deliverIntakeAlerts } from '../leadIntake/alerts';
+import { intakeAlertDelayMs } from '../../shared/leadIntake';
 
 /** Au-delà, un appel journalisé n'aide plus personne à diagnostiquer quoi que ce soit. */
 const RETENTION_DAYS = 90;
@@ -47,13 +49,6 @@ export const sweepLeadInboundEvents = async (_args: unknown, context: any) => {
 
 // ─── Alerte de prospects reçus ────────────────────────────────────────────────
 
-/**
- * Le sursis laissé avant d'alerter. Même raisonnement que pour les réponses SMS
- * (`REPLY_ALERT_DELAY_MINUTES`) : quelqu'un qui a Gestia ouvert verra la carte
- * arriver, et n'a pas besoin d'un courriel en plus.
- */
-const NOTIFY_DELAY_MS = 10 * 60_000;
-
 /** Au-delà, on ne rattrape plus : le prospect est de toute façon froid. */
 const NOTIFY_MAX_AGE_MS = 12 * 60 * 60_000;
 
@@ -65,20 +60,29 @@ const NOTIFY_MAX_AGE_MS = 12 * 60 * 60_000;
  * encore faut-il que quelqu'un l'apprenne. L'alerte est différée et conditionnée
  * à `statusUpdatedAt` — dès que le prospect change de colonne, c'est que
  * quelqu'un s'en occupe, et l'alerte n'a plus lieu d'être.
+ *
+ * Le sursis se lit sur chaque source (`alertDelayMinutes`). Une source réglée sur
+ * « dès l'arrivée » a normalement déjà été traitée par le point d'entrée, qui a
+ * posé `notifiedAt` : il ne reste alors rien à annoncer ici. Ce passage lui sert
+ * de filet — si l'envoi immédiat a échoué avant d'écrire ce repère, il reprend le
+ * lot au tour suivant.
  */
 export const notifyInboundLeads = async (_args: unknown, context: any) => {
   const now = Date.now();
-  const due = new Date(now - NOTIFY_DELAY_MS);
   const floor = new Date(now - NOTIFY_MAX_AGE_MS);
 
   // Les sources sans aucune alerte demandée sont écartées en SQL. C'est le cas
   // par défaut, donc de très loin le plus courant : les charger pour découvrir
   // ensuite qu'il n'y a rien à envoyer ferait tourner une requête de prospects
   // par source toutes les cinq minutes, pour rien.
+  //
+  // L'échéance, elle, ne s'exprime plus en SQL depuis qu'elle dépend de chaque
+  // source : le filtre ne garde ici que ce qui est encore rattrapable, et le
+  // sursis est appliqué dans la boucle.
   const webhooks = await context.entities.LeadInboundWebhook.findMany({
     where: {
       isActive: true,
-      lastReceivedAt: { gte: floor, lte: due },
+      lastReceivedAt: { gte: floor },
       OR: [{ notifyByEmail: true }, { notifyBySms: true }],
     },
     select: {
@@ -87,12 +91,19 @@ export const notifyInboundLeads = async (_args: unknown, context: any) => {
       notifiedAt: true,
       notifyByEmail: true,
       notifyBySms: true,
+      alertDelayMinutes: true,
+      lastReceivedAt: true,
       search: { select: { id: true, title: true } },
     },
   });
 
   let sent = 0;
   for (const webhook of webhooks) {
+    // Le sursis court depuis la dernière réception, et non depuis chaque prospect :
+    // c'est ce qui fait qu'une vague d'arrivées produit une seule alerte.
+    const due = new Date(now - intakeAlertDelayMs(webhook.alertDelayMinutes));
+    if (webhook.lastReceivedAt && webhook.lastReceivedAt > due) continue;
+
     // Uniquement ce qui est arrivé depuis la dernière alerte : sans cette borne,
     // chaque passage réexpédierait tout l'historique de la journée.
     const since = webhook.notifiedAt ?? floor;
@@ -112,124 +123,8 @@ export const notifyInboundLeads = async (_args: unknown, context: any) => {
     );
     if (unseen.length === 0) continue;
 
-    // Les coordonnées visées sont celles de l'entreprise — jamais un compte
-    // individuel — mais le choix des canaux appartient à la source.
-    const company = await context.entities.Company.findUnique({
-      where: { id: webhook.companyId },
-      select: {
-        id: true, name: true, email: true, phone: true,
-        telnyxPhoneNumber: true, telnyxApiKey: true,
-        smtpHost: true, smtpPort: true, smtpUsername: true, smtpPassword: true,
-        smtpFromName: true, smtpFromEmail: true,
-      },
-    });
-    if (!company) continue;
-
-    let delivered = false;
-    if (webhook.notifyByEmail) {
-      delivered = await deliverInboundAlert(company, webhook.search.title, unseen);
-    }
-    if (webhook.notifyBySms) {
-      delivered = (await deliverInboundSms(company, webhook.search.title, unseen)) || delivered;
-    }
-
-    // La date est posée même en cas d'échec d'envoi : sans cela, un SMTP mal
-    // configuré ferait retenter le même lot toutes les cinq minutes, sans fin.
-    await context.entities.LeadInboundWebhook.update({
-      where: { id: webhook.id },
-      data: { notifiedAt: new Date() },
-    });
-    if (delivered) sent += 1;
+    if (await deliverIntakeAlerts(context.entities, webhook, unseen)) sent += 1;
   }
 
   return { sent };
 };
-
-/**
- * L'alerte par SMS.
- *
- * Court et sans lien : un SMS est facturé au segment, et l'adresse de Gestia ne
- * tient pas dans le budget utile. Le message dit combien et sur quel tableau ;
- * l'application dit le reste.
- *
- * Les mêmes garde-fous que les alertes de réponse (`jobs/smsReplyAlerts`), pour
- * la même raison : écrire à notre propre numéro Telnyx rentrerait dans le webhook
- * entrant et créerait une conversation avec nous-mêmes.
- */
-async function deliverInboundSms(company: any, boardTitle: string, leads: any[]): Promise<boolean> {
-  const credentials = resolveSmsCredentials(company);
-  const target = toE164(company.phone ?? '');
-
-  if (!credentials) {
-    console.warn('[intake] alerte SMS demandée mais identifiants Telnyx absents.');
-    return false;
-  }
-  if (!target) {
-    console.warn('[intake] alerte SMS demandée mais aucun téléphone d\'entreprise valide.');
-    return false;
-  }
-  if (target === credentials.from) {
-    console.warn('[intake] alerte SMS ignorée : le téléphone d\'entreprise est le numéro Telnyx.');
-    return false;
-  }
-
-  const count = leads.length;
-  const head = leads[0];
-  const text = count === 1
-    ? `Gestia — nouveau prospect sur « ${boardTitle} » : ${head.name}.`
-    : `Gestia — ${count} nouveaux prospects sur « ${boardTitle} ».`;
-
-  try {
-    await sendSms({ to: target, text, credentials });
-    return true;
-  } catch (err) {
-    console.error('[intake] alerte SMS échouée', err);
-    return false;
-  }
-}
-
-async function deliverInboundAlert(company: any, boardTitle: string, leads: any[]): Promise<boolean> {
-  const to = (company.email ?? '').trim();
-  const smtp = companySmtp(company);
-  if (!to) {
-    console.warn('[intake] prospects reçus mais aucun courriel d\'entreprise configuré.');
-    return false;
-  }
-  if (!smtp) {
-    console.warn('[intake] prospects reçus mais aucun serveur SMTP propre à l\'entreprise.');
-    return false;
-  }
-
-  const link = `${config.frontendUrl}/prospection`;
-  const count = leads.length;
-  const subject = count === 1
-    ? `Nouveau prospect — ${boardTitle}`
-    : `${count} nouveaux prospects — ${boardTitle}`;
-
-  const lines = leads.map(l => `• ${l.name}${l.email ? ` — ${l.email}` : ''}${l.phone ? ` — ${l.phone}` : ''}`);
-
-  try {
-    await sendEmailWithAttachment({
-      smtp,
-      to,
-      subject,
-      text: `${subject}\n\n${lines.join('\n')}\n\nVoir dans Gestia : ${link}`,
-      html:
-        `<p><strong>${escapeHtml(subject)}</strong></p>`
-        + `<ul>${leads.map(l => `<li>${escapeHtml(l.name)}${l.email ? ` — ${escapeHtml(l.email)}` : ''}${l.phone ? ` — ${escapeHtml(l.phone)}` : ''}</li>`).join('')}</ul>`
-        + `<p><a href="${link}">Voir dans Gestia</a></p>`,
-    });
-    return true;
-  } catch (err) {
-    console.error('[intake] alerte courriel échouée', err);
-    return false;
-  }
-}
-
-function escapeHtml(text: string): string {
-  return String(text)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
-}

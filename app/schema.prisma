@@ -857,10 +857,22 @@ model LeadInboundWebhook {
   notifyByEmail Boolean @default(false)
   notifyBySms   Boolean @default(false)
 
+  // Sursis avant d'alerter, en minutes. `0` = à la réception de l'appel, sans
+  // passer par la tâche. Le défaut garde le sursis historique : il laisse à
+  // quelqu'un qui a Gestia ouvert le temps de voir la carte arriver, et regroupe
+  // une vague d'arrivées en une seule alerte — donc un seul SMS facturé.
+  alertDelayMinutes Int @default(10)
+
   // Repère de la dernière alerte « prospects reçus » : la tâche ne réexpédie que
   // ce qui est arrivé après. Sans cette borne, chaque passage renverrait tout
   // l'historique de la journée.
   notifiedAt DateTime?
+
+  // Dernier SMS d'arrivée réellement émis. Sert de plancher en mode immédiat :
+  // une source qui envoie vingt appels en deux minutes ne doit pas produire vingt
+  // segments facturés. Distinct de `notifiedAt`, qui couvre les deux canaux — le
+  // courriel ne coûte rien et n'a pas à être retenu par le prix du SMS.
+  smsNotifiedAt DateTime?
 
   events LeadInboundEvent[]
 

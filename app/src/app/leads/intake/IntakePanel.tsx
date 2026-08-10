@@ -238,6 +238,7 @@ export function IntakePanel({
           onListen={startListening}
           notifyByEmail={cfg.notifyByEmail}
           notifyBySms={cfg.notifyBySms}
+          alertDelayMinutes={cfg.alertDelayMinutes}
           alertEmail={cfg.alertEmail}
           alertPhone={cfg.alertPhone}
           canAlertBySms={cfg.canAlertBySms}
