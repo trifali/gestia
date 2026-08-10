@@ -691,10 +691,15 @@ model LeadEmailLog {
   to         String
   cc         String?
   subject    String
+  // Texte saisi seulement — sans la citation des échanges précédents, qui est
+  // ajoutée à l'envoi. Sinon chaque relance citerait la citation d'avant.
   body       String  @default("") // full message as sent, for preview
   replyTo    String? // where the prospect's reply lands
   fromName   String? // display name used in the From header
   fromEmail  String? // address used in the From header
+  // Message-ID RFC 5322 renvoyé par le serveur SMTP : les relances partent avec
+  // In-Reply-To/References pointant dessus, donc dans le même fil chez le prospect.
+  messageId  String?
 
   @@index([companyId, identifier])
 }

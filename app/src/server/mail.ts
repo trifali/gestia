@@ -150,7 +150,15 @@ export async function sendEmailWithAttachment(params: {
    */
   clientFacing?: boolean;
   attachments?: Attachment[];
-}): Promise<void> {
+  /**
+   * Message-ID du courriel auquel celui-ci répond. Avec `references`, c'est ce
+   * qui range une relance dans la même conversation chez le destinataire
+   * (Gmail, Outlook) au lieu d'ouvrir un fil de plus.
+   */
+  inReplyTo?: string;
+  /** Message-ID de tout le fil, du plus ancien au plus récent (ordre RFC 5322). */
+  references?: string[];
+}): Promise<{ messageId?: string }> {
   const { smtp } = params;
   const fromName = params.fromName || smtp.fromName;
   const fromEmail = params.fromEmail || smtp.fromEmail;
@@ -163,7 +171,7 @@ export async function sendEmailWithAttachment(params: {
   const copyTo = params.clientFacing ? smtp.copyTo : null;
   const bcc = copyTo && !recipients.includes(copyTo.toLowerCase()) ? copyTo : undefined;
 
-  await transportFor(smtp).sendMail({
+  const info = await transportFor(smtp).sendMail({
     from: `"${fromName}" <${fromEmail}>`,
     to: params.to,
     cc: params.cc,
@@ -172,12 +180,18 @@ export async function sendEmailWithAttachment(params: {
     subject: params.subject,
     text: params.text,
     html: params.html,
+    inReplyTo: params.inReplyTo,
+    references: params.references?.length ? params.references : undefined,
     attachments: (params.attachments || []).map((a) => ({
       filename: a.filename,
       content: Buffer.from(a.contentBase64, 'base64'),
       contentType: a.contentType,
     })),
   });
+
+  // Le Message-ID est généré par nodemailer à l'envoi : l'appelant doit le
+  // conserver s'il veut pouvoir rattacher un envoi ultérieur à ce fil.
+  return { messageId: info?.messageId };
 }
 
 /** Opens a connection and authenticates without sending, for the "Tester" button. */

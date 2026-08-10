@@ -521,7 +521,7 @@ export function LeadDetailPanel({
                 : !lead.email
                   ? 'Aucun courriel pour ce prospect'
                   : l.hasEmailSent
-                    ? 'Courriel déjà envoyé — cliquer pour renvoyer'
+                    ? 'Déjà contacté — écrire un nouveau courriel'
                     : l.hasEmailDraft
                       ? 'Brouillon en cours — cliquer pour reprendre'
                       : 'Envoyer un courriel'
@@ -541,7 +541,7 @@ export function LeadDetailPanel({
                   ? 'Aucun téléphone pour ce prospect'
                   : l.smsUnreadCount
                     ? `${l.smsUnreadCount} réponse(s) non lue(s)`
-                    : l.hasSmsSent ? 'Renvoyer un SMS' : 'Envoyer un SMS'
+                    : 'Envoyer un SMS'
             }
           >
             <LuMessageSquare size={14} />
