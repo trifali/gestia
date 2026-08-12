@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import toast from 'react-hot-toast';
 import {
@@ -43,7 +43,7 @@ import {
 } from 'wasp/client/operations';
 import { useAuth } from 'wasp/client/auth';
 import { PAYMENT_METHOD_OPTIONS } from '../payments/PaymentForm';
-import { LuPlus, LuSearch, LuFileText, LuCopy, LuEye, LuX, LuChevronRight, LuWand, LuMessageSquare, LuCheck, LuMail } from 'react-icons/lu';
+import { LuPlus, LuSearch, LuFileText, LuCopy, LuEye, LuX, LuChevronRight, LuWand, LuMessageSquare, LuCheck, LuMail, LuDownload } from 'react-icons/lu';
 import { PageHeader, IconBtn, EditIcon, TrashIcon, useConfirm, Modal, EmptyState, PhoneInput, CopyableUrl } from '../../client/ui';
 import { MagicInput, MagicTextarea } from '../../client/magic';
 import { useSmsAlerts } from '../../client/sms/useSmsAlerts';
@@ -52,7 +52,8 @@ import { REPLY_ALERT_DELAY_MINUTES } from '../../shared/smsAlerts';
 import { TEMPLATE_TYPES, TEMPLATE_VARIABLE_GROUPS, getTemplatePdfBase64 } from './templatePdf';
 import { getBoilerplate } from './templateBoilerplates';
 import MDEditor from '@uiw/react-md-editor';
-import type { BrandAssets } from '../documents/pdf';
+import type { BrandAssets, CompanyForPdf } from '../documents/pdf';
+import { downloadCatalogPdf, getCatalogPdfBase64 } from '../prices/catalogPdf';
 
 export default function SettingsPage() {
   const { data: user } = useAuth();
@@ -550,8 +551,11 @@ const emptyPriceForm: PriceForm = {
 
 function PriceList({ canEdit }: { canEdit: boolean }) {
   const { data: items, isLoading, refetch } = useQuery(getPriceItems);
+  const { data: company } = useQuery(getCurrentCompany);
+  const { data: brand } = useQuery(getCompanyBrandAssets);
   const [editing, setEditing] = useState<PriceItem | null>(null);
   const [creating, setCreating] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const [search, setSearch] = useState('');
   const [filterCategory, setFilterCategory] = useState('');
   const [filterStatus, setFilterStatus] = useState('');
@@ -596,11 +600,18 @@ function PriceList({ canEdit }: { canEdit: boolean }) {
         <p className='text-xs text-muted'>
           Définissez votre grille tarifaire — réutilisable dans les soumissions et factures.
         </p>
-        {canEdit && (
-          <button className='btn-primary' onClick={() => setCreating(true)}>
-            <LuPlus size={16} className='mr-1.5' /> Nouvel article
-          </button>
-        )}
+        <div className='flex items-center gap-2 shrink-0'>
+          {list.length > 0 && (
+            <button className='btn-secondary' onClick={() => setExporting(true)} title='Générer un catalogue PDF à partager'>
+              <LuFileText size={16} className='mr-1.5' /> Catalogue PDF
+            </button>
+          )}
+          {canEdit && (
+            <button className='btn-primary' onClick={() => setCreating(true)}>
+              <LuPlus size={16} className='mr-1.5' /> Nouvel article
+            </button>
+          )}
+        </div>
       </div>
 
       {list.length > 0 && (
@@ -706,7 +717,237 @@ function PriceList({ canEdit }: { canEdit: boolean }) {
           onSaved={() => { setCreating(false); setEditing(null); refetch(); }}
         />
       )}
+
+      {exporting && (
+        <CatalogExportModal
+          items={list}
+          company={(company as any) ?? null}
+          brand={(brand as BrandAssets) ?? null}
+          onClose={() => setExporting(false)}
+        />
+      )}
     </div>
+  );
+}
+
+// ─── Export du catalogue en PDF ────────────────────────────────────────────
+
+/** `YYYY-MM-DD` from a date input → local midnight (avoids the UTC off-by-one). */
+function parseDateInput(v: string): Date | null {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(v);
+  if (!m) return null;
+  return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+}
+
+function CatalogExportModal({
+  items,
+  company,
+  brand,
+  onClose,
+}: {
+  items: PriceItem[];
+  company: CompanyForPdf;
+  brand: BrandAssets;
+  onClose: () => void;
+}) {
+  const [recipient, setRecipient] = useState('');
+  const [validUntil, setValidUntil] = useState('');
+  const [category, setCategory] = useState('');
+  const [intro, setIntro] = useState('');
+  const [notes, setNotes] = useState('');
+  const [onlyActive, setOnlyActive] = useState(true);
+  const [groupByCategory, setGroupByCategory] = useState(true);
+  const [showDescriptions, setShowDescriptions] = useState(true);
+  const [showCodes, setShowCodes] = useState(true);
+  const [url, setUrl] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const categories = useMemo(
+    () => Array.from(new Set(items.map((it) => it.category).filter(Boolean))) as string[],
+    [items],
+  );
+
+  const selected = useMemo(
+    () =>
+      items.filter(
+        (it) => (!onlyActive || it.isActive) && (!category || it.category === category),
+      ),
+    [items, onlyActive, category],
+  );
+
+  const options = useMemo(
+    () => ({
+      recipient: recipient.trim() || null,
+      validUntil: validUntil ? parseDateInput(validUntil) : null,
+      intro: intro.trim() || null,
+      notes: notes.trim() || null,
+      groupByCategory,
+      showDescriptions,
+      showCodes,
+      showSummary: true,
+    }),
+    [recipient, validUntil, intro, notes, groupByCategory, showDescriptions, showCodes],
+  );
+
+  // Debounced live preview — regenerating on every keystroke would be wasteful.
+  // The previous blob stays alive until the new one is ready so the iframe
+  // never flashes empty between two renders.
+  const urlRef = useRef<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    const timer = setTimeout(async () => {
+      try {
+        setError(null);
+        const b64 = await getCatalogPdfBase64(selected, company, brand, options);
+        if (cancelled) return;
+        const bytes = atob(b64);
+        const arr = new Uint8Array(bytes.length);
+        for (let i = 0; i < bytes.length; i++) arr[i] = bytes.charCodeAt(i);
+        const next = URL.createObjectURL(new Blob([arr], { type: 'application/pdf' }));
+        const prev = urlRef.current;
+        urlRef.current = next;
+        setUrl(next);
+        if (prev) URL.revokeObjectURL(prev);
+      } catch (err: any) {
+        if (!cancelled) setError(err?.message || 'Erreur lors de la génération du PDF');
+      }
+    }, 400);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [selected, company, brand, options]);
+
+  // Release the last preview blob when the modal closes.
+  useEffect(() => () => { if (urlRef.current) URL.revokeObjectURL(urlRef.current); }, []);
+
+  const onDownload = () => {
+    try {
+      downloadCatalogPdf(selected, company, brand, options);
+      toast.success('Catalogue téléchargé');
+    } catch (e: any) {
+      toast.error(e?.message || 'Erreur lors de la génération du PDF');
+    }
+  };
+
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      size='xl'
+      title='Catalogue de prix — PDF'
+      footer={
+        <>
+          <button className='btn-secondary' onClick={onClose}>Fermer</button>
+          <button className='btn-primary' onClick={onDownload} disabled={selected.length === 0}>
+            <LuDownload size={16} className='mr-1.5' /> Télécharger le PDF
+          </button>
+        </>
+      }
+    >
+      <div className='grid md:grid-cols-[20rem_1fr] gap-6'>
+        <div className='space-y-3'>
+          <p className='text-xs text-muted'>
+            Générez une grille tarifaire à vos couleurs, prête à envoyer à vos revendeurs.
+          </p>
+
+          <div>
+            <label className='label'>Destinataire</label>
+            <input
+              type='text'
+              className='input w-full text-sm'
+              placeholder='Ex. Revendeurs partenaires'
+              value={recipient}
+              onChange={(e) => setRecipient(e.target.value)}
+            />
+          </div>
+
+          <div>
+            <label className='label'>Prix valides jusqu’au</label>
+            <input
+              type='date'
+              className='input w-full text-sm'
+              value={validUntil}
+              onChange={(e) => setValidUntil(e.target.value)}
+            />
+          </div>
+
+          {categories.length > 0 && (
+            <div>
+              <label className='label'>Catégorie</label>
+              <select className='input w-full text-sm' value={category} onChange={(e) => setCategory(e.target.value)}>
+                <option value=''>Toutes les catégories</option>
+                {categories.map((c) => (
+                  <option key={c} value={c}>{c}</option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          <div>
+            <label className='label'>Introduction</label>
+            <input
+              type='text'
+              className='input w-full text-sm'
+              placeholder='Phrase affichée sous le titre'
+              value={intro}
+              onChange={(e) => setIntro(e.target.value)}
+            />
+          </div>
+
+          <div>
+            <label className='label'>Note (conditions)</label>
+            <textarea
+              className='input w-full text-sm'
+              rows={3}
+              placeholder='Ex. Remise de 15 % applicable aux revendeurs autorisés.'
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+            />
+          </div>
+
+          <div className='space-y-1.5 pt-1'>
+            <CheckRow label='Articles actifs seulement' checked={onlyActive} onChange={setOnlyActive} />
+            <CheckRow label='Grouper par catégorie' checked={groupByCategory} onChange={setGroupByCategory} />
+            <CheckRow label='Afficher les descriptions' checked={showDescriptions} onChange={setShowDescriptions} />
+            <CheckRow label='Afficher les codes' checked={showCodes} onChange={setShowCodes} />
+          </div>
+
+          <p className='text-xs text-muted'>
+            {selected.length} article{selected.length > 1 ? 's' : ''} inclus.
+          </p>
+        </div>
+
+        <div className='h-[65vh] min-h-[24rem] rounded-lg overflow-hidden border border-line bg-canvas-100'>
+          {error ? (
+            <div className='p-6 text-danger text-sm'>{error}</div>
+          ) : selected.length === 0 ? (
+            <div className='p-6 text-muted text-sm'>Aucun article ne correspond aux filtres choisis.</div>
+          ) : url ? (
+            <iframe src={url} title='Aperçu du catalogue' className='w-full h-full border-0' />
+          ) : (
+            <div className='p-6 text-muted text-sm'>Génération de l’aperçu…</div>
+          )}
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+function CheckRow({
+  label,
+  checked,
+  onChange,
+}: {
+  label: string;
+  checked: boolean;
+  onChange: (v: boolean) => void;
+}) {
+  return (
+    <label className='flex items-center gap-2 text-sm cursor-pointer'>
+      <input type='checkbox' checked={checked} onChange={(e) => onChange(e.target.checked)} />
+      <span>{label}</span>
+    </label>
   );
 }
 

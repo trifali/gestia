@@ -95,7 +95,7 @@ export type BrandAssets = {
 } | null;
 
 // ---------- Helpers ----------
-function joinAddress(p: {
+export function joinAddress(p: {
   address?: string | null;
   city?: string | null;
   province?: string | null;
@@ -132,7 +132,7 @@ function docKindLabel(type: string): { word: string; titre: string; refLabel: st
   return { word: 'DEVIS', titre: 'Proposition\ncommerciale.', refLabel: 'Référence' };
 }
 
-type Theme = {
+export type Theme = {
   primary: string;
   accent: string;
   text: string;
@@ -143,7 +143,7 @@ type Theme = {
   zebra: string;
 };
 
-function buildTheme(brand: BrandAssets): Theme {
+export function buildTheme(brand: BrandAssets): Theme {
   return {
     primary: brand?.primaryColor || DEFAULT_PRIMARY,
     accent: brand?.accentColor || DEFAULT_ACCENT,
@@ -249,7 +249,7 @@ function buildCover(doc: DocForPdf, company: CompanyForPdf, brand: BrandAssets, 
   ];
 }
 
-function footerLine(company: CompanyForPdf): string {
+export function footerLine(company: CompanyForPdf): string {
   const parts: string[] = [];
   if (company?.legalName || company?.name) parts.push(company!.legalName || company!.name);
   if (company?.email) parts.push(company.email);
@@ -257,7 +257,7 @@ function footerLine(company: CompanyForPdf): string {
   return parts.join('  •  ');
 }
 
-function chunkPairs<T>(arr: T[]): (T | null)[][] {
+export function chunkPairs<T>(arr: T[]): (T | null)[][] {
   const out: (T | null)[][] = [];
   for (let i = 0; i < arr.length; i += 2) {
     out.push([arr[i], arr[i + 1] ?? null]);
@@ -266,7 +266,7 @@ function chunkPairs<T>(arr: T[]): (T | null)[][] {
 }
 
 // ---------- Section heading ----------
-function sectionHeading(eyebrow: string, title: string, t: Theme): Content {
+export function sectionHeading(eyebrow: string, title: string, t: Theme): Content {
   return {
     stack: [
       { text: eyebrow.toUpperCase(), color: t.accent, bold: true, fontSize: 8, characterSpacing: 3, margin: [0, 0, 0, 4] },
@@ -280,7 +280,7 @@ function sectionHeading(eyebrow: string, title: string, t: Theme): Content {
   };
 }
 
-function subheading(text: string, t: Theme): Content {
+export function subheading(text: string, t: Theme): Content {
   return {
     text: text,
     color: t.accent,
