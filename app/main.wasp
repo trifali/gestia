@@ -734,6 +734,18 @@ action deleteProspectTemplate {
   fn: import { deleteProspectTemplate } from "@src/app/leads/operations",
   entities: [User, LeadSearch, ProspectTemplate]
 }
+
+// Reprendre les modèles d'un tableau existant dans un nouveau, plutôt que de les
+// réécrire. La copie a besoin des statuts : elle vérifie que ceux qu'un modèle
+// revendique existent bien dans le tableau d'arrivée.
+query getProspectTemplateSources {
+  fn: import { getProspectTemplateSources } from "@src/app/leads/operations",
+  entities: [User, LeadSearch, ProspectTemplate]
+}
+action copyProspectTemplates {
+  fn: import { copyProspectTemplates } from "@src/app/leads/operations",
+  entities: [User, LeadSearch, ProspectTemplate, LeadStatusConfig]
+}
 action sendProspectSms {
   fn: import { sendProspectSms } from "@src/app/leads/operations",
   entities: [User, Company, Lead, LeadSmsLog]

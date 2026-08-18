@@ -1471,6 +1471,121 @@ export const deleteProspectTemplate = async (
   return { deleted: true };
 };
 
+/**
+ * Les tableaux où l'on peut aller chercher des modèles à recopier : ceux de
+ * l'entreprise qui en ont au moins un, celui d'où l'on regarde exclu.
+ *
+ * Les modèles voyagent avec la liste plutôt que derrière un second appel par
+ * tableau : ils servent à la fois à cocher ce qu'on recopie et à en montrer un
+ * aperçu, et une entreprise a des dizaines de tableaux, pas des milliers.
+ */
+export const getProspectTemplateSources = async (
+  args: { searchId?: string | null } | void,
+  context: any,
+): Promise<any[]> => {
+  const companyId = ensureCompany(context.user);
+  // Sans tableau d'arrivée — l'assistant « Nouveau tableau », où il n'existe pas
+  // encore — il n'y a rien à exclure : tous les tableaux pourvus sont candidats.
+  const searchId = (args as any)?.searchId ?? null;
+  if (searchId) await ensureOwnedSearch(searchId, companyId, context.entities);
+
+  return (context.entities as any).LeadSearch.findMany({
+    where: {
+      companyId,
+      ...(searchId ? { id: { not: searchId } } : {}),
+      templates: { some: {} },
+    },
+    orderBy: { createdAt: 'desc' },
+    select: {
+      id: true,
+      title: true,
+      templates: {
+        orderBy: [{ channel: 'asc' }, { createdAt: 'asc' }],
+        select: {
+          id: true,
+          name: true,
+          channel: true,
+          subject: true,
+          body: true,
+          defaultStatus: true,
+        },
+      },
+    },
+  });
+};
+
+/**
+ * Recopie des modèles d'un autre tableau dans celui-ci.
+ *
+ * Une copie, pas un partage : le nouveau tableau repart avec ses propres lignes,
+ * que l'on peut retoucher sans que l'original ne bouge. C'est ce qu'attend
+ * quelqu'un qui vient de créer un tableau et veut y retrouver ses messages.
+ */
+export const copyProspectTemplates = async (
+  { searchId, templateIds }: { searchId: string; templateIds: string[] },
+  context: any,
+): Promise<{ copied: number; templates: any[] }> => {
+  const companyId = ensureCompany(context.user);
+  await ensureOwnedSearch(searchId, companyId, context.entities);
+
+  const ids = Array.from(new Set((templateIds ?? []).filter(Boolean)));
+  if (ids.length === 0) throw new HttpError(400, 'Aucun modèle sélectionné');
+
+  const sources = await (context.entities as any).ProspectTemplate.findMany({
+    where: { id: { in: ids }, companyId },
+    orderBy: [{ channel: 'asc' }, { createdAt: 'asc' }],
+  });
+  if (sources.length !== ids.length) throw new HttpError(404);
+  if (sources.some((t: any) => t.searchId === searchId)) {
+    throw new HttpError(400, 'Ces modèles appartiennent déjà à ce tableau.');
+  }
+
+  // Un statut ne propose qu'un modèle par canal (voir `upsertProspectTemplate`).
+  // La copie ne revendique donc le sien que si ce tableau connaît ce statut — il
+  // peut avoir les siens — et que personne ne l'y a déjà pris. Sinon elle arrive
+  // sans statut : mieux vaut un modèle à rattacher à la main qu'un modèle en
+  // place délogé par une importation.
+  const statusKeys = new Set(
+    (await effectiveStatusConfigs(context.entities, companyId, searchId)).map((s: any) => s.key),
+  );
+  const claimed = new Set(
+    (
+      await (context.entities as any).ProspectTemplate.findMany({
+        where: { searchId, defaultStatus: { not: null } },
+        select: { channel: true, defaultStatus: true },
+      })
+    ).map((t: any) => `${t.channel}:${t.defaultStatus}`),
+  );
+
+  const created: any[] = [];
+  for (const src of sources) {
+    const key = `${src.channel}:${src.defaultStatus}`;
+    const defaultStatus =
+      src.defaultStatus && statusKeys.has(src.defaultStatus) && !claimed.has(key)
+        ? src.defaultStatus
+        : null;
+    if (defaultStatus) claimed.add(key);
+
+    created.push(
+      await (context.entities as any).ProspectTemplate.create({
+        data: {
+          companyId,
+          searchId,
+          name: src.name,
+          channel: src.channel,
+          subject: src.subject,
+          body: src.body,
+          defaultStatus,
+        },
+      }),
+    );
+  }
+
+  // Les copies sont renvoyées : l'écran ouvre l'éditeur sur la première d'entre
+  // elles, qui n'a pas l'identifiant de son original.
+  return { copied: created.length, templates: created };
+};
+
 // ─── Prospect SMS ─────────────────────────────────────────────────────────────
 
 export const sendProspectSms = async (
