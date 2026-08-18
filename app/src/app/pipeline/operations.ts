@@ -4,6 +4,7 @@ import type {
   GetActivityFeed,
   AddActivityNote,
 } from 'wasp/server/operations';
+import { toE164 } from '../../shared/phone';
 
 function ensureCompany(user: any): string {
   if (!user) throw new HttpError(401);
@@ -31,6 +32,10 @@ export type PipelineDocument = {
   clientPhone: string | null;
   noteCount: number;
   emailSentCount: number;
+  /** SMS partis vers le numéro du client, tous fils confondus. */
+  smsSentCount: number;
+  /** Réponses du client encore non lues. */
+  smsUnreadCount: number;
 };
 
 export type ActivityFeedItem = {
@@ -43,6 +48,12 @@ export type ActivityFeedItem = {
   documentId: string | null;
   userId: string | null;
   userName: string | null;
+  /**
+   * Charge utile de l'activité. Porte notamment le courriel envoyé (objet,
+   * corps, destinataires) pour les entrées `document.email_sent`, que l'aperçu
+   * et la citation d'une relance relisent.
+   */
+  metadata: any;
 };
 
 // ─── Queries ───────────────────────────────────────────────────────────────
@@ -74,6 +85,44 @@ export const getPipelineDocuments: GetPipelineDocuments<void, PipelineDocument[]
     orderBy: { createdAt: 'desc' },
   });
 
+  // Compteurs SMS par numéro plutôt que par fil : la conversation d'un client
+  // peut vivre sous `tel:+…` comme sous l'identifiant d'un prospect qui porte le
+  // même numéro, et c'est le numéro qui identifie l'interlocuteur de bout en
+  // bout. `Client.phone` est du texte libre, d'où la normalisation en JS.
+  const phoneByClient = new Map<string, string>();
+  for (const d of docs as any[]) {
+    const e164 = toE164(d.client?.phone ?? '');
+    if (e164) phoneByClient.set(d.clientId, e164);
+  }
+  const phones = [...new Set(phoneByClient.values())];
+
+  const [sentRows, unreadRows] = phones.length
+    ? await Promise.all([
+        (context.entities as any).LeadSmsLog.groupBy({
+          by: ['to'],
+          where: { companyId, direction: 'outbound', to: { in: phones } },
+          _count: { _all: true },
+        }),
+        (context.entities as any).LeadSmsLog.groupBy({
+          by: ['fromNumber'],
+          where: {
+            companyId,
+            direction: 'inbound',
+            readAt: null,
+            fromNumber: { in: phones },
+          },
+          _count: { _all: true },
+        }),
+      ])
+    : [[], []];
+
+  const sentByPhone = new Map<string, number>(
+    (sentRows as any[]).map((r) => [r.to, r._count._all]),
+  );
+  const unreadByPhone = new Map<string, number>(
+    (unreadRows as any[]).map((r) => [r.fromNumber, r._count._all]),
+  );
+
   return (docs as any[]).map((d) => ({
     id: d.id,
     number: d.number,
@@ -92,6 +141,8 @@ export const getPipelineDocuments: GetPipelineDocuments<void, PipelineDocument[]
     clientPhone: d.client.phone,
     noteCount: (d.activities as any[]).filter((a: any) => a.type === 'note').length,
     emailSentCount: (d.activities as any[]).filter((a: any) => a.type === 'document.email_sent').length,
+    smsSentCount: sentByPhone.get(phoneByClient.get(d.clientId) ?? '') ?? 0,
+    smsUnreadCount: unreadByPhone.get(phoneByClient.get(d.clientId) ?? '') ?? 0,
   }));
 };
 
@@ -127,6 +178,7 @@ export const getActivityFeed: GetActivityFeed<
     documentId: r.documentId,
     userId: r.userId,
     userName: r.user?.fullName || r.user?.email || null,
+    metadata: r.metadata ?? null,
   }));
 };
 

@@ -496,7 +496,7 @@ action duplicateDocument {
 }
 action sendDocumentEmail {
   fn: import { sendDocumentEmail } from "@src/app/documents/operations",
-  entities: [User, Document, Client, ActivityLog, Company]
+  entities: [User, Document, Client, ActivityLog, Company, LeadEmailLog]
 }
 action sendContactEmail {
   fn: import { sendContactEmail } from "@src/landing/contactAction",
@@ -521,6 +521,18 @@ query getAdminUsers {
 action saveDocumentEmailDraft {
   fn: import { saveDocumentEmailDraft } from "@src/app/documents/operations",
   entities: [User, Document]
+}
+
+// SMS vers un client depuis le suivi. Le fil vit dans LeadSmsLog sous
+// l'identifiant du numéro (`tel:+…`), donc dans la même conversation que la
+// boîte SMS — mais sans dépendre de son interrupteur.
+query getClientSmsThread {
+  fn: import { getClientSmsThread } from "@src/app/clients/smsOperations",
+  entities: [User, Client, LeadSmsLog]
+}
+action sendClientSms {
+  fn: import { sendClientSms } from "@src/app/clients/smsOperations",
+  entities: [User, Company, Client, LeadSmsLog]
 }
 
 query getClientActivities {
@@ -1004,7 +1016,7 @@ query getDashboardStats {
 
 query getPipelineDocuments {
   fn: import { getPipelineDocuments } from "@src/app/pipeline/operations",
-  entities: [User, Document, Client, ActivityLog]
+  entities: [User, Document, Client, ActivityLog, LeadSmsLog]
 }
 
 query getActivityFeed {

@@ -12,8 +12,13 @@ import {
   slugifyLeadSource,
 } from '../../shared/leadSources';
 import { randomBytes } from 'crypto';
-import { formatMontrealTime } from '../../shared/format';
 import { sendEmailWithAttachment, companySmtp } from '../../server/mail';
+import {
+  QUOTED_HISTORY_LIMIT,
+  buildEmailHtml,
+  buildQuotedHistory,
+  buildThreadHeaders,
+} from '../../shared/mailThread';
 import { sendSms, toE164, resolveSmsCredentials, isDirectIdentifier } from '../../server/sms';
 import type {
   GetLeadSearches,
@@ -1193,45 +1198,6 @@ export const deleteLeadNote = async (
   return { id };
 };
 
-/** Nombre d'échanges repris en citation au bas d'une relance. */
-const QUOTED_HISTORY_LIMIT = 10;
-
-function escapeHtml(s: string): string {
-  return s
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;');
-}
-
-/**
- * Reprend les courriels déjà envoyés à ce prospect sous le nouveau message,
- * comme le ferait une réponse dans un client de messagerie : le prospect
- * retrouve le contexte sans avoir à chercher dans sa boîte.
- *
- * `logs` arrive du plus récent au plus ancien. Les corps stockés ne contiennent
- * jamais de citation (voir `sendProspectEmail`), donc l'empilement reste
- * linéaire au lieu de doubler à chaque relance.
- */
-function buildQuotedHistory(logs: any[]): { text: string; html: string } {
-  if (!logs.length) return { text: '', html: '' };
-  const textParts: string[] = [];
-  const htmlParts: string[] = [];
-  for (const log of logs) {
-    const header = `Le ${formatMontrealTime(log.createdAt)}, nous écrivions :`;
-    const body = log.body || '';
-    textParts.push(
-      `\n\n──────────\n${header}\n` +
-        body.split('\n').map((line: string) => `> ${line}`).join('\n'),
-    );
-    htmlParts.push(
-      `<div style="margin-top:16px;color:#555;font-size:13px;">${escapeHtml(header)}</div>` +
-        `<blockquote style="margin:4px 0 0 .8ex;border-left:2px solid #ddd;padding-left:1ex;color:#555;white-space:pre-wrap;">` +
-        `${escapeHtml(body).replace(/\n/g, '<br/>')}</blockquote>`,
-    );
-  }
-  return { text: textParts.join(''), html: htmlParts.join('') };
-}
-
 export const sendProspectEmail = async (
   args: { identifier: string; to: string; cc?: string | null; subject: string; body: string },
   context: any,
@@ -1260,19 +1226,9 @@ export const sendProspectEmail = async (
     take: QUOTED_HISTORY_LIMIT,
   });
   const quoted = buildQuotedHistory(previous);
-  const inReplyTo = previous.find(l => l.messageId)?.messageId ?? undefined;
-  const references = previous
-    .map(l => l.messageId)
-    .filter(Boolean)
-    .reverse() as string[];
+  const { inReplyTo, references } = buildThreadHeaders(previous);
 
-  const html =
-    `<div style="font-family: Arial, sans-serif; font-size: 14px; color:#1a1a1a; white-space: pre-wrap;">${escapeHtml(
-      args.body,
-    ).replace(/\n/g, '<br/>')}</div>` +
-    (quoted.html
-      ? `<div style="font-family: Arial, sans-serif; font-size: 14px;">${quoted.html}</div>`
-      : '');
+  const html = buildEmailHtml(args.body, quoted);
 
   // Sender name/address, Reply-To and the optional Cci copy all come from the
   // company's SMTP configuration — the prospect answers to the company inbox,

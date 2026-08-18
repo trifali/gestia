@@ -14,6 +14,14 @@ import type { Document, DocumentItem, Client, Project, Payment } from 'wasp/enti
 import { computeTotals, nextDocNumber } from '../../server/tenant';
 import { logActivity } from '../activity/operations';
 import { sendEmailWithAttachment, companySmtp } from '../../server/mail';
+import {
+  QUOTED_HISTORY_LIMIT,
+  buildEmailHtml,
+  buildQuotedHistory,
+  buildThreadHeaders,
+  mergeSentHistory,
+} from '../../shared/mailThread';
+import { clientIdentifier } from '../../shared/threads';
 
 function ensureCompany(user: any): string {
   if (!user) throw new HttpError(401);
@@ -385,26 +393,48 @@ export const sendDocumentEmail: SendDocumentEmail<SendDocumentEmailArgs, { ok: t
   if (!args.pdfBase64) throw new HttpError(400, 'PDF manquant');
 
   const message = args.message || '';
-  const html = `<div style="font-family: Arial, sans-serif; font-size: 14px; color:#1a1a1a; white-space: pre-wrap;">${message
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/\n/g, '<br/>')}</div>`;
 
   const smtp = companySmtp(company);
   if (!smtp) throw new HttpError(400, 'Courriel non configuré. Ajoutez votre propre serveur SMTP dans Paramètres → Intégrations.');
 
-  await sendEmailWithAttachment({
+  // Un seul fil par client, tous documents confondus : la relance d'une facture
+  // cite les envois précédents et repart dans la même conversation, exactement
+  // comme une relance de prospection.
+  const identifier = clientIdentifier((doc as any).clientId);
+  const [logs, legacy] = await Promise.all([
+    (context.entities as any).LeadEmailLog.findMany({
+      where: { companyId, identifier },
+      orderBy: { createdAt: 'desc' },
+      take: QUOTED_HISTORY_LIMIT,
+    }),
+    // Les envois d'avant le journal ne vivent que dans le journal d'activité.
+    // Sans eux, un client écrit de longue date repartirait sans aucune citation
+    // — et l'aperçu, qui lit la même fusion, mentirait de la même manière.
+    (context.entities as any).ActivityLog.findMany({
+      where: { companyId, clientId: (doc as any).clientId, type: 'document.email_sent' },
+      orderBy: { createdAt: 'desc' },
+      take: QUOTED_HISTORY_LIMIT,
+    }),
+  ]);
+  const previous = mergeSentHistory(logs, legacy).slice(0, QUOTED_HISTORY_LIMIT);
+  const quoted = buildQuotedHistory(previous);
+  const { inReplyTo, references } = buildThreadHeaders(previous);
+
+  const html = buildEmailHtml(message, quoted);
+
+  const sent = await sendEmailWithAttachment({
     smtp,
     to,
     cc: args.cc?.trim() || undefined,
     subject: args.subject,
-    text: message,
+    text: message + quoted.text,
     html,
     // Sender name, Reply-To and the optional Cci copy all come from the company's
     // configuration (Paramètres → Intégrations); a client answering the invoice
     // must reach the company, not the individual account that pressed "Envoyer".
     clientFacing: true,
+    inReplyTo,
+    references,
     attachments: [
       {
         filename: args.filename || `${doc.number}.pdf`,
@@ -414,14 +444,36 @@ export const sendDocumentEmail: SendDocumentEmail<SendDocumentEmailArgs, { ok: t
     ],
   });
 
+  // Journal d'envoi du client. `body` ne garde que le texte saisi : c'est lui
+  // qui sera cité au prochain envoi, et une citation de citation gonflerait
+  // chaque relance.
+  await (context.entities as any).LeadEmailLog.create({
+    data: {
+      companyId,
+      identifier,
+      to,
+      cc: args.cc?.trim() || null,
+      subject: args.subject,
+      body: message,
+      replyTo: smtp.replyTo ?? null,
+      fromName: smtp.fromName,
+      fromEmail: smtp.fromEmail,
+      messageId: sent.messageId ?? null,
+    },
+  });
+
   // Sending the email always transitions the document to 'envoyee' (unless it
   // already is). The PDF generated client-side reflects this same status.
   const docAny = doc as any;
   const currentStatus = docAny.status as string;
+  // L'envoi efface le brouillon, comme une relance de prospection efface le
+  // sien : le prochain message repart à vide plutôt que de recopier celui qui
+  // vient de partir. Le contenu envoyé n'est pas perdu pour autant — il est
+  // dans le journal d'envoi ci-dessus, et il sera cité par la prochaine relance.
   const updateData: any =
     args.type === 'invoice'
-      ? { emailSubjectInvoice: args.subject, emailBodyInvoice: args.message }
-      : { emailSubjectQuote: args.subject, emailBodyQuote: args.message };
+      ? { emailSubjectInvoice: null, emailBodyInvoice: null }
+      : { emailSubjectQuote: null, emailBodyQuote: null };
   updateData.emailTo = args.to.trim() || null;
   updateData.emailCc = args.cc?.trim() || null;
   if (currentStatus !== 'envoyee') {

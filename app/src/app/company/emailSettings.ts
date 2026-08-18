@@ -102,6 +102,15 @@ export type EmailCapability = {
    * the user add their own address in Cc by hand.
    */
   copyToCompany: string | null;
+  /**
+   * En-têtes que porteront les envois : de quoi montrer un aperçu fidèle avant
+   * de cliquer. Aucun secret — ces trois valeurs sont déjà sur chaque courriel
+   * reçu par le destinataire, et dans le journal d'envoi que tout le monde lit.
+   * Null tant que le SMTP n'est pas configuré : il n'y a alors rien à annoncer.
+   */
+  fromName: string | null;
+  fromEmail: string | null;
+  replyTo: string | null;
 };
 
 /**
@@ -119,6 +128,9 @@ export const getEmailCapability = async (_args: void, context: any): Promise<Ema
       reason: 'Aucune entreprise associée à votre compte.',
       canConfigure,
       copyToCompany: null,
+      fromName: null,
+      fromEmail: null,
+      replyTo: null,
     };
   }
 
@@ -128,7 +140,12 @@ export const getEmailCapability = async (_args: void, context: any): Promise<Ema
   });
   const smtp = companySmtp(company);
   const copyToCompany = smtp?.copyTo ?? null;
-  if (smtp) return { canSend: true, reason: null, canConfigure, copyToCompany };
+  const headers = {
+    fromName: smtp?.fromName ?? null,
+    fromEmail: smtp?.fromEmail ?? null,
+    replyTo: smtp?.replyTo ?? null,
+  };
+  if (smtp) return { canSend: true, reason: null, canConfigure, copyToCompany, ...headers };
 
   const missing: string[] = [];
   if (!company?.smtpHost?.trim()) missing.push('l\'hôte');
@@ -140,6 +157,7 @@ export const getEmailCapability = async (_args: void, context: any): Promise<Ema
     canSend: false,
     canConfigure,
     copyToCompany,
+    ...headers,
     reason: canConfigure
       ? `Courriel non configuré : ajoutez ${what} dans Paramètres → Intégrations.`
       : `Courriel non configuré : demandez à un administrateur d'ajouter ${what} dans Paramètres → Intégrations.`,

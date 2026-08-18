@@ -285,7 +285,7 @@ export function DocumentTable({
                         <LuEye size={14} />
                       </IconBtn>
                       <IconBtn
-                        title={wasSent ? `Renvoyer (envoyé le ${formatDate(lastSentForType.createdAt)})` : 'Envoyer par courriel'}
+                        title={wasSent ? `Envoyer par courriel (dernier envoi le ${formatDate(lastSentForType.createdAt)})` : 'Envoyer par courriel'}
                         onClick={() => setSending({ doc: docForPdf, activities: sentActivities })}
                       >
                         <LuMail size={14} className={wasSent ? 'text-success' : ''} />

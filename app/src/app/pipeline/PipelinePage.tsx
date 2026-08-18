@@ -33,10 +33,12 @@ import {
   LuInfo,
   LuLock,
   LuLockOpen,
+  LuMessageSquare,
 } from 'react-icons/lu';
 import { PageHeader, Modal } from '../../client/ui';
 import { formatCurrency, formatDate, formatDateTime } from '../../shared/format';
 import { SendDocumentEmailModal } from '../shared/SendDocumentEmailModal';
+import { SendClientSmsModal } from '../shared/SendClientSmsModal';
 import { DocumentForm } from '../shared/DocumentForm';
 import type { PipelineDocument, ActivityFeedItem } from './operations';
 
@@ -250,6 +252,7 @@ function KanbanBoard({
 }) {
   const [noteDoc, setNoteDoc] = useState<PipelineDocument | null>(null);
   const [emailDocId, setEmailDocId] = useState<string | null>(null);
+  const [smsDoc, setSmsDoc] = useState<PipelineDocument | null>(null);
   const [editDocId, setEditDocId] = useState<string | null>(null);
 
   // Drag-and-drop state
@@ -382,6 +385,7 @@ function KanbanBoard({
                         onDragEnd={() => { setDraggingId(null); setDragOverStatus(null); }}
                         onOpenNotes={() => setNoteDoc(doc)}
                         onOpenEmail={() => setEmailDocId(doc.id)}
+                        onOpenSms={() => setSmsDoc(doc)}
                         onEdit={() => setEditDocId(doc.id)}
                         onToggleLock={() => handleToggleLock(doc.id)}
                       />
@@ -406,6 +410,15 @@ function KanbanBoard({
         <DocumentEmailModal docId={emailDocId} onClose={() => setEmailDocId(null)} />
       )}
 
+      {smsDoc && (
+        <SendClientSmsModal
+          clientId={smsDoc.clientId}
+          clientName={smsDoc.clientName}
+          clientPhone={smsDoc.clientPhone}
+          onClose={() => setSmsDoc(null)}
+        />
+      )}
+
       {editDocId && (
         <DocumentEditModal docId={editDocId} onClose={() => setEditDocId(null)} />
       )}
@@ -423,6 +436,7 @@ function PipelineCard({
   onDragEnd,
   onOpenNotes,
   onOpenEmail,
+  onOpenSms,
   onEdit,
   onToggleLock,
 }: {
@@ -433,6 +447,7 @@ function PipelineCard({
   onDragEnd: () => void;
   onOpenNotes: () => void;
   onOpenEmail: () => void;
+  onOpenSms: () => void;
   onEdit: () => void;
   onToggleLock: () => void;
 }) {
@@ -443,6 +458,10 @@ function PipelineCard({
     ? Math.ceil((due.getTime() - now.getTime()) / (1000 * 60 * 60 * 24))
     : null;
   const rawPhone = doc.clientPhone?.replace(/\s/g, '') || '';
+  // Une pastille SMS à la fois : une réponse non lue prime sur le décompte des
+  // envois, sans quoi elle disparaîtrait derrière lui.
+  const smsUnread = doc.smsUnreadCount > 0;
+  const smsBadge = smsUnread ? doc.smsUnreadCount : doc.smsSentCount;
 
   return (
     <div
@@ -576,6 +595,33 @@ function PipelineCard({
             {doc.emailSentCount > 0 && (
               <span className='absolute -top-1 -right-1 min-w-[14px] h-[14px] rounded-full bg-success text-white text-[9px] font-bold flex items-center justify-center px-0.5 leading-none'>
                 {doc.emailSentCount > 9 ? '9+' : doc.emailSentCount}
+              </span>
+            )}
+          </button>
+          {/* SMS button — conversation du client, réponses comprises */}
+          <button
+            type='button'
+            onClick={onOpenSms}
+            title={
+              smsUnread
+                ? `${doc.smsUnreadCount} réponse${doc.smsUnreadCount > 1 ? 's' : ''} non lue${doc.smsUnreadCount > 1 ? 's' : ''}`
+                : doc.smsSentCount > 0
+                ? `${doc.smsSentCount} SMS envoyé${doc.smsSentCount > 1 ? 's' : ''} — Relancer`
+                : 'Envoyer un SMS'
+            }
+            className='relative flex items-center justify-center w-7 h-7 rounded-lg text-muted hover:text-accent hover:bg-canvas transition-colors shrink-0'
+          >
+            <LuMessageSquare
+              size={15}
+              className={smsUnread ? 'text-accent' : doc.smsSentCount > 0 ? 'text-success' : ''}
+            />
+            {smsBadge > 0 && (
+              <span
+                className={`absolute -top-1 -right-1 min-w-[14px] h-[14px] rounded-full text-white text-[9px] font-bold flex items-center justify-center px-0.5 leading-none ${
+                  smsUnread ? 'bg-accent' : 'bg-success'
+                }`}
+              >
+                {smsBadge > 9 ? '9+' : smsBadge}
               </span>
             )}
           </button>

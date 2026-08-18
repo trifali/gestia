@@ -1,12 +1,31 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import toast from 'react-hot-toast';
-import { LuEye, LuSave, LuRotateCcw, LuChevronDown, LuChevronUp } from 'react-icons/lu';
-import { sendDocumentEmail, saveDocumentEmailDraft } from 'wasp/client/operations';
+import {
+  LuSave,
+  LuRotateCcw,
+  LuChevronDown,
+  LuChevronRight,
+  LuClock,
+  LuCornerUpLeft,
+  LuMailOpen,
+} from 'react-icons/lu';
+import {
+  useQuery,
+  sendDocumentEmail,
+  saveDocumentEmailDraft,
+  getActivityFeed,
+  // @ts-ignore -- généré par Wasp au prochain redémarrage
+  getLeadEmailLogs,
+} from 'wasp/client/operations';
+import { clientIdentifier } from '../../shared/threads';
+import { mergeSentHistory, type SentEmailRecord } from '../../shared/mailThread';
+import { formatMontrealTime } from '../../shared/format';
 import { Modal } from '../../client/ui';
 import { MagicInput, MagicTextarea } from '../../client/magic';
 import { buildDocumentPdfFilename, getDocumentPdfBase64 } from '../documents/pdf';
 import type { DocForPdf, CompanyForPdf, BrandAssets } from '../documents/pdf';
 import { PdfPreviewModal } from './PdfPreviewModal';
+import { EmailPreviewModal } from './EmailPreviewModal';
 import { useEmailCapability } from '../../client/capabilities';
 
 type SentActivity = {
@@ -62,9 +81,50 @@ export function SendDocumentEmailModal({ doc, company, brand, activities, onClos
     canSend: emailCanSend,
     reason: emailReason,
     copyToCompany,
+    fromName,
+    fromEmail,
+    replyTo,
   } = useEmailCapability();
   const docAny = doc as any;
   const initialType: DocType = doc.type === 'invoice' ? 'invoice' : 'quote';
+
+  // Un seul fil par client, tous documents confondus : relancer une facture
+  // reprend la conversation ouverte par la soumission d'avant.
+  const clientThread = docAny.clientId ? clientIdentifier(docAny.clientId) : null;
+  const { data: sentLogs = [] } = useQuery(
+    // @ts-ignore -- généré par Wasp au prochain redémarrage
+    getLeadEmailLogs,
+    { identifier: clientThread ?? '' },
+    { enabled: !!clientThread },
+  );
+
+  // Les activités sont relues par client et non reprises de la prop : celle-ci
+  // ne porte que ce document, alors que le fil — et donc ce qui sera cité —
+  // couvre tous les siens. L'aperçu et l'envoi doivent lire la même chose.
+  const { data: clientActivities = [] } = useQuery(
+    getActivityFeed,
+    { clientId: docAny.clientId, limit: 50 },
+    { enabled: !!docAny.clientId },
+  );
+  const legacySends = useMemo(
+    () => (clientActivities as any[]).filter(a => a.type === 'document.email_sent'),
+    [clientActivities],
+  );
+
+  const history = useMemo(
+    () => mergeSentHistory(sentLogs as any[], legacySends),
+    [sentLogs, legacySends],
+  );
+
+  // Objet suggéré pour une relance — proposé sous le champ, jamais écrit d'office.
+  //
+  // Pris sur l'historique complet et non sur le seul journal d'envoi : sinon la
+  // suggestion resterait invisible pour tous les clients déjà écrits avant que
+  // ce journal existe, jusqu'à ce qu'on leur réécrive une première fois.
+  const lastSubject = history[0]?.subject;
+  const followUpSubject = lastSubject
+    ? (/^re\s*:/i.test(lastSubject) ? lastSubject : `Re: ${lastSubject}`)
+    : null;
 
   const lastSentByType = useMemo(() => {
     const map: Record<DocType, SentActivity | null> = { quote: null, invoice: null };
@@ -85,25 +145,55 @@ export function SendDocumentEmailModal({ doc, company, brand, activities, onClos
   );
 
   const [activeType, setActiveType] = useState<DocType>(initialType);
-  const [mainTab, setMainTab] = useState<DocType | 'history'>(initialType);
+  // Cible du retour en haut après « Répondre » : la liste des envois est sous le
+  // formulaire, donc préremplir sans remonter ne se verrait pas.
+  const composerRef = useRef<HTMLDivElement | null>(null);
+
+  /**
+   * Ordre de priorité à l'ouverture : un brouillon explicitement enregistré,
+   * sinon le modèle par défaut — mais seulement tant que rien n'est parti. Une
+   * fois le premier courriel envoyé, les champs restent vides : une relance est
+   * un nouveau message, pas une copie du précédent. Le texte déjà envoyé se
+   * relit dans « Envois précédents », et le bouton « Répondre » y reprend
+   * destinataire et objet pour qui veut repartir de là.
+   *
+   * `lastSent` est ce qui rend la règle vraie pour les documents envoyés avant
+   * que l'envoi n'efface le brouillon : leur ligne porte encore le texte parti.
+   * Sur un document déjà envoyé, le brouillon n'est donc gardé que s'il diffère
+   * de ce qui est parti — seul cas où quelqu'un l'a réellement écrit depuis.
+   * Sans quoi ces documents-là garderaient éternellement leur dernier message
+   * prérempli.
+   */
+  const initialText = (
+    saved: string | null | undefined,
+    lastSent: string | null | undefined,
+    alreadySent: boolean,
+    fallback: string,
+  ): string => {
+    if (saved == null) return alreadySent ? '' : fallback;
+    if (!alreadySent) return saved;
+    return lastSent != null && saved !== lastSent ? saved : '';
+  };
+
+  const sentQuote = lastSentByType.quote?.metadata;
+  const sentInvoice = lastSentByType.invoice?.metadata;
 
   const [subjectQuote, setSubjectQuote] = useState<string>(
-    docAny.emailSubjectQuote ||
-      lastSentByType.quote?.metadata?.subject ||
-      defaultsQuote.subject,
+    initialText(docAny.emailSubjectQuote, sentQuote?.subject, !!sentQuote, defaultsQuote.subject),
   );
   const [bodyQuote, setBodyQuote] = useState<string>(
-    docAny.emailBodyQuote || lastSentByType.quote?.metadata?.body || defaultsQuote.body,
+    initialText(docAny.emailBodyQuote, sentQuote?.body, !!sentQuote, defaultsQuote.body),
   );
   const [subjectInvoice, setSubjectInvoice] = useState<string>(
-    docAny.emailSubjectInvoice ||
-      lastSentByType.invoice?.metadata?.subject ||
+    initialText(
+      docAny.emailSubjectInvoice,
+      sentInvoice?.subject,
+      !!sentInvoice,
       defaultsInvoice.subject,
+    ),
   );
   const [bodyInvoice, setBodyInvoice] = useState<string>(
-    docAny.emailBodyInvoice ||
-      lastSentByType.invoice?.metadata?.body ||
-      defaultsInvoice.body,
+    initialText(docAny.emailBodyInvoice, sentInvoice?.body, !!sentInvoice, defaultsInvoice.body),
   );
 
   const initialPrev =
@@ -117,6 +207,7 @@ export function SendDocumentEmailModal({ doc, company, brand, activities, onClos
   const [sending, setSending] = useState(false);
   const [savingDraft, setSavingDraft] = useState(false);
   const [previewing, setPreviewing] = useState(false);
+  const [previewingEmail, setPreviewingEmail] = useState(false);
 
   const subject = activeType === 'invoice' ? subjectInvoice : subjectQuote;
   const setSubject = activeType === 'invoice' ? setSubjectInvoice : setSubjectQuote;
@@ -127,12 +218,24 @@ export function SendDocumentEmailModal({ doc, company, brand, activities, onClos
   const activeTypeLabel = TYPE_META[activeType].label;
   const docType: DocType = initialType;
   const isCurrentType = activeType === docType;
-  const isHistoryTab = mainTab === 'history';
 
-  // Keep activeType in sync when switching type tabs
-  const handleTabChange = (tab: DocType | 'history') => {
-    setMainTab(tab);
-    if (tab !== 'history') setActiveType(tab);
+  /**
+   * Repartir d'un envoi précédent : destinataire, Cc et objet sont repris, et
+   * l'onglet revient sur le type du document — le seul depuis lequel on peut
+   * envoyer. Le corps est laissé tel quel : la citation de l'échange est ajoutée
+   * à l'envoi, pas ici, sans quoi elle serait citée deux fois.
+   *
+   * Les setters sont nommés explicitement plutôt que pris à travers
+   * `setSubject` : celui-ci suit `activeType`, qui n'aura changé qu'au rendu
+   * suivant.
+   */
+  const replyToEntry = (entry: SentEmailRecord) => {
+    setActiveType(docType);
+    if (entry.to) setTo(entry.to);
+    setCc(entry.cc ?? '');
+    const next = /^re\s*:/i.test(entry.subject) ? entry.subject : `Re: ${entry.subject}`;
+    (docType === 'invoice' ? setSubjectInvoice : setSubjectQuote)(next);
+    composerRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
   };
 
   const saveDraft = async () => {
@@ -206,17 +309,20 @@ export function SendDocumentEmailModal({ doc, company, brand, activities, onClos
         title={`Envoyer ${isCurrentType ? activeTypeLabel : TYPE_META[docType].label} ${doc.number}`}
         footer={
           <>
-            {isCurrentType && !isHistoryTab && (
+            {isCurrentType && (
               <>
+                {/* Un seul aperçu : le courriel. Le PDF s'ouvre depuis la
+                    pièce jointe qui y est listée — deux icônes d'œil côte à côte
+                    ne disaient pas laquelle montrait quoi. */}
                 <button
                   type='button'
                   className='btn-ghost p-2'
                   disabled={sending}
-                  onClick={() => setPreviewing(true)}
-                  title='Aperçu du PDF'
-                  aria-label='Aperçu du PDF'
+                  onClick={() => setPreviewingEmail(true)}
+                  title='Aperçu du courriel'
+                  aria-label='Aperçu du courriel'
                 >
-                  <LuEye size={16} />
+                  <LuMailOpen size={16} />
                 </button>
                 <button
                   type='button'
@@ -242,32 +348,32 @@ export function SendDocumentEmailModal({ doc, company, brand, activities, onClos
             )}
             <div className='flex-1' />
             <button className='btn-secondary' disabled={sending} onClick={onClose}>
-              {isHistoryTab ? 'Fermer' : 'Annuler'}
+              Annuler
             </button>
-            {isCurrentType && !isHistoryTab && (
+            {isCurrentType && (
               <button
                 className='btn-primary'
                 disabled={sending || !emailCanSend}
                 title={!emailCanSend ? (emailReason ?? '') : undefined}
                 onClick={submit}
               >
-                {sending ? 'Envoi…' : activeLastSent ? 'Renvoyer' : 'Envoyer'}
+                {sending ? 'Envoi…' : 'Envoyer'}
               </button>
             )}
           </>
         }
       >
         <div className='space-y-4'>
-          {/* Tab bar: Soumission | Facture | Historique */}
+          {/* Tab bar: Soumission | Facture */}
           <div className='flex border-b border-line -mt-1'>
             {(['quote', 'invoice'] as DocType[]).map((t) => {
-              const isActive = mainTab === t;
+              const isActive = activeType === t;
               const sent = !!lastSentByType[t];
               return (
                 <button
                   key={t}
                   type='button'
-                  onClick={() => handleTabChange(t)}
+                  onClick={() => setActiveType(t)}
                   className={
                     'px-4 py-2 text-sm font-medium border-b-2 -mb-px flex items-center gap-2 ' +
                     (isActive
@@ -282,110 +388,139 @@ export function SendDocumentEmailModal({ doc, company, brand, activities, onClos
                 </button>
               );
             })}
-            {/* History tab */}
-            <button
-              type='button'
-              onClick={() => handleTabChange('history')}
-              className={
-                'px-4 py-2 text-sm font-medium border-b-2 -mb-px flex items-center gap-1.5 ' +
-                (mainTab === 'history'
-                  ? 'border-primary text-ink'
-                  : 'border-transparent text-muted hover:text-ink')
-              }
-            >
-              Historique
-              {(activities?.length ?? 0) > 0 && (
-                <span className='inline-flex items-center justify-center min-w-[16px] h-4 rounded-full bg-canvas border border-line text-[9px] font-bold text-muted px-1'>
-                  {activities!.length}
-                </span>
-              )}
-            </button>
           </div>
 
-          {/* ── History tab content ── */}
-          {isHistoryTab ? (
-            <EmailHistoryList activities={activities || []} />
-          ) : (
-            <>
-              {activeLastSent && (
-                <div className='text-xs bg-canvas-200 border border-line rounded-md px-3 py-2 text-muted'>
-                  Déjà envoyé le {new Date(activeLastSent.createdAt).toLocaleString('fr-CA')}. Le contenu précédent est repris ci-dessous.
-                </div>
-              )}
-              {willTransitionToSent && (
-                <div className='text-xs bg-blue-50 border border-blue-200 rounded-md px-3 py-2 text-blue-800'>
-                  L'envoi fera passer le statut à <strong>Envoyée</strong>. Le PDF joint sera généré avec ce nouveau statut.
-                </div>
-              )}
-              {isCurrentType && !willTransitionToSent && (
-                <div className='text-xs bg-blue-50 border border-blue-200 rounded-md px-3 py-2 text-blue-800'>
-                  Le statut restera <strong>Envoyée</strong>. Le PDF joint sera généré avec ce statut.
-                </div>
-              )}
-              {!isCurrentType && (
-                <div className='text-xs bg-amber-50 border border-amber-200 rounded-md px-3 py-2 text-amber-700'>
-                  Ce document est une <strong>{TYPE_META[docType].label.toLowerCase()}</strong>. L'onglet {TYPE_META[activeType].label} est en lecture seule — l'envoi est désactivé pour ce type.
-                </div>
-              )}
-              <Field label='À (destinataire)'>
-                <input
-                  type='email'
-                  className='input'
-                  value={to}
-                  readOnly={!isCurrentType}
-                  onChange={(e) => isCurrentType && setTo(e.target.value)}
-                  placeholder='client@exemple.com'
-                />
-              </Field>
-              <Field
-                label='Cc'
-                hint={
-                  isCurrentType
-                    ? 'Facultatif. Séparez plusieurs adresses par des virgules.'
-                    : undefined
-                }
-              >
-                <input
-                  type='text'
-                  className='input'
-                  value={cc}
-                  readOnly={!isCurrentType}
-                  onChange={(e) => isCurrentType && setCc(e.target.value)}
-                  placeholder='autre@exemple.com'
-                />
-              </Field>
-              {isCurrentType && copyToCompany && (
-                <p className='text-xs text-muted -mt-2'>
-                  Une copie sera aussi envoyée en Cci à{' '}
-                  <span className='font-medium text-ink/80'>{copyToCompany}</span>.
-                </p>
-              )}
-              <Field label='Objet'>
-                <MagicInput
-                  type='text'
-                  className='input'
-                  value={subject}
-                  readOnly={!isCurrentType}
-                  onChange={(e) => isCurrentType && setSubject(e.target.value)}
-                />
-              </Field>
-              <Field label='Message'>
-                <MagicTextarea
-                  className='input min-h-[180px] resize-y'
-                  value={body}
-                  readOnly={!isCurrentType}
-                  onChange={(e) => isCurrentType && setBody(e.target.value)}
-                />
-              </Field>
-              {isCurrentType && (
-                <p className='text-xs text-muted'>
-                  Pièce jointe : <span className='font-mono'>{buildDocumentPdfFilename(docForOutput)}</span>
-                </p>
-              )}
-            </>
+          {activeLastSent && (
+            <div className='text-xs bg-canvas-200 border border-line rounded-md px-3 py-2 text-muted'>
+              Déjà envoyé le {new Date(activeLastSent.createdAt).toLocaleString('fr-CA')}. Objet et
+              message repartent à vide — le contenu précédent se relit dans « Envois précédents ».
+            </div>
           )}
+          {willTransitionToSent && (
+            <div className='text-xs bg-blue-50 border border-blue-200 rounded-md px-3 py-2 text-blue-800'>
+              L'envoi fera passer le statut à <strong>Envoyée</strong>. Le PDF joint sera généré avec ce nouveau statut.
+            </div>
+          )}
+          {isCurrentType && !willTransitionToSent && (
+            <div className='text-xs bg-blue-50 border border-blue-200 rounded-md px-3 py-2 text-blue-800'>
+              Le statut restera <strong>Envoyée</strong>. Le PDF joint sera généré avec ce statut.
+            </div>
+          )}
+          {!isCurrentType && (
+            <div className='text-xs bg-amber-50 border border-amber-200 rounded-md px-3 py-2 text-amber-700'>
+              Ce document est une <strong>{TYPE_META[docType].label.toLowerCase()}</strong>. L'onglet {TYPE_META[activeType].label} est en lecture seule — l'envoi est désactivé pour ce type.
+            </div>
+          )}
+          <div ref={composerRef}>
+            <Field label='À (destinataire)'>
+              <input
+                type='email'
+                className='input'
+                value={to}
+                readOnly={!isCurrentType}
+                onChange={(e) => isCurrentType && setTo(e.target.value)}
+                placeholder='client@exemple.com'
+              />
+            </Field>
+          </div>
+          <Field
+            label='Cc'
+            hint={
+              isCurrentType
+                ? 'Facultatif. Séparez plusieurs adresses par des virgules.'
+                : undefined
+            }
+          >
+            <input
+              type='text'
+              className='input'
+              value={cc}
+              readOnly={!isCurrentType}
+              onChange={(e) => isCurrentType && setCc(e.target.value)}
+              placeholder='autre@exemple.com'
+            />
+          </Field>
+          {isCurrentType && copyToCompany && (
+            <p className='text-xs text-muted -mt-2'>
+              Une copie sera aussi envoyée en Cci à{' '}
+              <span className='font-medium text-ink/80'>{copyToCompany}</span>.
+            </p>
+          )}
+          {isCurrentType &&
+            ((company as any)?.email ? (
+              <p className='text-xs text-muted -mt-1'>
+                Les réponses du client arriveront à{' '}
+                <span className='font-medium text-ink/80'>{(company as any).email}</span>.
+              </p>
+            ) : (
+              <div className='text-xs bg-amber-50 border border-amber-200 rounded-md px-3 py-2 text-amber-700'>
+                Aucun courriel n'est configuré pour votre entreprise : les réponses du client
+                seront perdues. Ajoutez-en un dans Paramètres.
+              </div>
+            ))}
+          <Field label='Objet'>
+            <MagicInput
+              type='text'
+              className='input'
+              value={subject}
+              readOnly={!isCurrentType}
+              onChange={(e) => isCurrentType && setSubject(e.target.value)}
+            />
+          </Field>
+          {isCurrentType && followUpSubject && subject.trim() !== followUpSubject && (
+            <button
+              type='button'
+              className='text-xs text-accent-600 hover:underline -mt-2 inline-flex items-center gap-1'
+              onClick={() => setSubject(followUpSubject)}
+              title='Reprendre l’objet du dernier envoi'
+            >
+              <LuCornerUpLeft size={12} />
+              {followUpSubject}
+            </button>
+          )}
+          <Field label='Message'>
+            <MagicTextarea
+              className='input min-h-[180px] resize-y'
+              value={body}
+              readOnly={!isCurrentType}
+              onChange={(e) => isCurrentType && setBody(e.target.value)}
+            />
+          </Field>
+          {isCurrentType && history.length > 0 && (
+            <p className='text-xs text-muted -mt-2'>
+              Relance : {history.length > 1
+                ? `les ${history.length} échanges précédents seront cités`
+                : 'l’échange précédent sera cité'} sous votre message, dans le même fil de
+              discussion.
+            </p>
+          )}
+          {isCurrentType && (
+            <p className='text-xs text-muted'>
+              Pièce jointe : <span className='font-mono'>{buildDocumentPdfFilename(docForOutput)}</span>
+            </p>
+          )}
+
+          <EmailHistoryList entries={history} onReply={replyToEntry} />
         </div>
       </Modal>
+      {previewingEmail && (
+        <EmailPreviewModal
+          headers={{
+            fromName,
+            fromEmail,
+            replyTo,
+            to: to.trim(),
+            cc: cc.trim() || null,
+            bcc: copyToCompany,
+            subject: subject.trim() || activeDefaults.subject,
+          }}
+          body={body}
+          previousLogs={history}
+          attachmentName={buildDocumentPdfFilename(docForOutput)}
+          onOpenAttachment={() => setPreviewing(true)}
+          onClose={() => setPreviewingEmail(false)}
+        />
+      )}
       {previewing && (
         <PdfPreviewModal
           doc={doc}
@@ -398,66 +533,103 @@ export function SendDocumentEmailModal({ doc, company, brand, activities, onClos
   );
 }
 
-function EmailHistoryList({ activities }: { activities: SentActivity[] }) {
-  const [expandedIdx, setExpandedIdx] = useState<number | null>(null);
+function EmailHistoryList({
+  entries,
+  onReply,
+}: {
+  entries: SentEmailRecord[];
+  onReply: (entry: SentEmailRecord) => void;
+}) {
+  const [expandedKey, setExpandedKey] = useState<string | null>(null);
 
-  if (activities.length === 0) {
-    return (
-      <p className='text-sm text-muted py-4 text-center'>
-        Aucun courriel envoyé pour ce document.
-      </p>
-    );
-  }
+  // Rien à montrer tant que rien n'est parti : un cadre vide sous le formulaire
+  // ne dirait rien que « Envoyer » ne dise déjà.
+  if (entries.length === 0) return null;
 
   return (
-    <ol className='space-y-1.5'>
-      {activities.map((a, i) => {
-        const m = a.metadata || {};
-        const typeLabel = m.type === 'invoice' ? 'Facture' : 'Soumission';
-        const isExpanded = expandedIdx === i;
-        const date = new Date(a.createdAt).toLocaleString('fr-CA', {
-          dateStyle: 'short',
-          timeStyle: 'short',
-        });
-
-        return (
-          <li key={i} className='rounded-lg border border-line bg-canvas text-xs overflow-hidden'>
-            {/* Header row — always visible */}
-            <button
-              type='button'
-              className='w-full flex items-start gap-2 px-3 py-2 text-left hover:bg-canvas-200 transition-colors'
-              onClick={() => setExpandedIdx(isExpanded ? null : i)}
-            >
-              <span className='shrink-0 mt-0.5 text-muted'>{date}</span>
-              <span className='shrink-0 badge-neutral text-[10px] mt-px'>{typeLabel}</span>
-              <span className='flex-1 font-medium text-ink truncate'>{m.subject || '(sans objet)'}</span>
-              <span className='shrink-0 text-muted ml-1'>
-                {isExpanded ? <LuChevronUp size={13} /> : <LuChevronDown size={13} />}
-              </span>
-            </button>
-
-            {/* Expanded content */}
-            {isExpanded && (
-              <div className='border-t border-line px-3 py-2.5 space-y-2 bg-white'>
-                <div className='flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-muted'>
-                  {m.to && (
-                    <span><span className='font-medium text-ink/70'>À :</span> {m.to}</span>
-                  )}
-                  {m.cc && (
-                    <span><span className='font-medium text-ink/70'>Cc :</span> {m.cc}</span>
-                  )}
-                </div>
-                {m.body && (
-                  <pre className='whitespace-pre-wrap text-[11px] text-ink/80 font-sans leading-snug max-h-52 overflow-y-auto'>
-                    {m.body}
-                  </pre>
+    <div className='border-t border-line pt-3'>
+      <div className='text-xs font-medium text-muted mb-2 flex items-center gap-1.5'>
+        <LuClock size={13} />
+        Envois précédents ({entries.length})
+      </div>
+      <div className='space-y-1'>
+        {entries.map(entry => {
+          const open = expandedKey === entry.key;
+          return (
+            <div key={entry.key} className='border border-line rounded-md overflow-hidden'>
+              <button
+                type='button'
+                className='w-full flex items-center gap-2 px-2.5 py-2 text-left hover:bg-canvas-100'
+                onClick={() => setExpandedKey(open ? null : entry.key)}
+              >
+                {open ? (
+                  <LuChevronDown size={13} className='shrink-0 text-muted' />
+                ) : (
+                  <LuChevronRight size={13} className='shrink-0 text-muted' />
                 )}
-              </div>
-            )}
-          </li>
-        );
-      })}
-    </ol>
+                {entry.docType && (
+                  <span className='shrink-0 badge-neutral text-[10px]'>
+                    {entry.docType === 'invoice' ? 'Facture' : 'Soumission'}
+                  </span>
+                )}
+                <span className='text-xs font-medium truncate flex-1'>{entry.subject}</span>
+                <span className='text-xs text-muted shrink-0'>
+                  {formatMontrealTime(entry.createdAt)}
+                </span>
+              </button>
+              {open && (
+                <div className='px-3 py-2.5 bg-canvas-100 border-t border-line space-y-2'>
+                  <dl className='text-xs space-y-1'>
+                    <EmailPreviewRow
+                      label='De'
+                      value={
+                        entry.fromEmail
+                          ? `${entry.fromName || 'Gestia'} <${entry.fromEmail}>`
+                          : entry.fromName || '—'
+                      }
+                    />
+                    <EmailPreviewRow label='À' value={entry.to || '—'} />
+                    {entry.cc && <EmailPreviewRow label='Cc' value={entry.cc} />}
+                    <EmailPreviewRow
+                      label='Répondre à'
+                      value={entry.replyTo || (entry.legacy ? '—' : '— (réponses perdues)')}
+                    />
+                    <EmailPreviewRow label='Objet' value={entry.subject} />
+                  </dl>
+                  <div className='text-xs whitespace-pre-wrap bg-white border border-line rounded p-2.5 max-h-64 overflow-y-auto'>
+                    {entry.body || (
+                      <span className='text-muted italic'>
+                        Corps non enregistré (envoyé avant l’ajout de l’aperçu).
+                      </span>
+                    )}
+                  </div>
+                  <div className='flex justify-end'>
+                    <button
+                      type='button'
+                      className='btn-ghost px-2 py-1 text-xs text-accent-600 inline-flex items-center gap-1.5'
+                      onClick={() => onReply(entry)}
+                      title='Repartir de ce courriel : destinataire, Cc et objet repris'
+                    >
+                      <LuCornerUpLeft size={13} />
+                      Répondre
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function EmailPreviewRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div className='flex gap-2'>
+      <dt className='text-muted shrink-0 w-24'>{label}</dt>
+      <dd className='flex-1 break-words'>{value}</dd>
+    </div>
   );
 }
 
