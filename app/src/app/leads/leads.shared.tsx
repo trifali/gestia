@@ -48,6 +48,7 @@ import {
   normalizeLeadExtras,
   type LeadExtra,
 } from '../../shared/leadIntake';
+import { detectLeadValue } from '../../shared/leadValues';
 import {
   DEFAULT_CARD_FIELDS,
   extraFieldId,
@@ -371,6 +372,42 @@ export function LeadEditForm({
 // créneau de rappel, un numéro de dossier. Voir `shared/leadIntake` (`ExtraField`)
 // pour le pourquoi, et `Lead.extras` pour la forme enregistrée.
 
+/**
+ * Une valeur d'information libre, rendue selon ce qu'elle est.
+ *
+ * Une adresse devient un lien qui s'ouvre dans un onglet, un courriel un
+ * `mailto:`, un numéro un `tel:` — ce qui, sur un téléphone, compose directement
+ * — et une date ISO se lit enfin. Le reste est du texte.
+ *
+ * Un seul composant pour la carte et pour la fiche : sans cela, les deux écrans
+ * dériveraient et un champ cliquable ici cesserait de l'être là.
+ *
+ * `stopPropagation` est indispensable : sur la carte, tout clic non intercepté
+ * remonte à `CardClickShell` et ouvre le panneau latéral. Sans lui, suivre un lien
+ * ouvrirait aussi la fiche derrière.
+ */
+export function LeadValueText({ value, className }: { value: string; className?: string }) {
+  const detected = detectLeadValue(value);
+
+  if (detected.kind === 'text' || detected.kind === 'date') {
+    return <span className={className}>{detected.display}</span>;
+  }
+
+  const external = detected.kind === 'url';
+  return (
+    <a
+      href={detected.href}
+      target={external ? '_blank' : undefined}
+      rel={external ? 'noopener noreferrer' : undefined}
+      title={external ? detected.href : undefined}
+      onClick={e => e.stopPropagation()}
+      className={`text-accent-700 hover:underline break-words ${className ?? ''}`}
+    >
+      {detected.display}
+    </a>
+  );
+}
+
 /** Les informations de carte d'un prospect. Même remise en forme que le serveur. */
 export function leadExtras(lead: unknown): LeadExtra[] {
   return normalizeLeadExtras((lead as any)?.extras);
@@ -575,9 +612,10 @@ export function LeadCardInfo({
           <div className='text-[9px] font-semibold uppercase tracking-wide text-muted leading-tight'>
             {extra.label}
           </div>
-          <div className='text-xs text-ink leading-snug break-words whitespace-pre-wrap'>
-            {extra.value}
-          </div>
+          <LeadValueText
+            value={extra.value}
+            className='block text-xs text-ink leading-snug break-words whitespace-pre-wrap'
+          />
         </div>
       );
     }

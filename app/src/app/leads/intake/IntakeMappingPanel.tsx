@@ -558,8 +558,17 @@ export function IntakeMappingPanel({
                     category: lead.category,
                     source: lead.source,
                     extras: lead.extras,
+                    // Une carte reçue n'a jamais été ouverte : l'aperçu porte donc
+                    // la pastille et la graisse d'un prospect neuf, comme la vraie.
+                    viewedAt: null,
                   } as any}
                   sources={sources}
+                  // Celui qu'on est en train de régler, pas celui enregistré :
+                  // c'est ce qui fait de cet encadré un aperçu et non une
+                  // illustration. Éteindre une étoile à droite retire la ligne ici,
+                  // immédiatement. Sans cette prop, `LeadCardInfo` retombait sur le
+                  // jeu par défaut et montrait la carte de quelqu'un d'autre.
+                  cardFields={fieldsConfig}
                 />
                 {lead.notes && (
                   <div className='border-t border-line px-3 pb-3 pt-2'>
@@ -577,6 +586,12 @@ export function IntakeMappingPanel({
               </div>
             ) : (
               <p className='text-sm text-muted'>Aucun prospect ne ressort de cet appel.</p>
+            )}
+            {lead && (
+              <p className='mt-1.5 text-xs text-muted'>
+                La carte telle qu'elle apparaîtra, étoiles comprises. Un champ marqué du seul
+                œil ne s'y lira pas : il attend dans la fiche, en ouvrant la carte.
+              </p>
             )}
           </div>
         </div>

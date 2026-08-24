@@ -52,6 +52,7 @@ import {
   CopyBtn,
   formatMontrealTime,
   leadExtras,
+  LeadValueText,
   leadSourceColor,
   extraFieldId,
   isExtraFieldKey,
@@ -282,7 +283,7 @@ export function LeadDetailPanel({
       if (!extra) return null;
       return (
         <InfoRow key={key} icon={<LuInfo size={14} />} label={field.label} copyText={extra.value}>
-          <span className='whitespace-pre-wrap'>{extra.value}</span>
+          <LeadValueText value={extra.value} className='whitespace-pre-wrap' />
         </InfoRow>
       );
     }
