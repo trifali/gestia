@@ -224,7 +224,7 @@ export default function ProspectPortalPage() {
 
   // `sourceConfigs` arrive avec la charge : le portail n'est pas authentifié et ne
   // peut pas interroger le registre lui-même.
-  const { search, statusConfigs, sourceConfigs = [] } = data as any;
+  const { search, statusConfigs, sourceConfigs = [], cardFields = [] } = data as any;
 
   async function updateStatus(leadId: string, newStatus: string) {
     await (updateLeadByToken as any)({ token: token!, leadId, status: newStatus });
@@ -304,6 +304,7 @@ export default function ProspectPortalPage() {
         leads={filteredLeads}
         statusConfigs={statusConfigs}
         sources={sourceConfigs}
+        cardFields={cardFields}
         updateStatus={updateStatus}
         reorder={reorder}
         refetch={refetch}

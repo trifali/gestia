@@ -676,6 +676,22 @@ action reorderLeadStatusConfigs {
   entities: [User, LeadStatusConfig]
 }
 
+// Champs de carte : ce que montre une carte du kanban, à deux portées comme les
+// statuts. Le jeu de l'entreprise vaut par défaut ; un tableau peut le remplacer
+// entièrement, et `resetLeadCardFields` est le seul chemin de retour.
+query getLeadCardFields {
+  fn: import { getLeadCardFields } from "@src/app/leads/operations",
+  entities: [User, LeadCardFieldConfig, LeadSearch]
+}
+action saveLeadCardFields {
+  fn: import { saveLeadCardFields } from "@src/app/leads/operations",
+  entities: [User, LeadCardFieldConfig, LeadSearch]
+}
+action resetLeadCardFields {
+  fn: import { resetLeadCardFields } from "@src/app/leads/operations",
+  entities: [User, LeadCardFieldConfig, LeadSearch]
+}
+
 // Provenances : le registre de l'entreprise. Pas de portée par tableau — une
 // provenance dit d'où vient le prospect, pas où on le regarde.
 query getLeadSourceConfigs {
@@ -933,7 +949,7 @@ action revokeLeadShareToken {
 }
 query getLeadSearchByToken {
   fn: import { getLeadSearchByToken } from "@src/app/leads/operations",
-  entities: [LeadSearch, Lead, LeadSearchShareToken, LeadStatusConfig, LeadSourceConfig, LeadNote]
+  entities: [LeadSearch, Lead, LeadSearchShareToken, LeadStatusConfig, LeadSourceConfig, LeadNote, LeadCardFieldConfig]
 }
 action updateLeadByToken {
   fn: import { updateLeadByToken } from "@src/app/leads/operations",

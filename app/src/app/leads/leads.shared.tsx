@@ -14,6 +14,8 @@ import {
   LuMail,
   LuStar,
   LuExternalLink,
+  LuMapPin,
+  LuTag,
   LuTrash2,
   LuLoader,
   LuSend,
@@ -39,6 +41,34 @@ export { formatMontrealTime };
 // les appelants existants n'aient pas à changer d'import.
 
 import { leadSourceColor, leadSourceLabel, type LeadSourceOption } from '../../shared/leadSources';
+import {
+  MAX_EXTRA_FIELDS,
+  MAX_EXTRA_LABEL_CHARS,
+  MAX_EXTRA_VALUE_CHARS,
+  normalizeLeadExtras,
+  type LeadExtra,
+} from '../../shared/leadIntake';
+import {
+  DEFAULT_CARD_FIELDS,
+  extraFieldId,
+  isExtraFieldKey,
+  visibleCardFields,
+  type CardFieldConfig,
+} from '../../shared/leadCardFields';
+
+export {
+  DEFAULT_CARD_FIELDS,
+  extraFieldKey,
+  extraFieldId,
+  isExtraFieldKey,
+  isLockedCardField,
+  hasDetailToggle,
+  slugifyFieldLabel,
+  visibleCardFields,
+  visibleDetailFields,
+  isBoardOverride,
+} from '../../shared/leadCardFields';
+export type { CardFieldConfig } from '../../shared/leadCardFields';
 
 export {
   DEFAULT_LEAD_SOURCES,
@@ -200,6 +230,7 @@ export function LeadEditForm({
   onSave,
   onCancel,
   extraFields,
+  hiddenKeys,
   submitLabel = 'Sauvegarder',
   savingLabel = 'Sauvegarde…',
 }: {
@@ -209,6 +240,15 @@ export function LeadEditForm({
   onCancel: () => void;
   /** Extra cell(s) appended to the field grid, e.g. a status picker on creation. */
   extraFields?: ReactNode;
+  /**
+   * Les champs retirés de la fiche dans « Cartes », à ne pas proposer ici.
+   *
+   * Le nom n'en fait jamais partie : il est obligatoire en base, et un formulaire
+   * qui ne permettrait pas de le corriger rendrait la fiche irréparable. La valeur
+   * d'un champ masqué n'est pas effacée pour autant — elle n'est simplement plus
+   * modifiable depuis cet écran, ce qui est exactement ce que « retiré » veut dire.
+   */
+  hiddenKeys?: readonly string[];
   submitLabel?: string;
   savingLabel?: string;
 }) {
@@ -235,6 +275,9 @@ export function LeadEditForm({
     }
   }
 
+  const hidden = new Set(hiddenKeys ?? []);
+  const shows = (key: keyof LeadFormValues) => key === 'name' || !hidden.has(key);
+
   return (
     <div className='space-y-4'>
       <div className='grid grid-cols-1 sm:grid-cols-2 gap-3'>
@@ -246,54 +289,64 @@ export function LeadEditForm({
             onChange={e => setField('name', e.target.value)}
           />
         </div>
-        <div>
-          <label className='label'>Téléphone</label>
-          {/* Le numéro du prospect est la cible de toute la prospection SMS :
-              masqué ici, il ne peut plus arriver hors E.164 au moment d'envoyer. */}
-          <PhoneInput
-            className='input'
-            value={form.phone}
-            onChange={next => setField('phone', next)}
-          />
-        </div>
-        <div>
-          <label className='label'>Courriel</label>
-          <input
-            className='input'
-            type='email'
-            value={form.email}
-            onChange={e => setField('email', e.target.value)}
-            placeholder='—'
-          />
-        </div>
-        <div className='sm:col-span-2'>
-          <label className='label'>Site web</label>
-          <input
-            className='input'
-            type='url'
-            value={form.website}
-            onChange={e => setField('website', e.target.value)}
-            placeholder='https://…'
-          />
-        </div>
-        <div className='sm:col-span-2'>
-          <label className='label'>Adresse</label>
-          <input
-            className='input'
-            value={form.address}
-            onChange={e => setField('address', e.target.value)}
-            placeholder='—'
-          />
-        </div>
-        <div>
-          <label className='label'>Catégorie</label>
-          <input
-            className='input'
-            value={form.category}
-            onChange={e => setField('category', e.target.value)}
-            placeholder='—'
-          />
-        </div>
+        {shows('phone') && (
+          <div>
+            <label className='label'>Téléphone</label>
+            {/* Le numéro du prospect est la cible de toute la prospection SMS :
+                masqué ici, il ne peut plus arriver hors E.164 au moment d'envoyer. */}
+            <PhoneInput
+              className='input'
+              value={form.phone}
+              onChange={next => setField('phone', next)}
+            />
+          </div>
+        )}
+        {shows('email') && (
+          <div>
+            <label className='label'>Courriel</label>
+            <input
+              className='input'
+              type='email'
+              value={form.email}
+              onChange={e => setField('email', e.target.value)}
+              placeholder='—'
+            />
+          </div>
+        )}
+        {shows('website') && (
+          <div className='sm:col-span-2'>
+            <label className='label'>Site web</label>
+            <input
+              className='input'
+              type='url'
+              value={form.website}
+              onChange={e => setField('website', e.target.value)}
+              placeholder='https://…'
+            />
+          </div>
+        )}
+        {shows('address') && (
+          <div className='sm:col-span-2'>
+            <label className='label'>Adresse</label>
+            <input
+              className='input'
+              value={form.address}
+              onChange={e => setField('address', e.target.value)}
+              placeholder='—'
+            />
+          </div>
+        )}
+        {shows('category') && (
+          <div>
+            <label className='label'>Catégorie</label>
+            <input
+              className='input'
+              value={form.category}
+              onChange={e => setField('category', e.target.value)}
+              placeholder='—'
+            />
+          </div>
+        )}
         {extraFields}
       </div>
       <div className='flex justify-end gap-2 pt-1'>
@@ -313,23 +366,54 @@ export function LeadEditForm({
 // rating and Maps link. Used in both the Kanban card template and mobile
 // accordion rows. Pass `actions` for the button row.
 
+// ─── Informations de carte ────────────────────────────────────────────────────
+// Ce qu'un webhook a câblé en plus des sept champs du prospect : un budget, un
+// créneau de rappel, un numéro de dossier. Voir `shared/leadIntake` (`ExtraField`)
+// pour le pourquoi, et `Lead.extras` pour la forme enregistrée.
+
+/** Les informations de carte d'un prospect. Même remise en forme que le serveur. */
+export function leadExtras(lead: unknown): LeadExtra[] {
+  return normalizeLeadExtras((lead as any)?.extras);
+}
+
+export type { LeadExtra };
+export { MAX_EXTRA_FIELDS, MAX_EXTRA_LABEL_CHARS, MAX_EXTRA_VALUE_CHARS };
+
+/**
+ * La partie non interactive d'une carte de prospect.
+ *
+ * Ne décide plus de ce qu'elle montre : elle applique `cardFields`, le jeu résolu
+ * pour ce tableau (voir `shared/leadCardFields`). C'est ce qui permet à un tableau
+ * de formulaire d'afficher un budget là où un tableau Google Maps affiche une note
+ * et un lien Maps, sans deux composants ni un `if` par provenance.
+ *
+ * L'ordre de la configuration est respecté tel quel, y compris pour la pastille de
+ * provenance et la note Google, qui ont chacune leur forme mais pas de place
+ * réservée : ce que l'écran de réglage montre de haut en bas est ce que la carte
+ * montre de haut en bas.
+ */
 export function LeadCardInfo({
   lead,
   actions,
   selection,
   sources,
+  cardFields,
 }: {
   lead: {
     name: string;
     website?: string | null;
     phone?: string | null;
     email?: string | null;
+    address?: string | null;
+    category?: string | null;
     rating?: number | null;
     mapsUrl?: string | null;
     statusUpdatedAt?: string | Date | null;
     source?: string | null;
     /** Première ouverture de la fiche. `null` = personne ne l'a encore regardée. */
     viewedAt?: string | Date | null;
+    /** Informations libres. Lues via `leadExtras`. */
+    extras?: unknown;
   };
   /** Optional button row rendered below contact info. */
   actions?: ReactNode;
@@ -342,6 +426,13 @@ export function LeadCardInfo({
    * sur les étiquettes d'origine puis sur la clé dé-sluggifiée.
    */
   sources?: readonly LeadSourceOption[] | null;
+  /**
+   * Les champs à afficher, dans l'ordre. Même raison que `sources` de passer par
+   * une prop. Absent — l'aperçu d'une correspondance, un appelant pas encore
+   * migré — on retombe sur le jeu par défaut, qui est exactement ce que la carte
+   * montrait avant que ce réglage n'existe.
+   */
+  cardFields?: readonly CardFieldConfig[] | null;
 }) {
   const movedAt = lead.statusUpdatedAt ? new Date(lead.statusUpdatedAt) : null;
   const movedLabel = movedAt
@@ -354,6 +445,147 @@ export function LeadCardInfo({
   // l'alerte d'arrivée (`Lead.viewedAt`, voir jobs/leadIntake) : ce que le point
   // signale sur la carte est exactement ce qui déclencherait la notification.
   const unopened = !lead.viewedAt;
+
+  const extras = leadExtras(lead);
+  const shown = visibleCardFields(
+    cardFields && cardFields.length
+      ? cardFields
+      : DEFAULT_CARD_FIELDS.map((f, order) => ({ ...f, order })),
+  );
+
+  /** Le rendu d'un champ, ou `null` quand ce prospect n'a rien à y mettre. */
+  function renderField(key: string): ReactNode {
+    if (key === 'name') return null; // rendu dans l'en-tête, avec la sélection.
+
+    if (key === 'source') {
+      return (
+        <span
+          key={key}
+          className='flex w-fit items-center gap-1 text-[9px] leading-none px-1 py-[1px] rounded bg-canvas border border-line text-muted whitespace-nowrap'
+          title={`Provenance : ${leadSourceLabel(lead.source, sources)}`}
+        >
+          <span
+            className='w-1.5 h-1.5 rounded-full shrink-0'
+            style={{ backgroundColor: leadSourceColor(lead.source, sources) }}
+          />
+          {leadSourceLabel(lead.source, sources)}
+        </span>
+      );
+    }
+
+    if (key === 'rating') {
+      if (lead.rating == null && !lead.mapsUrl) return null;
+      return (
+        <div key={key} className='flex items-center gap-1.5'>
+          {lead.rating != null && (
+            <span className='flex items-center gap-0.5 text-xs'>
+              <LuStar size={10} className='text-amber-400 fill-amber-400' />
+              <span className='font-medium'>{Number(lead.rating).toFixed(1)}</span>
+            </span>
+          )}
+          {lead.mapsUrl && (
+            <a
+              href={lead.mapsUrl}
+              target='_blank'
+              rel='noopener noreferrer'
+              className='text-xs text-accent-700 hover:underline flex items-center gap-0.5'
+              onClick={e => e.stopPropagation()}
+            >
+              <LuExternalLink size={10} />
+              Maps
+            </a>
+          )}
+        </div>
+      );
+    }
+
+    if (key === 'website' && lead.website) {
+      return (
+        <div key={key} className='flex items-center gap-1.5 text-xs'>
+          <LuGlobe size={10} className='text-muted shrink-0' />
+          <a
+            href={lead.website}
+            target='_blank'
+            rel='noopener noreferrer'
+            className='text-accent-700 hover:underline truncate'
+            onClick={e => e.stopPropagation()}
+          >
+            {lead.website.replace(/^https?:\/\//, '').replace(/\/$/, '')}
+          </a>
+        </div>
+      );
+    }
+
+    if (key === 'phone' && lead.phone) {
+      return (
+        <div key={key} className='flex items-center gap-1.5 text-xs'>
+          <LuPhone size={10} className='text-muted shrink-0' />
+          <a
+            href={`tel:${lead.phone}`}
+            className='text-accent-700 hover:underline truncate'
+            onClick={e => e.stopPropagation()}
+          >
+            {lead.phone}
+          </a>
+        </div>
+      );
+    }
+
+    if (key === 'email' && lead.email) {
+      return (
+        <div key={key} className='flex items-center gap-1.5 text-xs'>
+          <LuMail size={10} className='text-muted shrink-0' />
+          <a
+            href={`mailto:${lead.email}`}
+            className='text-accent-700 hover:underline truncate'
+            onClick={e => e.stopPropagation()}
+          >
+            {lead.email}
+          </a>
+        </div>
+      );
+    }
+
+    if (key === 'address' && lead.address) {
+      return (
+        <div key={key} className='flex items-start gap-1.5 text-xs'>
+          <LuMapPin size={10} className='text-muted shrink-0 mt-0.5' />
+          <span className='text-ink break-words'>{lead.address}</span>
+        </div>
+      );
+    }
+
+    if (key === 'category' && lead.category) {
+      return (
+        <div key={key} className='flex items-start gap-1.5 text-xs'>
+          <LuTag size={10} className='text-muted shrink-0 mt-0.5' />
+          <span className='text-ink break-words'>{lead.category}</span>
+        </div>
+      );
+    }
+
+    if (isExtraFieldKey(key)) {
+      const id = extraFieldId(key);
+      const extra = extras.find(e => e.key === id);
+      if (!extra) return null;
+      // Intitulé au-dessus et non en préfixe : « Budget : 40 000 $ » sur une seule
+      // ligne se fait tronquer au milieu de la valeur, qui est la moitié utile.
+      return (
+        <div key={key} className='min-w-0'>
+          <div className='text-[9px] font-semibold uppercase tracking-wide text-muted leading-tight'>
+            {extra.label}
+          </div>
+          <div className='text-xs text-ink leading-snug break-words whitespace-pre-wrap'>
+            {extra.value}
+          </div>
+        </div>
+      );
+    }
+
+    return null;
+  }
+
+  const body = shown.map(field => renderField(field.key)).filter(Boolean);
 
   return (
     <div className='p-3 space-y-2'>
@@ -374,89 +606,21 @@ export function LeadCardInfo({
           {lead.name}
         </div>
       </div>
-      <div className='flex items-center gap-1.5 flex-wrap'>
-        {movedLabel && (
-          <div
-            className='flex items-center gap-1 text-[10px] text-muted'
-            title={`Déplacé le ${movedLabel}`}
-          >
-            <LuClock size={9} className='shrink-0' />
-            <span>{movedLabel}</span>
-          </div>
-        )}
-        <span
-          className='flex items-center gap-1 text-[9px] leading-none px-1 py-[1px] rounded bg-canvas border border-line text-muted whitespace-nowrap'
-          title={`Provenance : ${leadSourceLabel(lead.source, sources)}`}
+
+      {/* La date de déplacement n'est pas un champ du prospect mais une trace du
+          tableau : elle ne se règle donc pas et garde sa place sous le nom. */}
+      {movedLabel && (
+        <div
+          className='flex items-center gap-1 text-[10px] text-muted'
+          title={`Déplacé le ${movedLabel}`}
         >
-          <span
-            className='w-1.5 h-1.5 rounded-full shrink-0'
-            style={{ backgroundColor: leadSourceColor(lead.source, sources) }}
-          />
-          {leadSourceLabel(lead.source, sources)}
-        </span>
-      </div>
-      <div className='space-y-0.5'>
-        {lead.website && (
-          <div className='flex items-center gap-1.5 text-xs'>
-            <LuGlobe size={10} className='text-muted shrink-0' />
-            <a
-              href={lead.website}
-              target='_blank'
-              rel='noopener noreferrer'
-              className='text-accent-700 hover:underline truncate'
-              onClick={e => e.stopPropagation()}
-            >
-              {lead.website.replace(/^https?:\/\//, '').replace(/\/$/, '')}
-            </a>
-          </div>
-        )}
-        {lead.phone && (
-          <div className='flex items-center gap-1.5 text-xs'>
-            <LuPhone size={10} className='text-muted shrink-0' />
-            <a
-              href={`tel:${lead.phone}`}
-              className='text-accent-700 hover:underline truncate'
-              onClick={e => e.stopPropagation()}
-            >
-              {lead.phone}
-            </a>
-          </div>
-        )}
-        {lead.email && (
-          <div className='flex items-center gap-1.5 text-xs'>
-            <LuMail size={10} className='text-muted shrink-0' />
-            <a
-              href={`mailto:${lead.email}`}
-              className='text-accent-700 hover:underline truncate'
-              onClick={e => e.stopPropagation()}
-            >
-              {lead.email}
-            </a>
-          </div>
-        )}
-      </div>
-      {(lead.rating != null || lead.mapsUrl) && (
-        <div className='flex items-center gap-1.5'>
-          {lead.rating != null && (
-            <span className='flex items-center gap-0.5 text-xs'>
-              <LuStar size={10} className='text-amber-400 fill-amber-400' />
-              <span className='font-medium'>{Number(lead.rating).toFixed(1)}</span>
-            </span>
-          )}
-          {lead.mapsUrl && (
-            <a
-              href={lead.mapsUrl}
-              target='_blank'
-              rel='noopener noreferrer'
-              className='text-xs text-accent-700 hover:underline flex items-center gap-0.5'
-              onClick={e => e.stopPropagation()}
-            >
-              <LuExternalLink size={10} />
-              Maps
-            </a>
-          )}
+          <LuClock size={9} className='shrink-0' />
+          <span>{movedLabel}</span>
         </div>
       )}
+
+      {body.length > 0 && <div className='space-y-1'>{body}</div>}
+
       {actions && <div className='pt-1.5 border-t border-line'>{actions}</div>}
     </div>
   );
@@ -676,6 +840,7 @@ export function LeadKanbanBoard({
   onToggleSelect,
   onSelectMany,
   sources,
+  cardFields,
   cssClass = 'gestia-kanban',
 }: {
   /** Already-filtered leads to display. */
@@ -683,6 +848,8 @@ export function LeadKanbanBoard({
   statusConfigs: any[];
   /** Le registre des provenances, pour l'étiquette et la pastille des cartes. */
   sources?: readonly LeadSourceOption[] | null;
+  /** Les champs à afficher sur les cartes, résolus pour ce tableau. */
+  cardFields?: readonly CardFieldConfig[] | null;
   /** API call only — no toast, no refetch. Throws on error. */
   updateStatus: (leadId: string, newStatus: string) => Promise<void>;
   /**
@@ -735,6 +902,11 @@ export function LeadKanbanBoard({
   onSelectManyRef.current = onSelectMany;
   const sourcesRef = useRef(sources);
   sourcesRef.current = sources;
+  // Même raison que `sourcesRef` : le gabarit de carte de Syncfusion est rendu
+  // hors de l'arbre React normal, et lire la prop directement y donnerait la
+  // valeur figée du premier rendu.
+  const cardFieldsRef = useRef(cardFields);
+  cardFieldsRef.current = cardFields;
   const boardRef = useRef<HTMLDivElement>(null);
   const rootRef = useRef<HTMLDivElement>(null);
 
@@ -933,10 +1105,14 @@ export function LeadKanbanBoard({
           actions={cardActionsRef.current(lead)}
           selection={renderSelection(lead)}
           sources={sourcesRef.current}
+          cardFields={cardFieldsRef.current}
         />
       </CardClickShell>
     ),
-    [renderSelection, sources],
+    // `cardFields` doit être une vraie dépendance : sans elle, le gabarit garde
+    // celui qu'il avait au premier rendu, et étoiler un champ ne changerait rien
+    // aux cartes tant qu'on n'a pas rechargé la page.
+    [renderSelection, sources, cardFields],
   );
 
   const columnHeaderTemplate = useCallback(
@@ -1016,6 +1192,7 @@ export function LeadKanbanBoard({
                             actions={cardActions(lead)}
                             selection={renderSelection(lead)}
                             sources={sources}
+                            cardFields={cardFields}
                           />
                         </CardClickShell>
                       </div>

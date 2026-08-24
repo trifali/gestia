@@ -11,6 +11,8 @@ import {
   normalizeLeadSource,
   slugifyLeadSource,
 } from '../../shared/leadSources';
+import { normalizeLeadExtras } from '../../shared/leadIntake';
+import { DEFAULT_CARD_FIELDS, hasDetailToggle, isLockedCardField } from '../../shared/leadCardFields';
 import { randomBytes } from 'crypto';
 import { sendEmailWithAttachment, companySmtp } from '../../server/mail';
 import {
@@ -476,9 +478,30 @@ export const searchLeads: SearchLeads<
 };
 
 export const updateLead: UpdateLead<
-  { id: string; status?: string; notes?: string; email?: string; name?: string; phone?: string; website?: string; address?: string; category?: string; source?: string },
+  {
+    id: string;
+    status?: string;
+    notes?: string;
+    email?: string;
+    name?: string;
+    phone?: string;
+    website?: string;
+    address?: string;
+    category?: string;
+    source?: string;
+    /**
+     * Les informations de la carte, réécrites en bloc.
+     *
+     * Câblées par une correspondance sur un tableau webhook, saisies à la main
+     * partout ailleurs — et modifiables à la main dans les deux cas : ce qu'un
+     * formulaire a envoyé n'est pas plus intouchable que le téléphone qu'il a
+     * envoyé aussi. La liste entière et pas une ligne à la fois, parce que
+     * l'ordre en fait partie et qu'il se règle en déplaçant les lignes.
+     */
+    extras?: { label?: string; value?: string }[];
+  },
   Lead
-> = async ({ id, status, notes, email, name, phone, website, address, category, source }, context) => {
+> = async ({ id, status, notes, email, name, phone, website, address, category, source, extras }, context) => {
   const companyId = ensureCompany(context.user);
   const lead = await context.entities.Lead.findUnique({
     where: { id },
@@ -503,6 +526,10 @@ export const updateLead: UpdateLead<
       ...(address !== undefined && { address }),
       ...(category !== undefined && { category }),
       ...(safeSource !== undefined && { source: safeSource }),
+      // `normalizeLeadExtras` est le même passage que celui qu'applique le
+      // webhook : une carte saisie à la main et une carte reçue portent donc des
+      // informations de la même forme, avec les mêmes plafonds.
+      ...(extras !== undefined && { extras: normalizeLeadExtras(extras) }),
     },
   });
 
@@ -713,6 +740,153 @@ export async function resolveIntakeStatus(
   const configs = await effectiveStatusConfigs(entities, companyId, searchId);
   return configs.find(c => c.key !== UNKNOWN_STATUS_KEY)?.key ?? 'nouveau';
 }
+
+// ─── Champs de carte ──────────────────────────────────────────────────────────
+
+/**
+ * Les champs qui s'appliquent réellement à un tableau.
+ *
+ * Jumelle exacte d'`effectiveStatusConfigs`, y compris le semis au premier accès :
+ * les siens s'il en a, ceux de l'entreprise sinon, et le jeu par défaut si
+ * l'entreprise n'a encore rien réglé. Le semis vit ici et pas dans une migration
+ * parce qu'une entreprise créée demain doit obtenir le même jeu qu'une entreprise
+ * migrée aujourd'hui — une migration ne couvre que les lignes déjà en base.
+ */
+export async function effectiveCardFieldConfigs(
+  entities: any,
+  companyId: string,
+  searchId?: string | null,
+): Promise<any[]> {
+  if (searchId) {
+    const own = await entities.LeadCardFieldConfig.findMany({
+      where: { companyId, searchId },
+      orderBy: { order: 'asc' },
+    });
+    if (own.length > 0) return own;
+  }
+
+  const shared = await entities.LeadCardFieldConfig.findMany({
+    where: { companyId, searchId: null },
+    orderBy: { order: 'asc' },
+  });
+  if (shared.length > 0) return shared;
+
+  return Promise.all(
+    DEFAULT_CARD_FIELDS.map((field, order) =>
+      entities.LeadCardFieldConfig.create({
+        data: { companyId, searchId: null, ...field, order },
+      }),
+    ),
+  );
+}
+
+/**
+ * Les champs de carte, à deux portées — même contrat que `getLeadStatusConfigs`.
+ *
+ * Les lignes portent leur `searchId`, ce qui suffit au client pour afficher le
+ * bandeau « ce tableau a ses propres champs » sans une requête de plus.
+ */
+export const getLeadCardFields = async (
+  args: { searchId?: string } | void,
+  context: any,
+): Promise<any[]> => {
+  const companyId = ensureCompany(context.user);
+  const searchId = (args as any)?.searchId as string | undefined;
+  if (searchId) {
+    const search = await context.entities.LeadSearch.findUnique({
+      where: { id: searchId },
+      select: { companyId: true },
+    });
+    if (!search || search.companyId !== companyId) throw new HttpError(404);
+  }
+  return effectiveCardFieldConfigs(context.entities, companyId, searchId);
+};
+
+/** Plafond : au-delà, la liste de réglage cesse d'être lisible autant que la carte. */
+const MAX_CARD_FIELDS = 24;
+
+/**
+ * Réécrit en bloc le jeu de champs d'une portée.
+ *
+ * En bloc et non ligne à ligne : l'écran règle l'ordre, les étoiles, les intitulés
+ * et les ajouts d'un même geste, et six actions séparées laisseraient l'affichage
+ * dans un état intermédiaire à chaque enregistrement partiel. Le jeu envoyé est le
+ * jeu qui vaut.
+ */
+export const saveLeadCardFields = async (
+  {
+    searchId,
+    fields,
+  }: {
+    searchId?: string;
+    fields: { key: string; label: string; onCard: boolean; onDetail?: boolean }[];
+  },
+  context: any,
+): Promise<any[]> => {
+  const companyId = ensureCompany(context.user);
+  const scope = await requireStatusScope(context, companyId, searchId);
+
+  if (!Array.isArray(fields) || fields.length === 0) {
+    throw new HttpError(400, 'Au moins un champ est requis.');
+  }
+  if (fields.length > MAX_CARD_FIELDS) {
+    throw new HttpError(400, `Pas plus de ${MAX_CARD_FIELDS} champs.`);
+  }
+
+  const seen = new Set<string>();
+  const rows = fields.map((field, order) => {
+    const key = String(field.key ?? '').trim();
+    if (!key) throw new HttpError(400, 'Un champ sans clé ne peut pas être enregistré.');
+    if (seen.has(key)) throw new HttpError(400, `Le champ « ${key} » est présent deux fois.`);
+    seen.add(key);
+    const label = String(field.label ?? '').trim().slice(0, 40);
+    if (!label) throw new HttpError(400, `Le champ « ${key} » n'a pas d'intitulé.`);
+    return {
+      companyId,
+      searchId: scope,
+      key,
+      label,
+      // Le nom passe toujours, quoi qu'annonce le client : la garde est la même
+      // que celle de `visibleCardFields`, appliquée avant l'écriture pour qu'une
+      // configuration enregistrée ne puisse pas décrire une carte anonyme.
+      onCard: isLockedCardField(key) ? true : !!field.onCard,
+      // `?? true` et non `!!` : un appelant qui ne connaît pas encore l'œil — la
+      // correspondance, qui ne règle que les étoiles — ne doit pas masquer de la
+      // fiche tout ce qu'il enregistre au passage.
+      onDetail: hasDetailToggle(key) ? (field.onDetail ?? true) : false,
+      order,
+    };
+  });
+
+  if (!seen.has('name')) throw new HttpError(400, 'Le nom ne peut pas être retiré de la carte.');
+
+  // Remplacement et non fusion : c'est la même règle « tout ou rien » que les
+  // statuts, et elle est ce qui rend une surcharge de tableau raisonnable.
+  await context.entities.LeadCardFieldConfig.deleteMany({ where: { companyId, searchId: scope } });
+  for (const row of rows) {
+    await context.entities.LeadCardFieldConfig.create({ data: row });
+  }
+
+  return effectiveCardFieldConfigs(context.entities, companyId, scope);
+};
+
+/**
+ * Rend un tableau au jeu de l'entreprise en supprimant ses lignes propres.
+ *
+ * L'inverse exact de la surcharge, et le seul moyen d'en sortir : sans cela, un
+ * tableau ayant un jour dévié resterait figé sur sa copie et cesserait de suivre
+ * les évolutions de l'entreprise, sans que rien ne l'indique.
+ */
+export const resetLeadCardFields = async (
+  { searchId }: { searchId: string },
+  context: any,
+): Promise<any[]> => {
+  const companyId = ensureCompany(context.user);
+  const scope = await requireStatusScope(context, companyId, searchId);
+  if (!scope) throw new HttpError(400, 'Un tableau est requis.');
+  await context.entities.LeadCardFieldConfig.deleteMany({ where: { companyId, searchId: scope } });
+  return effectiveCardFieldConfigs(context.entities, companyId, scope);
+};
 
 // ─── Lead status config operations ───────────────────────────────────────────
 
@@ -2164,6 +2338,10 @@ export const getLeadSearchByToken = async (
   // exactement les tableaux qu'on partage le plus.
   const sourceConfigs = await effectiveSourceConfigs(context.entities, search.companyId);
 
+  // Ceux du tableau partagé, pour la même raison que les statuts : un employé qui
+  // reçoit le lien doit voir exactement les cartes que voit son patron.
+  const cardFields = await effectiveCardFieldConfigs(context.entities, search.companyId, search.id);
+
   return {
     search: {
       id: search.id,
@@ -2174,6 +2352,7 @@ export const getLeadSearchByToken = async (
     leads: leadsWithFlags,
     statusConfigs,
     sourceConfigs,
+    cardFields,
   };
 };
 

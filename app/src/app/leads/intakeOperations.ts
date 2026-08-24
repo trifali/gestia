@@ -21,6 +21,7 @@ import {
   isMappingConfigured,
   isUsableLead,
   LEAD_INTAKE_PATH,
+  MAX_EXTRA_FIELDS,
   suggestMapping,
   type DetectedPath,
   type JsonValue,
@@ -405,6 +406,22 @@ const noteEntrySchema = z.object({
   transforms: transformsSchema,
 });
 
+// Une information de carte. L'intitulé est court par construction : il doit tenir
+// sur une carte de kanban à côté de sa valeur, pas porter la question entière.
+const extraFieldSchema = z.object({
+  // La clé nue du champ (`budget`), celle que porte aussi sa ligne de
+  // `LeadCardFieldConfig`. `id` est son ancien nom : encore accepté en écriture
+  // pour qu'une correspondance enregistrée avant le renommage puisse être
+  // réenregistrée sans être refusée.
+  key: z.string().min(1).max(60).optional(),
+  id: z.string().min(1).max(60).optional(),
+  label: z.string().max(40, 'Intitulé trop long (40 caractères au plus).'),
+  rule: fieldRuleSchema,
+}).refine(f => !!(f.key ?? f.id), {
+  message: 'Un champ libre doit porter une clé.',
+  path: ['key'],
+});
+
 const mappingSchema = z.object({
   version: z.literal(1),
   rootPath: z.string().max(400).nullable().optional(),
@@ -418,6 +435,12 @@ const mappingSchema = z.object({
     category: fieldRuleSchema,
     source: fieldRuleSchema,
   }),
+  // Absent d'une correspondance enregistrée avant les informations de carte : la
+  // refuser ferait échouer un réenregistrement qui n'a rien changé.
+  extras: z
+    .array(extraFieldSchema)
+    .max(MAX_EXTRA_FIELDS, `Pas plus de ${MAX_EXTRA_FIELDS} informations sur une carte.`)
+    .optional(),
   notes: z.object({
     mode: z.enum(['unmapped', 'selected', 'none']),
     // Ancienne forme, encore acceptée en écriture : une correspondance

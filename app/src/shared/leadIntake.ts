@@ -16,6 +16,7 @@
 // deux voient donc rigoureusement le même résultat.
 
 import { slugifyLeadSource, type LeadSourceKey } from './leadSources';
+import { slugifyFieldLabel } from './leadCardFields';
 import {
   applyTransforms,
   previewTransforms,
@@ -139,6 +140,95 @@ export type NoteEntry = {
   transforms?: Transform[];
 };
 
+/**
+ * Une information libre affichée sur la carte du kanban.
+ *
+ * Les sept champs du prospect (`MappedFieldKey`) sont des colonnes de la base :
+ * on les cherche, on les filtre, on écrit un courriel avec. Ce qu'un formulaire
+ * envoie en plus — un budget, un créneau de rappel, un numéro de dossier — n'a
+ * pas de colonne et n'en mérite pas : c'est du texte que quelqu'un doit *lire*
+ * avant de rappeler.
+ *
+ * Jusqu'ici cela finissait en note, c'est-à-dire à deux clics de la carte : on
+ * ouvrait la fiche, on descendait jusqu'aux notes. Une information qui décide
+ * s'il faut rappeler ce prospect avant midi doit se lire sur la carte elle-même.
+ *
+ * `id` est stable et sans rapport avec le chemin : il survit à un changement de
+ * source, ce qui permet de rebrancher « Budget » sur un autre champ reçu sans que
+ * la ligne change de place dans la liste.
+ *
+ * `rule` est une `FieldRule` complète, et pas un simple chemin : un budget en
+ * `field_data[name=budget].values[0]` a besoin des mêmes nettoyages qu'un
+ * téléphone, et « {{ville}}, {{province}} » est une information de carte aussi
+ * légitime qu'une adresse.
+ */
+export type ExtraField = {
+  /**
+   * La clé du champ, nue : `budget`, pas `extra:budget`.
+   *
+   * C'est le même identifiant que celui de la ligne `LeadCardFieldConfig` qui
+   * décide de l'affichage — la correspondance ne fait qu'**alimenter** un champ
+   * déclaré ailleurs, elle ne le déclare pas. Sans ce partage, une information
+   * câblée ici et une information saisie à la main sur un autre tableau seraient
+   * deux champs distincts portant le même nom.
+   */
+  key: string;
+  label: string;
+  rule: FieldRule;
+  /** Ancien nom de `key`. Lu, jamais écrit. @deprecated */
+  id?: string;
+};
+
+/**
+ * Une information libre portée par un prospect.
+ *
+ * `key` la rattache à sa ligne de `LeadCardFieldConfig`, qui décide si elle
+ * s'affiche sur la carte. `label` est enregistré à côté plutôt que relu depuis la
+ * configuration : une fiche doit rester lisible même si le champ a été renommé ou
+ * retiré depuis, et c'est bien ce que le formulaire disait ce jour-là.
+ */
+export type LeadExtra = { key: string; label: string; value: string };
+
+/** Plafond par prospect : au-delà, la carte n'est plus une carte. */
+export const MAX_EXTRA_FIELDS = 12;
+
+/** Longueurs retenues : un intitulé tient sur une carte, une valeur se lit dessous. */
+export const MAX_EXTRA_LABEL_CHARS = 40;
+export const MAX_EXTRA_VALUE_CHARS = 500;
+
+/**
+ * `Lead.extras` remis en forme, quoi qu'il y ait dans la colonne.
+ *
+ * Point unique de lecture *et* d'écriture : la colonne est du JSON libre, elle
+ * est alimentée aussi bien par une correspondance de webhook que par la saisie
+ * d'un utilisateur dans la fiche, et les prospects antérieurs à la colonne n'ont
+ * rien du tout. Un seul passage défensif vaut mieux que trois écrans qui plantent
+ * chacun à leur façon.
+ *
+ * Une ligne sans valeur est écartée : « Budget : » sans budget occuperait une des
+ * rares lignes d'une carte sans rien apprendre. Une ligne sans intitulé est
+ * gardée — la valeur seule dit encore quelque chose, l'inverse non.
+ */
+export function normalizeLeadExtras(raw: unknown): LeadExtra[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .filter((e): e is Record<string, unknown> => !!e && typeof e === 'object' && !Array.isArray(e))
+    .map(e => {
+      const label = String(e.label ?? '').trim().slice(0, MAX_EXTRA_LABEL_CHARS);
+      // Clé déduite de l'intitulé quand elle manque : les valeurs écrites avant
+      // que `key` n'existe se rattachent ainsi toutes seules au champ qui porte
+      // le même nom, sans migration ni écran de rattrapage.
+      const key = String(e.key ?? '').trim() || slugifyFieldLabel(label);
+      return {
+        key,
+        label,
+        value: String(e.value ?? '').trim().slice(0, MAX_EXTRA_VALUE_CHARS),
+      };
+    })
+    .filter(e => e.value.length > 0)
+    .slice(0, MAX_EXTRA_FIELDS);
+}
+
 export type LeadIntakeMapping = {
   version: 1;
   /** Chemin vers un tableau quand un même appel porte plusieurs prospects. */
@@ -146,6 +236,14 @@ export type LeadIntakeMapping = {
   /** Chemin de la clé anti-doublon (`external_id`, `leadgen_id`, numéro de ligne…). */
   dedupePath?: string | null;
   fields: Record<MappedFieldKey, FieldRule>;
+  /**
+   * Les informations libres de la carte, dans l'ordre où elles s'y afficheront.
+   *
+   * Optionnel et absent des correspondances enregistrées avant leur existence,
+   * qui continuent donc de produire exactement les mêmes prospects — passer par
+   * `extraFields()` plutôt que de lire la propriété évite d'avoir à s'en souvenir.
+   */
+  extras?: ExtraField[];
   notes: {
     mode: NotesMode;
     /**
@@ -177,6 +275,8 @@ export type MappedLead = {
   sourceLabel: string | null;
   notes: string | null;
   externalId: string | null;
+  /** Les informations libres de la carte. Vide quand la correspondance n'en câble aucune. */
+  extras: LeadExtra[];
 };
 
 /** Un chemin repéré dans un échantillon, avec la valeur qui s'y trouvait. */
@@ -197,6 +297,7 @@ export const EMPTY_MAPPING: LeadIntakeMapping = {
     category: NO_RULE,
     source: { kind: 'const', value: 'other' },
   },
+  extras: [],
   notes: { mode: 'unmapped' },
 };
 
@@ -227,6 +328,21 @@ export function noteEntries(mapping: LeadIntakeMapping): NoteEntry[] {
   const { entries, paths } = mapping.notes;
   if (entries?.length) return entries;
   return (paths ?? []).map(path => ({ path }));
+}
+
+/**
+ * Les informations de carte d'une correspondance, quelle qu'en soit l'ancienneté.
+ *
+ * Point unique de lecture, comme `noteEntries` : une correspondance enregistrée
+ * avant les informations de carte n'a pas la propriété, et personne ne doit avoir
+ * à s'en souvenir. Les lignes sans intitulé ou sans règle utile sont écartées ici
+ * plutôt qu'à chaque endroit qui les affiche.
+ */
+export function extraFields(mapping: LeadIntakeMapping): ExtraField[] {
+  return (mapping.extras ?? [])
+    .filter(f => f && f.rule && f.rule.kind !== 'none')
+    .map(f => ({ ...f, key: (f.key ?? f.id ?? '').trim() || slugifyFieldLabel(f.label ?? '') }))
+    .filter(f => !!f.key);
 }
 
 // ─── Lecture par chemin ───────────────────────────────────────────────────────
@@ -497,6 +613,11 @@ export function suggestMapping(
       category: rule(findPath(paths, ALIASES.category)),
       source: { kind: 'const', value: defaultSource },
     },
+    // Rien de proposé d'office : une information de carte est un choix éditorial
+    // — laquelle des douze valeurs restantes mérite d'occuper une carte — et
+    // aucune heuristique ne le devine. La note fourre-tout continue de tout
+    // recueillir en attendant qu'on tranche.
+    extras: [],
     notes: { mode: 'unmapped' },
   };
 }
@@ -591,7 +712,13 @@ const CLEAN = (value: string): string | null => {
 /** Chemins consommés par un champ, pour savoir ce qui reste à mettre en notes. */
 function consumedPaths(mapping: LeadIntakeMapping): Set<string> {
   const used = new Set<string>();
-  for (const rule of Object.values(mapping.fields)) {
+  // Les informations de carte comptent comme des champs : une valeur déjà lisible
+  // sur la carte n'a rien à faire une seconde fois dans la note fourre-tout.
+  const rules: (FieldRule | undefined)[] = [
+    ...Object.values(mapping.fields),
+    ...extraFields(mapping).map(f => f.rule),
+  ];
+  for (const rule of rules) {
     if (rule?.kind === 'path') used.add(rule.path);
     if (rule?.kind === 'template') {
       for (const m of rule.template.matchAll(/\{\{([^}]+)\}\}/g)) used.add(m[1].trim());
@@ -614,6 +741,42 @@ function consumedPaths(mapping: LeadIntakeMapping): Set<string> {
 function buildNotes(item: unknown, mapping: LeadIntakeMapping): string | null {
   const lines = noteLines(item, mapping).map(line => `${line.label} : ${line.value}`);
   return lines.length > 0 ? lines.join('\n') : null;
+}
+
+/**
+ * Les informations de carte d'un prospect, dans l'ordre de la correspondance.
+ *
+ * Une ligne dont la valeur finit vide est écartée, pour la même raison qu'une
+ * ligne de note vide : « Budget : » sans budget prend la place d'une information
+ * sur une carte qui en a très peu. Le plafond est appliqué ici et pas seulement à
+ * l'enregistrement — une correspondance venue d'ailleurs ne doit pas pouvoir
+ * remplir une carte de trente lignes.
+ */
+export function buildExtras(item: unknown, mapping: LeadIntakeMapping): LeadExtra[] {
+  return extraFields(mapping)
+    .slice(0, MAX_EXTRA_FIELDS)
+    .map(field => ({
+      key: field.key,
+      label: field.label.trim() || labelForRule(field.rule),
+      value: resolveRule(item, field.rule).trim(),
+    }))
+    .filter(extra => extra.value.length > 0);
+}
+
+/**
+ * L'intitulé de repli d'une information de carte laissée sans nom.
+ *
+ * Une information sans intitulé ne dit rien : « 4500 $ » seul sur une carte
+ * n'apprend rien à personne. Le chemin d'où vient la valeur reste le meilleur
+ * indice qu'on ait — c'est déjà ce que fait la note pour ses lignes.
+ */
+export function labelForRule(rule: FieldRule): string {
+  if (rule.kind === 'path') return labelForPath(rule.path);
+  if (rule.kind === 'template') {
+    const first = rule.template.match(/\{\{([^}]+)\}\}/);
+    return first ? labelForPath(first[1].trim()) : 'Information';
+  }
+  return 'Information';
 }
 
 /** Une ligne de note, décomposée — l'écran l'affiche, `buildNotes` l'assemble. */
@@ -751,6 +914,7 @@ export function applyMapping(payload: unknown, mapping: LeadIntakeMapping): Appl
       sourceLabel: rawSource,
       notes: buildNotes(item, mapping),
       externalId: CLEAN(toText(getByPath(item, mapping.dedupePath))),
+      extras: buildExtras(item, mapping),
     });
   });
 

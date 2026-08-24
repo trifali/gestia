@@ -120,6 +120,7 @@ model Company {
   leadSearches        LeadSearch[]
   prospectStatuses    ProspectStatus[]
   leadStatusConfigs   LeadStatusConfig[]
+  leadCardFields      LeadCardFieldConfig[]
   leadSourceConfigs   LeadSourceConfig[]
   leadNotes           LeadNote[]
   leadEmailLogs       LeadEmailLog[]
@@ -498,6 +499,7 @@ model LeadSearch {
   shareToken     LeadSearchShareToken?
   inboundWebhook LeadInboundWebhook?
   statusConfigs  LeadStatusConfig[]
+  cardFields     LeadCardFieldConfig[]
 
   @@index([companyId])
 }
@@ -545,6 +547,20 @@ model Lead {
   // (voir jobs/leadIntake). Le changement de statut ne suffisait pas : on peut
   // très bien ouvrir une fiche, la traiter et la laisser dans sa colonne.
   viewedAt        DateTime?
+  // Informations libres du prospect : `[{ key, label, value }]` (voir
+  // shared/leadIntake). Câblées par la correspondance d'un webhook, ou saisies à
+  // la main sur n'importe quel tableau. `key` rattache la valeur à sa ligne de
+  // `LeadCardFieldConfig`, qui décide si elle s'affiche sur la carte ; `label`
+  // reste enregistré à côté pour que la fiche reste lisible même si la
+  // configuration change ou disparaît.
+  //
+  // Une colonne JSON plutôt qu'une table : ces champs n'ont pas de vie propre —
+  // ils naissent avec le prospect, ne sont jamais requêtés seuls, et leur nom
+  // vient d'un formulaire externe qu'aucun schéma ne peut prévoir. On enregistre
+  // l'intitulé *avec* la valeur, et non une référence à la correspondance :
+  // renommer « Budget » en « Budget estimé » ne doit pas réécrire l'histoire des
+  // cartes déjà reçues, qui portent bien ce que le formulaire disait ce jour-là.
+  extras          Json      @default("[]")
   order           Int       @default(0) // manual position inside its kanban column
 
   @@index([searchId])
@@ -605,6 +621,53 @@ model LeadStatusConfig {
   // Postgres considère deux NULL comme distincts : cette contrainte ne protège
   // donc pas les statuts d'entreprise entre eux. `createLeadStatusConfig` vérifie
   // explicitement l'unicité de la clé — voir le commentaire qui l'accompagne.
+  @@unique([companyId, searchId, key])
+  @@index([companyId])
+  @@index([searchId])
+}
+
+// Ce que montre une carte du kanban, et dans quel ordre (voir shared/leadCardFields).
+//
+// Calquée sur `LeadStatusConfig`, jusqu'à la sémantique du `searchId` nul : un
+// tableau qui possède ses propres lignes **remplace entièrement** le jeu de
+// l'entreprise. Même raison qu'ailleurs — un héritage partiel serait impossible à
+// raisonner — et même bénéfice : l'écran de réglage est le même à deux portées.
+model LeadCardFieldConfig {
+  id        String   @id @default(uuid())
+  createdAt DateTime @default(now())
+
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  companyId String
+
+  // Null : le jeu de l'entreprise, que tous les tableaux suivent par défaut.
+  // Non nul : celui de ce tableau, qui remplace le précédent en bloc.
+  search   LeadSearch? @relation(fields: [searchId], references: [id], onDelete: Cascade)
+  searchId String?
+
+  // Une colonne du prospect (`name`, `email`, `rating`…) ou un champ libre,
+  // préfixé : `extra:budget`. Le préfixe permet de lire la clé sans sa ligne.
+  key   String
+  // Modifiable : « Catégorie » peut devenir « Type de projet » sans que rien ne
+  // bouge en base, puisque seule `key` fait foi.
+  label String
+
+  // L'étoile. Éteinte, le champ quitte la carte sans quitter la fiche.
+  onCard Boolean @default(true)
+  // L'œil. Éteint, le champ quitte la **fiche** — le panneau latéral qui s'ouvre
+  // quand on clique une carte. Séparé de `onCard` parce que les deux questions
+  // sont distinctes : la note Google n'a rien à faire sur un tableau alimenté par
+  // formulaire, ni sur la carte ni dans la fiche, alors qu'une adresse peut très
+  // bien mériter la fiche sans encombrer la carte.
+  //
+  // Masquer et non supprimer : la colonne existe en base, elle alimente encore
+  // les actions (le téléphone arme le bouton SMS, le courriel le bouton courriel),
+  // et l'éteindre doit rester réversible sans perte.
+  onDetail Boolean @default(true)
+  order  Int     @default(0)
+
+  // Comme pour les statuts, Postgres considère deux NULL comme distincts : cette
+  // contrainte ne protège donc pas les lignes d'entreprise entre elles. C'est
+  // `saveLeadCardFields` qui garantit l'unicité des clés d'un même jeu.
   @@unique([companyId, searchId, key])
   @@index([companyId])
   @@index([searchId])

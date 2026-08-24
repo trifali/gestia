@@ -131,6 +131,10 @@ export async function insertMappedLead(
       category: lead.category,
       source,
       externalId: lead.externalId ?? args.fallbackExternalId ?? null,
+      // Les informations de carte, figées telles qu'elles sont arrivées. Voir
+      // `Lead.extras` : on enregistre l'intitulé avec la valeur, pas un renvoi
+      // vers la correspondance, qui peut être remaniée demain.
+      extras: lead.extras ?? [],
     },
   });
 
