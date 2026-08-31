@@ -61,10 +61,13 @@ export function buildRecipes(url: string, secret: string | null): Recipe[] {
       summary:
         'Quand vos prospects arrivent déjà dans un tableur — y compris via le connecteur Google Sheets de Meta.',
       steps: [
+        'Vérifiez que les en-têtes de colonnes sont bien sur la ligne 1 du tableur (le script attend sagement si la feuille est encore vide).',
         'Dans le tableur : Extensions → Apps Script.',
         'Collez le script ci-dessous, puis Enregistrer.',
         'Déclencheurs (icône réveil) → Ajouter un déclencheur → fonction « envoyerNouveauxProspects » → source « Horaire » → « Minuteur (minutes) » → « Toutes les minutes ».',
         'Autorisez le script à la première exécution.',
+        'Plusieurs structures de prospects peuvent cohabiter dans la feuille : une colonne de données sans titre reçoit un en-tête automatique (colonne_M, …), et chaque ligne n\'envoie que ses cellules remplies.',
+        'Facultatif — pour pousser d\'autres sources dans la même feuille : Déployer → Nouveau déploiement → « Application web » (exécuter « en tant que moi », accès « Tout le monde »), puis envoyez vos prospects en POST JSON sur l\'URL obtenue avec ?secret=… au bout. Les colonnes manquantes seront créées automatiquement.',
       ],
       warning:
         'Il faut un déclencheur horaire, surtout pas onEdit. Google ne déclenche pas les scripts '
@@ -82,6 +85,24 @@ function envoyerNouveauxProspects() {
   const lignes  = feuille.getDataRange().getValues();
   const entetes = lignes.shift().map(function (h) { return String(h).trim(); });
 
+  // Feuille vide ou sans en-têtes : on attend. Écrire quoi que ce soit dans une
+  // feuille vierge décalerait les colonnes que Meta ou Zapier s'apprêtent à
+  // créer, et tout le tableur partirait de travers.
+  if (entetes.filter(String).length < 2) return;
+
+  // Colonne de données sans en-tête — réponse de formulaire ajoutée par le
+  // connecteur, ou nouvelle structure de prospect : on la baptise d'après sa
+  // lettre pour que ses valeurs voyagent au lieu d'être perdues. Plusieurs
+  // structures peuvent ainsi cohabiter dans la même feuille.
+  entetes.forEach(function (cle, c) {
+    if (cle) return;
+    var utilisee = lignes.some(function (l) { return String(l[c]).trim(); });
+    if (!utilisee) return;
+    var lettre = feuille.getRange(1, c + 1).getA1Notation().replace(/[0-9]+/, '');
+    entetes[c] = 'colonne_' + lettre;
+    feuille.getRange(1, c + 1).setValue(entetes[c]);
+  });
+
   var temoin = entetes.indexOf(TEMOIN);
   if (temoin === -1) {
     temoin = entetes.length;
@@ -91,13 +112,26 @@ function envoyerNouveauxProspects() {
   lignes.forEach(function (ligne, i) {
     if (ligne[temoin]) return;            // déjà envoyée
 
-    const prospect = { external_id: 'ligne-' + (i + 2) };
+    // Seules les cellules remplies voyagent : une ligne n'envoie que sa propre
+    // structure, pas les colonnes vides des autres.
+    const prospect = {};
+    var vide = true;
     entetes.forEach(function (cle, c) {
-      if (cle && cle !== TEMOIN) prospect[cle] = ligne[c];
+      if (!cle || cle === TEMOIN) return;
+      if (!String(ligne[c]).trim()) return;
+      prospect[cle] = ligne[c];
+      vide = false;
     });
 
     // Ligne vide en fin de feuille : rien à envoyer.
-    if (!prospect.email && !prospect.phone && !prospect.name && !prospect.nom) return;
+    if (vide) return;
+
+    // Anti-doublon : l'identifiant fourni par la source s'il y en a un, sinon
+    // une empreinte du contenu. Jamais le numéro de ligne — il change dès
+    // qu'une ligne est insérée, et fabriquerait de faux doublons.
+    prospect.external_id = String(prospect.external_id || prospect.id || prospect.ID || '').trim()
+      || Utilities.base64Encode(Utilities.computeDigest(
+           Utilities.DigestAlgorithm.MD5, JSON.stringify(ligne)));
 
     const rep = UrlFetchApp.fetch(ENDPOINT, {
       method: 'post',
@@ -115,6 +149,71 @@ function envoyerNouveauxProspects() {
       console.error('Ligne ' + (i + 2) + ' refusée : ' + rep.getContentText());
     }
   });
+}
+
+// Facultatif — reçoit des prospects poussés en HTTP (Zapier, Make, un site…)
+// directement dans la feuille. Les colonnes manquantes sont créées à la volée :
+// chaque structure de données trouve sa place, et « envoyerNouveauxProspects »
+// enverra la ligne à Gestia à la minute suivante.
+//
+// Pour l'activer : Déployer → Nouveau déploiement → « Application web » →
+// exécuter « en tant que moi », accès « Tout le monde », puis POST du JSON
+// sur l'URL obtenue, avec ?secret=… au bout.
+function doPost(e) {
+  const reponse = function (corps) {
+    return ContentService.createTextOutput(JSON.stringify(corps))
+      .setMimeType(ContentService.MimeType.JSON);
+  };
+  if ((e.parameter.secret || '') !== SECRET) {
+    return reponse({ ok: false, error: 'Secret invalide ou absent.' });
+  }
+
+  var prospect = {};
+  try {
+    if (e.postData && e.postData.type.indexOf('json') !== -1) {
+      prospect = JSON.parse(e.postData.contents);
+    } else {
+      // Formulaire classique : les champs arrivent dans e.parameter.
+      Object.keys(e.parameter).forEach(function (cle) {
+        if (cle !== 'secret') prospect[cle] = e.parameter[cle];
+      });
+    }
+  } catch (err) {
+    return reponse({ ok: false, error: 'JSON illisible.' });
+  }
+
+  const cles = Object.keys(prospect).filter(function (k) {
+    return String(k).trim() && k !== TEMOIN;
+  });
+  if (cles.length === 0) return reponse({ ok: false, error: 'Aucun champ reçu.' });
+
+  // Un seul écrivain à la fois : deux envois simultanés créeraient la même
+  // colonne en double.
+  const verrou = LockService.getScriptLock();
+  verrou.waitLock(30 * 1000);
+  try {
+    const feuille = SpreadsheetApp.getActive().getSheetByName(FEUILLE);
+    const entetes = feuille.getLastColumn() > 0
+      ? feuille.getRange(1, 1, 1, feuille.getLastColumn()).getValues()[0]
+          .map(function (h) { return String(h).trim(); })
+      : [];
+
+    cles.forEach(function (cle) {
+      if (entetes.indexOf(cle) !== -1) return;
+      entetes.push(cle);
+      feuille.getRange(1, entetes.length).setValue(cle);
+    });
+
+    feuille.appendRow(entetes.map(function (cle) {
+      if (!(cle in prospect)) return '';
+      const v = prospect[cle];
+      return (v !== null && typeof v === 'object') ? JSON.stringify(v) : v;
+    }));
+  } finally {
+    verrou.releaseLock();
+  }
+
+  return reponse({ ok: true });
 }`,
     },
 
