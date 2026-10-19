@@ -927,6 +927,12 @@ action updateLeadIntakeWebhook {
   fn: import { updateLeadIntakeWebhook } from "@src/app/leads/intakeOperations",
   entities: [User, Company, LeadSearch, LeadInboundWebhook]
 }
+// Réponse automatique au prospect. `Company` : refuser d'allumer un message
+// qu'aucun numéro Telnyx ne pourrait porter.
+action saveLeadIntakeAutoReply {
+  fn: import { saveLeadIntakeAutoReply } from "@src/app/leads/intakeOperations",
+  entities: [User, Company, LeadSearch, LeadInboundWebhook]
+}
 action simulateLeadIntakeCall {
   fn: import { simulateLeadIntakeCall } from "@src/app/leads/intakeOperations",
   entities: [User, LeadSearch, LeadInboundWebhook, LeadInboundEvent]
@@ -1112,10 +1118,11 @@ apiNamespace leadIntakeWebhooks {
   path: "/webhooks/prospects"
 }
 
+// `LeadSmsLog` : la réponse automatique au prospect est une ligne de son fil SMS.
 api leadIntakeReceive {
   fn: import { leadIntakeReceive } from "@src/server/leadIntake/webhook",
   httpRoute: (POST, "/webhooks/prospects/:publicId"),
-  entities: [Company, LeadSearch, Lead, LeadNote, LeadStatusConfig, LeadSourceConfig, LeadInboundWebhook, LeadInboundEvent],
+  entities: [Company, LeadSearch, Lead, LeadNote, LeadStatusConfig, LeadSourceConfig, LeadInboundWebhook, LeadInboundEvent, LeadSmsLog],
   auth: false
 }
 

@@ -33,6 +33,12 @@ import {
   MAX_PATTERN_CHARS,
   MAX_TRANSFORMS,
 } from '../../shared/leadIntakeTransforms';
+import {
+  AUTO_REPLY_MAX_CHARS,
+  isAutoReplyActive,
+  normalizeAutoReply,
+  type IntakeAutoReply,
+} from '../../shared/leadIntakeAutoReply';
 
 function ensureCompany(user: any): string {
   if (!user) throw new HttpError(401);
@@ -155,6 +161,10 @@ export type LeadIntakeConfig = {
   alertEmail: string | null;
   alertPhone: string | null;
   canAlertBySms: boolean;
+  /** Réponse automatique au prospect, toujours sous forme complète (voir shared/leadIntakeAutoReply). */
+  autoReply: IntakeAutoReply;
+  /** Un numéro Telnyx et sa clé existent : c'est tout ce que l'envoi au prospect exige. */
+  canAutoReply: boolean;
 };
 
 export const getLeadIntakeConfig = async (
@@ -198,6 +208,8 @@ export const getLeadIntakeConfig = async (
     // Le SMS demande en plus un numéro et une clé Telnyx : c'est Gestia qui
     // l'émet, pas le serveur de courriel de l'entreprise.
     canAlertBySms: !!(company?.telnyxPhoneNumber && company?.telnyxApiKey && company?.phone?.trim()),
+    autoReply: normalizeAutoReply(webhook.autoReply),
+    canAutoReply: !!(company?.telnyxPhoneNumber && company?.telnyxApiKey),
   };
 };
 
@@ -561,6 +573,76 @@ export const updateLeadIntakeWebhook = async (
     select: { isActive: true, notifyByEmail: true, notifyBySms: true, alertDelayMinutes: true },
   });
   return updated;
+};
+
+// ─── Réponse automatique au prospect ──────────────────────────────────────────
+
+const autoReplyWindowSchema = z.object({
+  enabled: z.boolean(),
+  text: z.string().max(AUTO_REPLY_MAX_CHARS, `Message trop long (${AUTO_REPLY_MAX_CHARS} caractères au plus).`),
+});
+
+const autoReplySchema = z
+  .object({
+    version: z.literal(1),
+    dayStartHour: z.number().int().min(0).max(23),
+    dayEndHour: z.number().int().min(1).max(24),
+    morning: autoReplyWindowSchema,
+    day: autoReplyWindowSchema,
+    evening: autoReplyWindowSchema,
+  })
+  .refine(c => c.dayEndHour > c.dayStartHour, {
+    message: "La fin de journée doit être après son début.",
+    path: ['dayEndHour'],
+  });
+
+/**
+ * Enregistre les trois messages d'accueil et leurs bornes, d'un bloc.
+ *
+ * D'un bloc et non champ par champ comme `updateLeadIntakeWebhook` : les textes se
+ * rédigent, se relisent, puis s'enregistrent — on ne veut pas qu'une tranche parte
+ * avec un message à moitié écrit parce que la case a été cochée avant la fin.
+ *
+ * Une tranche activée sans texte est refusée : l'écran afficherait « activé » et
+ * rien ne partirait. Allumer quoi que ce soit exige Telnyx, pour la même raison
+ * que les alertes SMS.
+ */
+export const saveLeadIntakeAutoReply = async (
+  { searchId, autoReply }: { searchId: string; autoReply: unknown },
+  context: any,
+): Promise<{ autoReply: IntakeAutoReply }> => {
+  const { companyId, webhook } = await requireIntake(context, searchId, { admin: true });
+
+  const parsed = autoReplySchema.safeParse(autoReply);
+  if (!parsed.success) {
+    const issue = parsed.error.issues[0];
+    const where = issue?.path?.length ? ` (${issue.path.join(' › ')})` : '';
+    throw new HttpError(400, `Réglage invalide${where} : ${issue?.message}`);
+  }
+
+  const labels = { morning: 'Avant l\'ouverture', day: 'Journée', evening: 'Soirée' } as const;
+  for (const key of ['morning', 'day', 'evening'] as const) {
+    if (parsed.data[key].enabled && !parsed.data[key].text.trim()) {
+      throw new HttpError(400, `Écrivez le message « ${labels[key]} » avant de l'activer.`);
+    }
+  }
+
+  const cfg = normalizeAutoReply(parsed.data);
+  if (isAutoReplyActive(cfg)) {
+    const company = await context.entities.Company.findUnique({
+      where: { id: companyId },
+      select: { telnyxPhoneNumber: true, telnyxApiKey: true },
+    });
+    if (!company?.telnyxPhoneNumber || !company?.telnyxApiKey) {
+      throw new HttpError(400, "Configurez d'abord l'envoi de SMS dans Paramètres › Intégrations.");
+    }
+  }
+
+  await context.entities.LeadInboundWebhook.update({
+    where: { id: webhook.id },
+    data: { autoReply: cfg as any },
+  });
+  return { autoReply: cfg };
 };
 
 /**

@@ -243,6 +243,8 @@ export function IntakePanel({
           alertPhone={cfg.alertPhone}
           canAlertBySms={cfg.canAlertBySms}
           onAlertsChanged={refetchConfig}
+          autoReply={cfg.autoReply}
+          canAutoReply={cfg.canAutoReply}
           onSimulated={async () => {
             await refetchSample();
             setListening(false);

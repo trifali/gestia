@@ -38,6 +38,7 @@ import {
 import { resolveIntakeStatus } from '../../app/leads/operations';
 import { insertMappedLead, registerLeadSources } from './persist';
 import { deliverIntakeAlerts } from './alerts';
+import { deliverIntakeAutoReplies } from './autoReply';
 
 /**
  * Plafond horaire par tableau. Le point d'entrée est anonyme au sens où
@@ -160,6 +161,9 @@ export const leadIntakeReceive = async (req: Request, res: Response, context: an
       notifyByEmail: true,
       notifyBySms: true,
       alertDelayMinutes: true,
+      // Réponse automatique au prospect : lue ici parce qu'elle part à la
+      // réception, et nulle part ailleurs.
+      autoReply: true,
       search: { select: { id: true, companyId: true, title: true } },
     },
   });
@@ -285,7 +289,9 @@ export const leadIntakeReceive = async (req: Request, res: Response, context: an
       );
     }
 
-    const created: { id: string; name: string; email: string | null; phone: string | null }[] = [];
+    const created: {
+      id: string; name: string; email: string | null; phone: string | null; placeId: string | null;
+    }[] = [];
     for (const lead of usable) {
       const row = await insertMappedLead(entities, {
         searchId: webhook.searchId,
@@ -330,6 +336,16 @@ export const leadIntakeReceive = async (req: Request, res: Response, context: an
     if (webhook.alertDelayMinutes === 0 && created.length > 0) {
       await deliverIntakeAlerts(entities, webhook, created).catch(err =>
         console.error('[intake] alerte immédiate échouée', err),
+      );
+    }
+
+    // Le SMS d'accueil au prospect lui-même, selon l'heure d'arrivée. Toujours
+    // depuis le point d'entrée, quel que soit le sursis des alertes : « merci,
+    // on vous rappelle » n'a de sens qu'à l'instant où la demande est faite.
+    // Seul le prospect *reçu* y a droit — ni la saisie manuelle, ni le rejeu.
+    if (created.length > 0) {
+      await deliverIntakeAutoReplies(entities, webhook, created).catch(err =>
+        console.error('[intake] réponse automatique échouée', err),
       );
     }
   } catch (err: any) {

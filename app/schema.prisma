@@ -948,6 +948,13 @@ model LeadInboundWebhook {
   // courriel ne coûte rien et n'a pas à être retenu par le prix du SMS.
   smsNotifiedAt DateTime?
 
+  // Réponse automatique au prospect lui-même, par SMS, selon l'heure d'arrivée
+  // (voir shared/leadIntakeAutoReply). Trois tranches de la journée, chacune avec
+  // son message et son interrupteur. `{}` = jamais réglée, donc rien n'est envoyé.
+  // Par source, comme les alertes : un formulaire de site web mérite un accueil,
+  // un tableur de rappels n'en mérite aucun.
+  autoReply Json @default("{}")
+
   events LeadInboundEvent[]
 
   @@index([companyId])

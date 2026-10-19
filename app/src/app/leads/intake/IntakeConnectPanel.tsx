@@ -26,7 +26,9 @@ import {
 import { CopyableUrl, useConfirm } from '../../../client/ui';
 import { formatMontrealTime } from '../../../client/format';
 import { buildRecipes } from './recipes';
+import { IntakeAutoReplyPanel } from './IntakeAutoReplyPanel';
 import type { IntakeSample } from '../intakeOperations';
+import type { IntakeAutoReply } from '../../../shared/leadIntakeAutoReply';
 
 export function IntakeConnectPanel({
   searchId,
@@ -43,6 +45,8 @@ export function IntakeConnectPanel({
   alertPhone,
   canAlertBySms,
   onAlertsChanged,
+  autoReply,
+  canAutoReply,
 }: {
   searchId: string;
   url: string;
@@ -62,6 +66,9 @@ export function IntakeConnectPanel({
   alertPhone: string | null;
   canAlertBySms: boolean;
   onAlertsChanged: () => void;
+  /** Réponse automatique au prospect, telle qu'enregistrée. */
+  autoReply: IntakeAutoReply;
+  canAutoReply: boolean;
 }) {
   const [secret, setSecret] = useState<string | null>(null);
   const [revealing, setRevealing] = useState(false);
@@ -170,6 +177,14 @@ export function IntakeConnectPanel({
         alertPhone={alertPhone}
         canAlertBySms={canAlertBySms}
         onChanged={onAlertsChanged}
+      />
+
+      <IntakeAutoReplyPanel
+        searchId={searchId}
+        isAdmin={isAdmin}
+        saved={autoReply}
+        canSend={canAutoReply}
+        onSaved={onAlertsChanged}
       />
 
       {/* ── Recettes ── */}

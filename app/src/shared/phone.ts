@@ -100,3 +100,57 @@ export function formatPhoneDisplay(e164: string | null | undefined): string {
   const m = /^\+1(\d{3})(\d{3})(\d{4})$/.exec(s);
   return m ? `+1 (${m[1]}) ${m[2]}-${m[3]}` : s;
 }
+
+// ─── Numéros canadiens ───────────────────────────────────────────────────────
+
+/**
+ * Les indicatifs régionaux du Canada, tous attribués ou annoncés.
+ *
+ * Le plan de numérotation nord-américain ne distingue pas le Canada des
+ * États-Unis par l'indicatif pays : « +1 » couvre les deux. Seul l'indicatif
+ * régional tranche. La liste suit les attributions de l'Administrateur de la
+ * numérotation canadienne (CNA) : les indicatifs « non géographiques » (600,
+ * 622) en sont exclus — aucun téléphone mobile n'y répond.
+ */
+export const CANADIAN_AREA_CODES: ReadonlySet<string> = new Set([
+  // Alberta
+  '368', '403', '587', '780', '825',
+  // Colombie-Britannique
+  '236', '250', '257', '604', '672', '778',
+  // Manitoba
+  '204', '431', '584',
+  // Nouveau-Brunswick
+  '428', '506',
+  // Terre-Neuve-et-Labrador
+  '709', '879',
+  // Nouvelle-Écosse et Île-du-Prince-Édouard
+  '782', '902',
+  // Territoires (Yukon, T.N.-O., Nunavut)
+  '867',
+  // Ontario
+  '226', '249', '289', '343', '365', '382', '416', '437', '460', '519', '548',
+  '613', '647', '683', '705', '742', '753', '807', '905', '942',
+  // Québec
+  '263', '354', '367', '418', '438', '450', '468', '514', '579', '581', '819', '873',
+  // Saskatchewan
+  '306', '474', '639',
+]);
+
+/** L'indicatif régional d'un numéro nord-américain, ou null pour tout autre. */
+export function nanpAreaCode(raw: string): string | null {
+  const e164 = toE164(raw);
+  if (!e164 || !/^\+1\d{10}$/.test(e164)) return null;
+  return e164.slice(2, 5);
+}
+
+/**
+ * Le numéro est-il canadien ?
+ *
+ * Sert à ne pas envoyer de SMS automatique à un numéro étranger : l'envoi
+ * international coûte plusieurs fois le tarif local et, pour un message de
+ * bienvenue que personne n'a relu, ce n'est pas un pari à faire tout seul.
+ */
+export function isCanadianNumber(raw: string): boolean {
+  const area = nanpAreaCode(raw);
+  return area !== null && CANADIAN_AREA_CODES.has(area);
+}
