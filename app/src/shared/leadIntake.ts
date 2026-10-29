@@ -59,6 +59,14 @@ export const INTAKE_ALERT_DELAY_DEFAULT = 10;
  */
 export const INTAKE_SMS_FLOOR_MS = 2 * 60_000;
 
+/**
+ * Téléphones supplémentaires prévenus par l'alerte SMS d'une source.
+ *
+ * Chaque numéro est un SMS facturé de plus à chaque alerte : la limite garde la
+ * liste à l'échelle d'une petite équipe.
+ */
+export const INTAKE_ALERT_MAX_PHONES = 5;
+
 /** Le sursis d'une source, en millisecondes, tolérant une valeur absente. */
 export function intakeAlertDelayMs(minutes: number | null | undefined): number {
   return (minutes ?? INTAKE_ALERT_DELAY_DEFAULT) * 60_000;

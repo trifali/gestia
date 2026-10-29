@@ -16,6 +16,8 @@ import {
   LuRefreshCcw,
   LuEye,
   LuEyeOff,
+  LuPlus,
+  LuX,
 } from 'react-icons/lu';
 import {
   revealLeadIntakeSecret,
@@ -23,7 +25,9 @@ import {
   simulateLeadIntakeCall,
   updateLeadIntakeWebhook,
 } from 'wasp/client/operations';
-import { CopyableUrl, useConfirm } from '../../../client/ui';
+import { CopyableUrl, PhoneInput, useConfirm } from '../../../client/ui';
+import { formatPhoneDisplay, toE164 } from '../../../shared/phone';
+import { INTAKE_ALERT_MAX_PHONES } from '../../../shared/leadIntake';
 import { formatMontrealTime } from '../../../client/format';
 import { buildRecipes } from './recipes';
 import { IntakeAutoReplyPanel } from './IntakeAutoReplyPanel';
@@ -43,6 +47,7 @@ export function IntakeConnectPanel({
   alertDelayMinutes,
   alertEmail,
   alertPhone,
+  alertPhones,
   canAlertBySms,
   onAlertsChanged,
   autoReply,
@@ -64,6 +69,8 @@ export function IntakeConnectPanel({
   /** Coordonnées de l'entreprise que les alertes viseraient. */
   alertEmail: string | null;
   alertPhone: string | null;
+  /** Téléphones prévenus en plus de celui de l'entreprise. */
+  alertPhones: string[];
   canAlertBySms: boolean;
   onAlertsChanged: () => void;
   /** Réponse automatique au prospect, telle qu'enregistrée. */
@@ -175,6 +182,7 @@ export function IntakeConnectPanel({
         alertDelayMinutes={alertDelayMinutes}
         alertEmail={alertEmail}
         alertPhone={alertPhone}
+        alertPhones={alertPhones}
         canAlertBySms={canAlertBySms}
         onChanged={onAlertsChanged}
       />
@@ -316,6 +324,7 @@ function IntakeAlerts({
   alertDelayMinutes,
   alertEmail,
   alertPhone,
+  alertPhones,
   canAlertBySms,
   onChanged,
 }: {
@@ -326,18 +335,21 @@ function IntakeAlerts({
   alertDelayMinutes: number;
   alertEmail: string | null;
   alertPhone: string | null;
+  alertPhones: string[];
   canAlertBySms: boolean;
   onChanged: () => void;
 }) {
-  const [saving, setSaving] = useState<'email' | 'sms' | 'delay' | null>(null);
+  const [saving, setSaving] = useState<'email' | 'sms' | 'delay' | 'phones' | null>(null);
 
-  async function save(what: 'email' | 'sms' | 'delay', patch: Record<string, boolean | number>) {
+  async function save(what: 'email' | 'sms' | 'delay' | 'phones', patch: Record<string, boolean | number | string[]>) {
     setSaving(what);
     try {
       await updateLeadIntakeWebhook({ searchId, ...patch } as any);
       onChanged();
+      return true;
     } catch (err: any) {
       toast.error(err?.message ?? 'Modification impossible');
+      return false;
     } finally {
       setSaving(null);
     }
@@ -354,9 +366,17 @@ function IntakeAlerts({
   // pourtant le bon numéro ne dit pas ce qui manque : ici, la clé Telnyx.
   const emailBlocked = alertEmail ? null : "Aucun courriel d'entreprise — Paramètres › Entreprise";
   const smsBlocked =
-    !alertPhone ? "Aucun téléphone d'entreprise — Paramètres › Entreprise"
-    : !canAlertBySms ? 'Envoi de SMS non configuré — Paramètres › Intégrations'
+    !canAlertBySms ? 'Envoi de SMS non configuré — Paramètres › Intégrations'
+    : !alertPhone && alertPhones.length === 0 ? 'Ajoutez un téléphone à prévenir ci-dessous'
     : null;
+  const smsTargets = [...(alertPhone ? [showPhone(alertPhone)] : []), ...alertPhones.map(formatPhoneDisplay)];
+  const smsTarget = smsTargets.length === 0 ? null
+    : smsTargets.length === 1 ? smsTargets[0]
+    : `${smsTargets[0]} + ${smsTargets.length - 1} autre${smsTargets.length > 2 ? 's' : ''}`;
+  // La liste se montre quand elle sert : alerte SMS allumée, ou impossible à
+  // allumer faute de numéro. Éteinte, elle n'encombre pas le panneau.
+  const showPhones = canAlertBySms && (notifyBySms || !alertPhone);
+  const smsCount = smsTargets.length;
 
   return (
     <div>
@@ -373,7 +393,7 @@ function IntakeAlerts({
         />
         <AlertToggle
           label='Par SMS'
-          target={alertPhone}
+          target={smsTarget}
           blocked={smsBlocked}
           checked={notifyBySms}
           busy={saving === 'sms'}
@@ -381,6 +401,16 @@ function IntakeAlerts({
           onChange={next => toggle('sms', next)}
         />
       </div>
+      {showPhones && (
+        <AlertPhones
+          companyPhone={alertPhone}
+          phones={alertPhones}
+          isAdmin={isAdmin}
+          busy={saving === 'phones'}
+          disabled={!isAdmin || saving !== null}
+          onSave={next => save('phones', { alertPhones: next })}
+        />
+      )}
       {/* Le moment de l'envoi n'a de sens qu'une fois un canal choisi : sans
           destinataire, régler « dès l'arrivée » ne règle rien. */}
       {!none && (
@@ -425,8 +455,8 @@ function IntakeAlerts({
             n'en déclenche aucune
             {notifyBySms ? (
               <>
-                {' '}— soit <strong className='text-ink'>un SMS facturé</strong>, au maximum un
-                toutes les 2 minutes pour qu'une rafale ne se facture pas au prospect
+                {' '}— soit <strong className='text-ink'>{smsCount > 1 ? `${smsCount} SMS facturés (un par téléphone)` : 'un SMS facturé'}</strong>,
+                au maximum un envoi toutes les 2 minutes pour qu'une rafale ne se facture pas au prospect
               </>
             ) : null}
             .
@@ -436,12 +466,128 @@ function IntakeAlerts({
             Déclenchée par les appels reçus à l'adresse ci-dessus, et envoyée 10 minutes plus tard
             — seulement si personne n'a ouvert ni déplacé le prospect entre-temps. Une seule alerte
             par vague, pas une par prospect, et rien pour un prospect ajouté à la main
-            {notifyBySms ? <> — soit <strong className='text-ink'>un SMS facturé</strong></> : null}.
+            {notifyBySms ? (
+              <> — soit <strong className='text-ink'>{smsCount > 1 ? `${smsCount} SMS facturés (un par téléphone)` : 'un SMS facturé'}</strong></>
+            ) : null}.
           </>
         )}
       </p>
     </div>
   );
+}
+
+/**
+ * Les téléphones qui reçoivent l'alerte SMS : celui de l'entreprise, toujours en
+ * tête et réglé ailleurs, puis ceux que cette source ajoute — un vendeur, un
+ * associé. Chaque ajout ou retrait s'enregistre aussitôt, comme les interrupteurs.
+ */
+function AlertPhones({
+  companyPhone,
+  phones,
+  isAdmin,
+  busy,
+  disabled,
+  onSave,
+}: {
+  companyPhone: string | null;
+  phones: string[];
+  isAdmin: boolean;
+  busy: boolean;
+  disabled: boolean;
+  onSave: (next: string[]) => Promise<boolean>;
+}) {
+  const [draft, setDraft] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const full = phones.length >= INTAKE_ALERT_MAX_PHONES;
+
+  async function add() {
+    const e164 = toE164(draft);
+    if (!e164) {
+      setError('Numéro incomplet — Telnyx refuserait cet envoi.');
+      return;
+    }
+    if (phones.includes(e164) || (companyPhone && toE164(companyPhone) === e164)) {
+      setError('Ce téléphone reçoit déjà l\'alerte.');
+      return;
+    }
+    setError(null);
+    if (await onSave([...phones, e164])) setDraft('');
+  }
+
+  return (
+    <div className='mt-2 rounded-xl border border-line p-2.5' data-alert-phones>
+      <div className='flex items-center gap-1.5 text-xs font-medium text-ink'>
+        Téléphones prévenus par SMS
+        {busy && <LuLoader size={11} className='animate-spin text-muted' />}
+      </div>
+      <ul className='mt-1.5 space-y-1'>
+        {companyPhone && (
+          <li className='flex min-h-8 items-center gap-2 rounded-lg bg-canvas-100 px-2.5 py-1 text-sm'>
+            <span className='min-w-0 flex-1 truncate'>{showPhone(companyPhone)}</span>
+            <span className='shrink-0 text-xs text-muted'>Entreprise</span>
+          </li>
+        )}
+        {phones.map(phone => (
+          <li key={phone} className='flex min-h-8 items-center gap-2 rounded-lg bg-canvas-100 py-1 pl-2.5 pr-1 text-sm'>
+            <span className='min-w-0 flex-1 truncate'>{formatPhoneDisplay(phone)}</span>
+            {isAdmin && (
+              <button
+                type='button'
+                className='grid h-7 w-7 shrink-0 place-items-center rounded-md text-muted hover:bg-canvas-200 hover:text-danger disabled:opacity-40'
+                aria-label={`Retirer ${formatPhoneDisplay(phone)}`}
+                title='Retirer'
+                disabled={disabled}
+                onClick={() => onSave(phones.filter(p => p !== phone))}
+              >
+                <LuX size={14} />
+              </button>
+            )}
+          </li>
+        ))}
+      </ul>
+      {isAdmin && !full && (
+        <form
+          className='mt-2 flex gap-2 sm:max-w-md'
+          onSubmit={e => {
+            e.preventDefault();
+            if (!disabled && draft.trim()) add();
+          }}
+        >
+          <div className='min-w-0 flex-1'>
+            <PhoneInput
+              value={draft}
+              onChange={next => {
+                setDraft(next);
+                setError(null);
+              }}
+              className='input h-9 w-full text-sm'
+              aria-label='Autre téléphone à prévenir'
+              placeholder='Autre téléphone'
+              disabled={disabled}
+            />
+          </div>
+          <button
+            type='submit'
+            className='btn-secondary h-9 shrink-0 gap-1 px-3 text-sm'
+            disabled={disabled || !draft.trim()}
+          >
+            <LuPlus size={14} /> Ajouter
+          </button>
+        </form>
+      )}
+      {error && <p className='mt-1 text-xs text-danger'>{error}</p>}
+      <p className='mt-1.5 text-xs text-muted'>
+        {full
+          ? `${INTAKE_ALERT_MAX_PHONES} téléphones supplémentaires au plus.`
+          : 'Chaque téléphone reçoit son propre SMS, facturé séparément.'}
+      </p>
+    </div>
+  );
+}
+
+/** Le téléphone d'entreprise est saisi librement ailleurs : affiché comme les autres. */
+function showPhone(raw: string): string {
+  return formatPhoneDisplay(toE164(raw) ?? raw);
 }
 
 function AlertToggle({

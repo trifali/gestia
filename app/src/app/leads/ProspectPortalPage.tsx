@@ -26,15 +26,18 @@ import {
   LuTrash2,
   LuNotebook,
   LuSearch,
+  LuX,
 } from 'react-icons/lu';
 import { Modal } from '../../client/ui';
 import {
   NoteThread,
   LeadEditForm,
-  LeadKanbanBoard,
+  LeadChip,
   LeadDeleteConfirmModal,
+  leadExtras,
   type LeadFormValues,
 } from './leads.shared';
+import { LeadKanbanBoard } from './LeadKanbanBoard';
 
 // ─── Shell ────────────────────────────────────────────────────────────────────
 
@@ -160,44 +163,16 @@ export default function ProspectPortalPage() {
   const [deleteTarget, setDeleteTarget] = useState<any | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
-  const [activeFilters, setActiveFilters] = useState<Set<string>>(new Set());
-
-  function toggleFilter(key: string) {
-    setActiveFilters(prev => {
-      const next = new Set(prev);
-      if (next.has(key)) next.delete(key); else next.add(key);
-      return next;
-    });
-  }
-
-  function getEmailDomain(email: string): string {
-    return email.split('@')[1]?.toLowerCase() ?? '';
-  }
-  function getWebsiteDomain(url: string): string {
-    try { return new URL(url.startsWith('http') ? url : `https://${url}`).hostname.replace(/^www\./, '').toLowerCase(); }
-    catch { return url.toLowerCase().replace(/^www\./, ''); }
-  }
-  function emailMatchesDomain(l: any): boolean {
-    if (!l.email || !l.website) return true;
-    const eDomain = getEmailDomain(l.email);
-    const wDomain = getWebsiteDomain(l.website);
-    return eDomain === wDomain || wDomain.endsWith(`.${eDomain}`) || eDomain.endsWith(`.${wDomain}`);
-  }
 
   const rawLeads: any[] = (data as any)?.leads ?? [];
   const filteredLeads = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
-    return rawLeads.filter(l => {
-      if (q && ![l.name, l.email, l.phone, l.website, l.address, l.category].some((v: any) => v?.toLowerCase().includes(q))) return false;
-      for (const f of activeFilters) {
-        if (f === 'has_email' && !l.email) return false;
-        if (f === 'no_email' && !!l.email) return false;
-        if (f === 'no_website' && !!l.website) return false;
-        if (f === 'email_mismatch' && (!l.email || !l.website || emailMatchesDomain(l))) return false;
-      }
-      return true;
-    });
-  }, [rawLeads, searchQuery, activeFilters]);
+    if (!q) return rawLeads;
+    return rawLeads.filter(l => [
+      l.name, l.email, l.phone, l.website, l.address, l.category,
+      ...leadExtras(l).map(e => `${e.label} ${e.value}`),
+    ].some((v: any) => v?.toLowerCase().includes(q)));
+  }, [rawLeads, searchQuery]);
 
   if (isLoading) {
     return (
@@ -308,86 +283,52 @@ export default function ProspectPortalPage() {
         updateStatus={updateStatus}
         reorder={reorder}
         refetch={refetch}
-        cardActions={lead => (
-          <div className='flex items-center gap-1'>
-            <button
-              className='w-6 h-6 rounded flex items-center justify-center hover:bg-canvas text-muted hover:text-ink transition-colors relative'
-              title={lead.noteCount > 0 ? 'Voir les notes' : 'Ajouter une note'}
-              onClick={e => { e.stopPropagation(); setNoteTarget(lead); }}
-            >
-              <LuNotebook size={11} />
-              {lead.noteCount > 0 && (
-                <span className='absolute -top-1 -right-1 min-w-[14px] h-3.5 rounded-full bg-accent-500 text-white text-[8px] font-bold flex items-center justify-center px-0.5 pointer-events-none leading-none'>
-                  {lead.noteCount}
-                </span>
-              )}
-            </button>
-            <button
-              className='w-6 h-6 rounded flex items-center justify-center hover:bg-canvas text-muted hover:text-ink transition-colors'
-              title='Modifier'
-              onClick={e => { e.stopPropagation(); setEditTarget(lead); }}
-            >
-              <LuPencil size={11} />
-            </button>
-            <button
-              className='w-6 h-6 rounded flex items-center justify-center hover:bg-red-50 text-muted hover:text-red-500 transition-colors'
-              title='Supprimer ce prospect'
-              onClick={e => { e.stopPropagation(); setDeleteTarget(lead); }}
-            >
-              <LuTrash2 size={11} />
-            </button>
-          </div>
-        )}
-        searchBarSlot={
-          <div className='flex items-center gap-2 flex-wrap pb-3'>
-            <div className='relative'>
-              <LuSearch
-                size={13}
-                className='absolute left-2.5 top-1/2 -translate-y-1/2 text-muted pointer-events-none'
-              />
+        onCardClick={setEditTarget}
+        cardMenu={lead => [
+          {
+            key: 'notes',
+            label: lead.noteCount > 0 ? `Notes (${lead.noteCount})` : 'Ajouter une note',
+            icon: <LuNotebook size={15} />,
+            onSelect: () => setNoteTarget(lead),
+          },
+          { key: 'edit', label: 'Modifier', icon: <LuPencil size={15} />, onSelect: () => setEditTarget(lead) },
+          { key: 'delete', label: 'Supprimer', icon: <LuTrash2 size={15} />, danger: true, onSelect: () => setDeleteTarget(lead) },
+        ]}
+        cardBadges={lead => lead.noteCount > 0 ? (
+          <LeadChip icon={<LuNotebook size={11} />}>
+            {lead.noteCount} note{lead.noteCount > 1 ? 's' : ''}
+          </LeadChip>
+        ) : null}
+        toolbar={
+          <div className='mb-3 space-y-2'>
+            <div className='relative sm:max-w-xs'>
+              <LuSearch size={16} className='pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted' />
               <input
-                type='text'
+                type='search'
                 value={searchQuery}
                 onChange={e => setSearchQuery(e.target.value)}
-                placeholder='Rechercher…'
-                className='text-xs pl-7 pr-2.5 py-1 rounded-full border border-line bg-canvas text-ink placeholder-muted focus:outline-none focus:border-accent-400 w-40'
+                placeholder='Rechercher un prospect…'
+                aria-label='Rechercher un prospect'
+                className='input h-10 pl-9 pr-9 [&::-webkit-search-cancel-button]:hidden'
               />
+              {searchQuery && (
+                <button
+                  type='button'
+                  onClick={() => setSearchQuery('')}
+                  className='absolute right-2 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-full text-muted hover:bg-canvas-200 hover:text-ink'
+                  aria-label='Effacer la recherche'
+                >
+                  <LuX size={15} />
+                </button>
+              )}
             </div>
-            {([
-              { key: 'has_email',      label: '✉ Avec courriel',        title: 'Prospects avec une adresse courriel' },
-              { key: 'no_email',       label: '✉ Sans courriel',         title: 'Prospects sans adresse courriel' },
-              { key: 'no_website',     label: '🌐 Sans site web',        title: 'Prospects sans site web' },
-              { key: 'email_mismatch', label: '⚠ Courriel hors domaine', title: 'Courriel dont le domaine ne correspond pas au site web' },
-            ] as const).map(c => (
-              <button
-                key={c.key}
-                title={c.title}
-                onClick={() => toggleFilter(c.key)}
-                className={`text-xs px-2.5 py-1 rounded-full border transition-colors ${
-                  activeFilters.has(c.key)
-                    ? 'bg-accent-600 border-accent-600 text-white'
-                    : 'bg-canvas border-line text-muted hover:border-accent-400 hover:text-ink'
-                }`}
-              >
-                {c.label}
-              </button>
-            ))}
-            {(activeFilters.size > 0 || searchQuery.trim()) && (
-              <button
-                onClick={() => { setActiveFilters(new Set()); setSearchQuery(''); }}
-                className='text-xs px-2 py-1 text-muted hover:text-ink transition-colors'
-              >
-                Réinitialiser
-              </button>
-            )}
-            {(activeFilters.size > 0 || searchQuery.trim()) && (
-              <span className='text-xs text-muted ml-auto'>
-                {filteredLeads.length} / {rawLeads.length} prospect{rawLeads.length !== 1 ? 's' : ''}
-              </span>
+            {searchQuery.trim() && (
+              <p className='text-sm text-muted'>
+                {filteredLeads.length} sur {rawLeads.length} prospect{rawLeads.length !== 1 ? 's' : ''}
+              </p>
             )}
           </div>
         }
-        cssClass='kanban-portal'
       />
     </PortalShell>
   );

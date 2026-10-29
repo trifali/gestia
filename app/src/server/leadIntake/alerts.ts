@@ -23,6 +23,8 @@ export type IntakeAlertTarget = {
   companyId: string;
   notifyByEmail: boolean;
   notifyBySms: boolean;
+  /** Téléphones prévenus en plus de celui de l'entreprise, en E.164. */
+  alertPhones: string[];
   search: { title: string };
 };
 
@@ -73,7 +75,7 @@ export async function deliverIntakeAlerts(
 
   if (webhook.notifyBySms) {
     if (await claimSmsSlot(entities, webhook.id)) {
-      delivered = (await deliverInboundSms(company, title, leads)) || delivered;
+      delivered = (await deliverInboundSms(company, webhook.alertPhones, title, leads)) || delivered;
     } else {
       // Le SMS précédent, émis il y a moins de deux minutes, annonçait déjà
       // « des prospects sont arrivés ». Le redire coûterait un segment pour une
@@ -121,24 +123,29 @@ async function claimSmsSlot(entities: any, webhookId: string): Promise<boolean> 
  * tient pas dans le budget utile. Le message dit combien et sur quel tableau ;
  * l'application dit le reste.
  *
+ * Part au téléphone de l'entreprise et à ceux que la source ajoute, une fois
+ * chacun : un même numéro saisi deux fois ne reçoit qu'un SMS. Un envoi qui
+ * échoue n'empêche pas les autres.
+ *
  * Les mêmes garde-fous que les alertes de réponse (`jobs/smsReplyAlerts`), pour
  * la même raison : écrire à notre propre numéro Telnyx rentrerait dans le webhook
  * entrant et créerait une conversation avec nous-mêmes.
  */
-async function deliverInboundSms(company: any, boardTitle: string, leads: IntakeAlertLead[]): Promise<boolean> {
+async function deliverInboundSms(
+  company: any,
+  extraPhones: string[],
+  boardTitle: string,
+  leads: IntakeAlertLead[],
+): Promise<boolean> {
   const credentials = resolveSmsCredentials(company);
-  const target = toE164(company.phone ?? '');
-
   if (!credentials) {
     console.warn('[intake] alerte SMS demandée mais identifiants Telnyx absents.');
     return false;
   }
-  if (!target) {
-    console.warn('[intake] alerte SMS demandée mais aucun téléphone d\'entreprise valide.');
-    return false;
-  }
-  if (target === credentials.from) {
-    console.warn('[intake] alerte SMS ignorée : le téléphone d\'entreprise est le numéro Telnyx.');
+
+  const targets = alertSmsTargets(company.phone, extraPhones, credentials.from);
+  if (targets.length === 0) {
+    console.warn('[intake] alerte SMS demandée mais aucun téléphone valide à prévenir.');
     return false;
   }
 
@@ -148,13 +155,39 @@ async function deliverInboundSms(company: any, boardTitle: string, leads: Intake
     ? `Gestia — nouveau prospect sur « ${boardTitle} » : ${head.name}.`
     : `Gestia — ${count} nouveaux prospects sur « ${boardTitle} ».`;
 
-  try {
-    await sendSms({ to: target, text, credentials });
-    return true;
-  } catch (err) {
-    console.error('[intake] alerte SMS échouée', err);
-    return false;
+  let sent = false;
+  for (const to of targets) {
+    try {
+      await sendSms({ to, text, credentials });
+      sent = true;
+    } catch (err) {
+      console.error('[intake] alerte SMS échouée', err);
+    }
   }
+  return sent;
+}
+
+/**
+ * Les numéros à prévenir : l'entreprise d'abord, puis la source, sans doublon et
+ * sans le numéro Telnyx lui-même.
+ */
+export function alertSmsTargets(
+  companyPhone: string | null | undefined,
+  extraPhones: string[] | null | undefined,
+  telnyxFrom: string,
+): string[] {
+  const own = toE164(telnyxFrom) ?? telnyxFrom;
+  const targets: string[] = [];
+  for (const raw of [companyPhone ?? '', ...(extraPhones ?? [])]) {
+    const e164 = toE164(raw);
+    if (!e164 || targets.includes(e164)) continue;
+    if (e164 === own) {
+      console.warn('[intake] alerte SMS ignorée pour un numéro : c\'est le numéro Telnyx.');
+      continue;
+    }
+    targets.push(e164);
+  }
+  return targets;
 }
 
 async function deliverInboundAlert(company: any, boardTitle: string, leads: IntakeAlertLead[]): Promise<boolean> {

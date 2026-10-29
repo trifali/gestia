@@ -931,6 +931,12 @@ model LeadInboundWebhook {
   notifyByEmail Boolean @default(false)
   notifyBySms   Boolean @default(false)
 
+  // Autres téléphones prévenus par l'alerte SMS, en plus de celui de
+  // l'entreprise — un vendeur, un associé. Par source, comme le reste : celui qui
+  // rappelle les leads Facebook n'est pas forcément celui qui traite le tableur.
+  // Toujours en E.164, normalisés par `updateLeadIntakeWebhook`.
+  alertPhones String[] @default([])
+
   // Sursis avant d'alerter, en minutes. `0` = à la réception de l'appel, sans
   // passer par la tâche. Le défaut garde le sursis historique : il laisse à
   // quelqu'un qui a Gestia ouvert le temps de voir la carte arriver, et regroupe

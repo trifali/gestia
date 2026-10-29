@@ -1,17 +1,19 @@
-// Réponse automatique au prospect : trois messages, un par tranche de la journée.
+// Réponse automatique au prospect : un message par plage horaire.
 //
 // Le prospect qui remplit un formulaire à 22 h reçoit « on vous rappelle demain
-// matin » ; celui de 14 h reçoit « on vous rappelle d'ici peu ». Les bornes sont
-// réglables parce que la journée ne finit pas à la même heure pour un bureau et
-// pour un commerce.
+// matin » ; celui de 14 h reçoit « on vous rappelle d'ici peu ». Les plages se
+// découpent librement — à la minute, à cheval sur minuit s'il le faut — parce
+// que la journée ne se découpe pas pareil pour un bureau et pour un commerce
+// ouvert le soir. Chaque plage peut porter plusieurs messages : l'un d'eux part,
+// tiré au hasard.
 //
 // Enregistrement d'un bloc, par un bouton, et non à chaque frappe : un message
-// se rédige puis se relit, et une tranche cochée ne doit pas partir vers un vrai
+// se rédige puis se relit, et une plage cochée ne doit pas partir vers un vrai
 // prospect avec un texte à moitié écrit.
 
 import { useEffect, useMemo, useState } from 'react';
 import toast from 'react-hot-toast';
-import { LuLoader, LuMessageSquareText } from 'react-icons/lu';
+import { LuLoader, LuMessageSquareText, LuPlus, LuTrash2, LuTriangleAlert, LuX } from 'react-icons/lu';
 import { saveLeadIntakeAutoReply } from 'wasp/client/operations';
 import { MagicTextarea } from '../../../client/magic';
 import { SmsCostHint } from '../../../client/sms/SmsCostHint';
@@ -20,19 +22,33 @@ import {
   AUTO_REPLY_MAX_CHARS,
   AUTO_REPLY_MAX_LEADS_PER_CALL,
   AUTO_REPLY_MAX_LEADS_PER_HOUR,
+  AUTO_REPLY_MAX_RULES,
+  AUTO_REPLY_MAX_TEXTS_PER_RULE,
   AUTO_REPLY_VARS,
-  AUTO_REPLY_WINDOW_KEYS,
-  DEFAULT_AUTO_REPLY_TEXTS,
-  autoReplyWindowHint,
-  autoReplyWindowLabel,
-  formatHour,
+  DEFAULT_NEW_RULE_TEXT,
+  MINUTES_PER_DAY,
+  autoReplyRuleForMinute,
+  autoReplyRuleLabel,
+  formatMinutes,
   isAutoReplyActive,
   renderAutoReply,
-  type AutoReplyWindowKey,
+  ruleCovers,
+  rulesOverlap,
+  uncoveredRanges,
+  usableTexts,
+  type AutoReplyRule,
   type IntakeAutoReply,
 } from '../../../shared/leadIntakeAutoReply';
 
-const HOURS = Array.from({ length: 25 }, (_, h) => h);
+/** Ce qu'affichent les aperçus à la place des variables. */
+const PREVIEW_VARS = { leadName: 'Jean Tremblay', companyName: 'Mon entreprise', searchTitle: 'Formulaire du site' };
+
+/** Une couleur par plage, pour la retrouver d'un coup d'œil sur la barre des 24 h. */
+const RULE_COLORS = ['#FF6A3D', '#3b82f6', '#16a34a', '#a855f7', '#f59e0b', '#0ea5e9', '#ec4899', '#14b8a6', '#6366f1', '#84cc16', '#ef4444', '#64748b'];
+
+function newRuleId(): string {
+  return `r_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
+}
 
 export function IntakeAutoReplyPanel({
   searchId,
@@ -51,9 +67,10 @@ export function IntakeAutoReplyPanel({
 }) {
   const [draft, setDraft] = useState<IntakeAutoReply>(saved);
   const [saving, setSaving] = useState(false);
-  // Replié par défaut quand rien n'est réglé : trois zones de texte vides
+  // Replié par défaut quand rien n'est réglé : plusieurs zones de texte
   // alourdiraient un panneau dont la plupart des sources n'ont pas besoin.
   const [open, setOpen] = useState(isAutoReplyActive(saved));
+  const [testMinute, setTestMinute] = useState(14 * 60 + 30);
 
   // Le brouillon repart de la base quand *son contenu* change — pas à chaque
   // objet neuf que renvoie un rafraîchissement de la requête, qui effacerait un
@@ -67,22 +84,31 @@ export function IntakeAutoReplyPanel({
   const dirty = useMemo(() => JSON.stringify(draft) !== JSON.stringify(saved), [draft, saved]);
   const active = isAutoReplyActive(saved);
   const blocked = canSend ? null : 'Envoi de SMS non configuré — Paramètres › Intégrations';
+  const disabled = !isAdmin || saving || !!blocked;
 
-  function setWindow(key: AutoReplyWindowKey, patch: Partial<IntakeAutoReply[AutoReplyWindowKey]>) {
-    setDraft(d => ({ ...d, [key]: { ...d[key], ...patch } }));
+  function setRule(id: string, patch: Partial<AutoReplyRule>) {
+    setDraft(d => ({ ...d, rules: d.rules.map(r => (r.id === id ? { ...r, ...patch } : r)) }));
   }
 
-  function setHours(dayStartHour: number, dayEndHour: number) {
-    // Une fin qui passe sous le début est repoussée d'une heure, pas refusée : on
-    // règle deux listes à la suite, et la seconde doit pouvoir rattraper la première.
-    const end = Math.max(dayEndHour, dayStartHour + 1);
-    setDraft(d => ({ ...d, dayStartHour, dayEndHour: Math.min(end, 24) }));
+  function removeRule(id: string) {
+    setDraft(d => ({ ...d, rules: d.rules.filter(r => r.id !== id) }));
+  }
+
+  /** Nouvelle plage : sur le premier trou de la journée s'il y en a un, sinon 9 h – 17 h. */
+  function addRule() {
+    const gap = uncoveredRanges(draft)[0];
+    const start = gap?.start ?? 9 * 60;
+    const end = gap ? gap.end : 17 * 60;
+    setDraft(d => ({
+      ...d,
+      rules: [...d.rules, { id: newRuleId(), start, end, enabled: true, texts: [DEFAULT_NEW_RULE_TEXT] }],
+    }));
   }
 
   async function save() {
-    for (const key of AUTO_REPLY_WINDOW_KEYS) {
-      if (draft[key].enabled && !draft[key].text.trim()) {
-        toast.error(`Écrivez le message « ${autoReplyWindowLabel(draft, key)} » avant de l'activer.`);
+    for (const rule of draft.rules) {
+      if (rule.enabled && usableTexts(rule).length === 0) {
+        toast.error(`Écrivez le message « ${autoReplyRuleLabel(rule)} » avant de l'activer.`);
         return;
       }
     }
@@ -98,8 +124,12 @@ export function IntakeAutoReplyPanel({
     }
   }
 
+  const enabledRules = draft.rules.filter(r => r.enabled && usableTexts(r).length > 0);
+  const gaps = uncoveredRanges(draft);
+  const testRule = autoReplyRuleForMinute(draft, testMinute);
+
   const summary = active
-    ? AUTO_REPLY_WINDOW_KEYS.filter(k => saved[k].enabled).map(k => autoReplyWindowLabel(saved, k)).join(' · ')
+    ? saved.rules.filter(r => r.enabled && usableTexts(r).length > 0).map(r => autoReplyRuleLabel(r)).join(' · ')
     : 'Désactivée';
 
   return (
@@ -129,37 +159,38 @@ export function IntakeAutoReplyPanel({
         <div className='space-y-3 rounded-xl border border-line p-3'>
           {blocked && <p className='text-xs text-warning'>{blocked}</p>}
 
-          {/* ── Bornes ── */}
-          <div className='flex flex-wrap items-center gap-2 text-sm'>
-            <span className='text-muted'>Journée de</span>
-            <HourSelect
-              value={draft.dayStartHour}
-              options={HOURS.filter(h => h <= 23)}
-              disabled={!isAdmin || saving}
-              onChange={h => setHours(h, draft.dayEndHour)}
-            />
-            <span className='text-muted'>à</span>
-            <HourSelect
-              value={draft.dayEndHour}
-              options={HOURS.filter(h => h > draft.dayStartHour)}
-              disabled={!isAdmin || saving}
-              onChange={h => setHours(draft.dayStartHour, h)}
-            />
-            <span className='text-xs text-muted'>(heure de Montréal)</span>
-          </div>
+          <p className='text-xs text-muted'>
+            Le message envoyé dépend de l'heure d'arrivée du prospect (heure de Montréal). Quand deux
+            plages se chevauchent, la première de la liste l'emporte.
+          </p>
 
-          {/* ── Les trois messages ── */}
-          {AUTO_REPLY_WINDOW_KEYS.map(key => (
-            <WindowEditor
-              key={key}
-              label={autoReplyWindowLabel(draft, key)}
-              hint={autoReplyWindowHint(key)}
-              defaultText={DEFAULT_AUTO_REPLY_TEXTS[key]}
-              window={draft[key]}
-              disabled={!isAdmin || saving || !!blocked}
-              onChange={patch => setWindow(key, patch)}
+          {/* ── La journée d'un coup d'œil ── */}
+          <DayBar rules={draft.rules} />
+          {enabledRules.length > 0 && gaps.length > 0 && (
+            <p className='text-xs text-muted'>
+              Aucun SMS {gaps.map(g => `de ${formatMinutes(g.start)} à ${formatMinutes(g.end)}`).join(', ')}.
+            </p>
+          )}
+
+          {/* ── Les plages ── */}
+          {draft.rules.map((rule, i) => (
+            <RuleEditor
+              key={rule.id}
+              rule={rule}
+              color={RULE_COLORS[i % RULE_COLORS.length]}
+              overlapsWith={draft.rules.slice(0, i).find(other => other.enabled && rule.enabled && rulesOverlap(other, rule))}
+              disabled={disabled}
+              onChange={patch => setRule(rule.id, patch)}
+              onRemove={() => removeRule(rule.id)}
             />
           ))}
+
+          {!disabled && draft.rules.length < AUTO_REPLY_MAX_RULES && (
+            <button type='button' className='btn-secondary w-full gap-1.5 text-sm' onClick={addRule}>
+              <LuPlus size={14} />
+              Ajouter une plage horaire
+            </button>
+          )}
 
           <div className='flex flex-wrap items-center gap-1.5 text-xs text-muted'>
             <span>Variables :</span>
@@ -168,6 +199,23 @@ export function IntakeAutoReplyPanel({
                 {v.token}
               </code>
             ))}
+          </div>
+
+          {/* ── Essai à une heure donnée ── */}
+          <div className='rounded-xl bg-canvas-100 p-2.5 text-xs'>
+            <div className='flex flex-wrap items-center gap-2 text-muted'>
+              <span>Un prospect qui arrive à</span>
+              <TimeInput value={testMinute} disabled={false} label="Heure d'arrivée à tester" onChange={setTestMinute} />
+              <span>reçoit :</span>
+            </div>
+            <p className='mt-1.5 text-[13px] text-ink'>
+              {testRule
+                ? renderAutoReply(usableTexts(testRule)[0], PREVIEW_VARS)
+                : <span className='text-muted italic'>aucun SMS à cette heure</span>}
+            </p>
+            {testRule && usableTexts(testRule).length > 1 && (
+              <p className='mt-0.5 text-muted'>ou l'une des {usableTexts(testRule).length - 1} autre(s) variante(s) de cette plage</p>
+            )}
           </div>
 
           <p className='text-xs text-muted'>
@@ -186,12 +234,7 @@ export function IntakeAutoReplyPanel({
           {isAdmin && (
             <div className='flex items-center justify-end gap-2'>
               {dirty && (
-                <button
-                  type='button'
-                  className='btn-secondary'
-                  disabled={saving}
-                  onClick={() => setDraft(saved)}
-                >
+                <button type='button' className='btn-secondary' disabled={saving} onClick={() => setDraft(saved)}>
                   Annuler
                 </button>
               )}
@@ -207,96 +250,198 @@ export function IntakeAutoReplyPanel({
   );
 }
 
-function HourSelect({
-  value,
-  options,
-  disabled,
-  onChange,
-}: {
-  value: number;
-  options: number[];
-  disabled: boolean;
-  onChange: (hour: number) => void;
-}) {
+/**
+ * Les 24 heures en une barre : chaque plage active dans sa couleur, les trous en
+ * blanc. Une heure peut être couverte par deux plages : c'est la première de la
+ * liste qui s'y affiche, comme c'est elle qui enverra.
+ */
+function DayBar({ rules }: { rules: AutoReplyRule[] }) {
+  const step = 15;
+  const slots = Array.from({ length: MINUTES_PER_DAY / step }, (_, i) => i * step);
   return (
-    <select
-      className='input w-auto py-1 text-sm'
-      value={value}
-      disabled={disabled}
-      onChange={e => onChange(parseInt(e.target.value, 10))}
-    >
-      {options.map(h => (
-        <option key={h} value={h}>{formatHour(h)}</option>
-      ))}
-    </select>
+    <div>
+      <div className='flex h-3 overflow-hidden rounded-full border border-line bg-white' aria-hidden>
+        {slots.map(m => {
+          const idx = rules.findIndex(r => r.enabled && usableTexts(r).length > 0 && ruleCovers(r, m));
+          return (
+            <div
+              key={m}
+              className='h-full flex-1'
+              style={idx >= 0 ? { backgroundColor: RULE_COLORS[idx % RULE_COLORS.length] } : undefined}
+            />
+          );
+        })}
+      </div>
+      <div className='mt-0.5 flex justify-between text-[10px] text-muted'>
+        {[0, 6, 12, 18, 24].map(h => <span key={h}>{h} h</span>)}
+      </div>
+    </div>
   );
 }
 
-function WindowEditor({
-  label,
-  hint,
-  defaultText,
-  window,
+function RuleEditor({
+  rule,
+  color,
+  overlapsWith,
   disabled,
   onChange,
+  onRemove,
 }: {
-  label: string;
-  hint: string;
-  /** Le message proposé d'origine, pour y revenir après l'avoir abîmé. */
-  defaultText: string;
-  window: { enabled: boolean; text: string };
+  rule: AutoReplyRule;
+  color: string;
+  /** Une plage plus haut dans la liste qui prend une partie de ces heures. */
+  overlapsWith?: AutoReplyRule;
   disabled: boolean;
-  onChange: (patch: Partial<{ enabled: boolean; text: string }>) => void;
+  onChange: (patch: Partial<AutoReplyRule>) => void;
+  onRemove: () => void;
 }) {
-  // L'aperçu chiffre le coût du message *rendu* : « {{company.name}} » fait
-  // quinze caractères, le nom qu'il remplace peut en faire quarante.
-  const preview = renderAutoReply(window.text, {
-    leadName: 'Jean Tremblay',
-    companyName: 'Mon entreprise',
-    searchTitle: 'Formulaire du site',
-  });
+  function setText(i: number, text: string) {
+    onChange({ texts: rule.texts.map((t, j) => (j === i ? text : t)) });
+  }
 
   return (
-    <div className={`rounded-xl border p-2.5 ${window.enabled ? 'border-accent-200 bg-accent-50/40' : 'border-line'}`}>
-      <label className={`flex items-start gap-2.5 ${disabled ? '' : 'cursor-pointer'}`}>
+    <div className={`rounded-xl border p-2.5 ${rule.enabled ? 'border-accent-200 bg-accent-50/40' : 'border-line'}`}>
+      <div className='flex flex-wrap items-center gap-2'>
         <input
           type='checkbox'
-          className='mt-0.5 rounded border-line text-accent focus:ring-accent/30'
-          checked={window.enabled}
+          className='rounded border-line text-accent focus:ring-accent/30'
+          checked={rule.enabled}
           disabled={disabled}
           onChange={e => onChange({ enabled: e.target.checked })}
+          aria-label={`Activer la plage ${autoReplyRuleLabel(rule)}`}
         />
-        <span className='min-w-0 flex-1'>
-          <span className='block text-sm font-medium text-ink'>{label}</span>
-          <span className='block text-xs text-muted'>{hint}</span>
+        <span className='h-2.5 w-2.5 shrink-0 rounded-full' style={{ backgroundColor: color }} />
+        <span className='inline-flex items-center gap-2'>
+          <span className='text-sm text-muted'>De</span>
+          <TimeInput value={rule.start} disabled={disabled} label='Début de la plage' onChange={start => onChange({ start })} />
         </span>
-      </label>
-      <MagicTextarea
-        containerClassName='mt-2'
-        className='input w-full resize-y text-sm'
-        rows={3}
-        maxLength={AUTO_REPLY_MAX_CHARS}
-        placeholder='Bonjour {{lead.name}}, merci pour votre demande. Nous vous rappelons…'
-        value={window.text}
-        disabled={disabled}
-        onChange={e => onChange({ text: e.target.value })}
-      />
-      <div className='mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-muted'>
-        <SmsCostHint
-          text={preview}
-          compact
-          onSimplify={disabled ? undefined : () => onChange({ text: toGsm7(window.text) })}
-        />
-        {!disabled && window.text !== defaultText && (
+        <span className='inline-flex items-center gap-2'>
+          <span className='text-sm text-muted'>à</span>
+          <TimeInput value={rule.end} disabled={disabled} label='Fin de la plage' onChange={end => onChange({ end: end === 0 ? MINUTES_PER_DAY : end })} />
+        </span>
+        {!disabled && (
           <button
             type='button'
-            className='ml-auto underline underline-offset-2 hover:text-ink'
-            onClick={() => onChange({ text: defaultText })}
+            className='ml-auto flex h-7 w-7 items-center justify-center rounded-full text-muted hover:bg-red-50 hover:text-danger'
+            onClick={onRemove}
+            title='Supprimer cette plage'
+            aria-label='Supprimer cette plage'
           >
-            Rétablir le message proposé
+            <LuTrash2 size={14} />
           </button>
         )}
       </div>
+      <p className='mt-1 text-xs text-muted'>{autoReplyRuleLabel(rule)}</p>
+      {overlapsWith && (
+        <p className='mt-1 flex items-center gap-1 text-xs text-amber-700'>
+          <LuTriangleAlert size={12} className='shrink-0' />
+          Chevauche « {autoReplyRuleLabel(overlapsWith)} », placée plus haut : c'est elle qui répond sur les heures communes.
+        </p>
+      )}
+
+      <div className='mt-2 space-y-2'>
+        {rule.texts.map((text, i) => {
+          // L'aperçu chiffre le coût du message *rendu* : « {{company.name}} » fait
+          // quinze caractères, le nom qu'il remplace peut en faire quarante.
+          const preview = renderAutoReply(text, PREVIEW_VARS);
+          return (
+            <div key={i}>
+              {rule.texts.length > 1 && (
+                <div className='mb-0.5 flex items-center justify-between text-[11px] font-semibold uppercase tracking-wide text-muted'>
+                  <span>Variante {i + 1}</span>
+                  {!disabled && (
+                    <button
+                      type='button'
+                      className='flex h-5 w-5 items-center justify-center rounded-full hover:bg-canvas-200 hover:text-ink'
+                      onClick={() => onChange({ texts: rule.texts.filter((_, j) => j !== i) })}
+                      title='Retirer cette variante'
+                      aria-label={`Retirer la variante ${i + 1}`}
+                    >
+                      <LuX size={12} />
+                    </button>
+                  )}
+                </div>
+              )}
+              <MagicTextarea
+                className='input w-full resize-y text-sm'
+                rows={3}
+                maxLength={AUTO_REPLY_MAX_CHARS}
+                placeholder='Bonjour {{lead.name}}, merci pour votre demande. Nous vous rappelons…'
+                value={text}
+                disabled={disabled}
+                onChange={e => setText(i, e.target.value)}
+              />
+              <div className='mt-1 text-xs text-muted'>
+                <SmsCostHint text={preview} compact onSimplify={disabled ? undefined : () => setText(i, toGsm7(text))} />
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {!disabled && rule.texts.length < AUTO_REPLY_MAX_TEXTS_PER_RULE && (
+        <button
+          type='button'
+          className='mt-2 inline-flex items-center gap-1 text-xs font-medium text-accent-700 hover:underline'
+          onClick={() => onChange({ texts: [...rule.texts, ''] })}
+        >
+          <LuPlus size={12} />
+          Ajouter une variante
+        </button>
+      )}
+      {rule.texts.length > 1 && (
+        <p className='mt-1 text-xs text-muted'>Un des messages est choisi au hasard pour chaque prospect.</p>
+      )}
     </div>
+  );
+}
+
+/**
+ * Heure et minutes en deux listes plutôt qu'un `<input type="time">` : celui-ci
+ * s'affiche en « 7:00 PM » sur un navigateur réglé en anglais, alors que tout le
+ * reste de l'écran dit « 19 h ». Deux listes s'affichent pareil partout, et se
+ * touchent mieux au doigt qu'un champ à segments.
+ */
+function TimeInput({
+  value,
+  disabled,
+  label,
+  onChange,
+}: {
+  value: number;
+  disabled: boolean;
+  label: string;
+  onChange: (minutes: number) => void;
+}) {
+  const m = value % MINUTES_PER_DAY;
+  const hour = Math.floor(m / 60);
+  const minute = m % 60;
+  // Pas de 5 minutes, plus la valeur actuelle si elle tombe entre deux.
+  const minutes = Array.from(new Set([...Array.from({ length: 12 }, (_, i) => i * 5), minute])).sort((a, b) => a - b);
+  return (
+    <span className='inline-flex items-center gap-0.5' role='group' aria-label={label}>
+      <select
+        className='input w-auto py-1 pl-2 pr-7 text-sm'
+        value={hour}
+        disabled={disabled}
+        aria-label={`${label} — heure`}
+        onChange={e => onChange(parseInt(e.target.value, 10) * 60 + minute)}
+      >
+        {Array.from({ length: 24 }, (_, h) => (
+          <option key={h} value={h}>{h} h</option>
+        ))}
+      </select>
+      <select
+        className='input w-auto py-1 pl-2 pr-7 text-sm'
+        value={minute}
+        disabled={disabled}
+        aria-label={`${label} — minutes`}
+        onChange={e => onChange(hour * 60 + parseInt(e.target.value, 10))}
+      >
+        {minutes.map(mm => (
+          <option key={mm} value={mm}>{String(mm).padStart(2, '0')}</option>
+        ))}
+      </select>
+    </span>
   );
 }

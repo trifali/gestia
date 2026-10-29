@@ -104,30 +104,30 @@ import {
   useConfirm,
   IconBtn,
   TrashIcon,
+  PhoneInput,
 } from '../../client/ui';
 import { readPref, writePref } from '../../client/localPref';
 import {
   formatMontrealTime,
   FALLBACK_SOURCE_KEY,
-  leadSourceColor,
   leadSourceLabel,
   type LeadSourceOption,
   NoteThread,
-  LeadEditForm,
   leadExtras,
-  LeadCardInfo,
-  LeadKanbanBoard,
+  leadStateChips,
   LeadDeleteConfirmModal,
   extraFieldKey,
+  extraFieldId,
+  MAX_EXTRA_VALUE_CHARS,
   isExtraFieldKey,
   isLockedCardField,
   isBoardOverride,
   hasDetailToggle,
   slugifyFieldLabel,
   type CardFieldConfig,
-  type LeadFormValues,
 } from './leads.shared';
 import { LeadDetailPanel } from './LeadDetailPanel';
+import { LeadKanbanBoard, KanbanMenu, type KanbanMenuItem } from './LeadKanbanBoard';
 import { SmsCostHint } from '../../client/sms/SmsCostHint';
 import { toGsm7 } from '../../client/sms/smsText';
 import { useSmsCapability, useEmailCapability } from '../../client/capabilities';
@@ -171,13 +171,16 @@ import {
   LuEye,
   LuEyeOff,
   LuUserPlus,
-  LuUserCheck,
   LuClock,
   LuShare2,
   LuLink,
   LuRefreshCcw,
   LuX,
   LuMessageSquare,
+  LuPanelRightOpen,
+  LuListChecks,
+  LuArrowRightLeft,
+  LuIdCard,
 } from 'react-icons/lu';
 import { MagicInput, MagicTextarea } from '../../client/magic';
 import { SearchForm, defaultForm, RADIUS_OPTIONS } from './GoogleSearchForm';
@@ -959,67 +962,222 @@ function TemplatesModal({
 
 // ─── Add lead modal ──────────────────────────────────────────────────────────
 
+/** Les colonnes du prospect qu'on peut saisir à la main, avec leur libellé par défaut. */
+const BUILTIN_INPUTS: Record<string, { label: string; placeholder: string; wide?: boolean; type?: string }> = {
+  phone: { label: 'Téléphone', placeholder: '' },
+  email: { label: 'Courriel', placeholder: 'nom@exemple.com', type: 'email' },
+  website: { label: 'Site web', placeholder: 'https://…', wide: true, type: 'url' },
+  address: { label: 'Adresse', placeholder: '', wide: true },
+  category: { label: 'Catégorie', placeholder: '' },
+};
+
+type AddLeadField =
+  | { kind: 'builtin'; key: string; label: string }
+  | { kind: 'extra'; key: string; label: string; example?: string; multiline: boolean };
+
+/**
+ * Le formulaire d'ajout d'un prospect, composé à partir du tableau plutôt que
+ * d'une liste figée.
+ *
+ * Il pose les mêmes questions que celles auxquelles les autres prospects du
+ * tableau ont répondu : les champs du réglage « Cartes », dans leur ordre — ceux
+ * qu'une correspondance de webhook a déclarés, budget ou créneau de rappel —
+ * puis les informations que des prospects portent sans qu'elles soient
+ * déclarées. Un champ standard qu'aucun prospect du tableau n'a jamais rempli
+ * (un site web sur un tableau de formulaire Facebook) se range derrière un lien
+ * plutôt que de réclamer une réponse que personne d'autre n'a donnée.
+ */
 function AddLeadModal({
   searchId,
   statusConfigs,
+  cardFields,
+  leads,
   onClose,
   onCreated,
 }: {
   searchId: string;
   statusConfigs: LeadStatusConfig[];
+  cardFields: CardFieldConfig[];
+  /** Les prospects déjà sur le tableau : ce qu'ils ont reçu décide de ce qu'on demande. */
+  leads: Lead[];
   onClose: () => void;
   onCreated: (lead: any) => void;
 }) {
-  // Opened from the + on the Nouveau column, so that column is the default.
+  // La première vraie colonne, celle où atterrit tout nouveau prospect.
   const [status, setStatus] = useState<string>(
-    statusConfigs.find(s => s.key === 'nouveau')?.key ?? statusConfigs[0]?.key ?? 'nouveau',
+    statusConfigs.find(s => s.key !== UNKNOWN_STATUS_KEY)?.key ?? 'nouveau',
   );
   const [source, setSource] = useState<string>('manual');
   const { data: sourceConfigs = [] } = useQuery(getLeadSourceConfigs);
+  const [values, setValues] = useState<Record<string, string>>({});
+  const [revealed, setRevealed] = useState<Set<string>>(new Set());
+  const [saving, setSaving] = useState(false);
 
-  async function handleSave(values: LeadFormValues) {
-    if (!values.name) {
-      toast.error("Le nom de l'entreprise est requis");
+  const { fields, tucked } = useMemo(() => {
+    // Du plus récent au plus ancien : l'exemple affiché est la réponse la plus fraîche.
+    const recent = [...leads].sort((a, b) => new Date(b.createdAt as any).getTime() - new Date(a.createdAt as any).getTime());
+    const extrasOf = new Map(recent.map(l => [l.id, leadExtras(l)]));
+    const usedBuiltin = (key: string) => recent.some(l => !!(l as any)[key]);
+    const extraSamples = (id: string) => recent.flatMap(l => extrasOf.get(l.id)!.filter(e => e.key === id).map(e => e.value));
+
+    const fields: AddLeadField[] = [];
+    const tucked: AddLeadField[] = [];
+    const seenExtras = new Set<string>();
+    const ordered = [...cardFields].sort((a, b) => a.order - b.order);
+
+    for (const f of ordered) {
+      if (isExtraFieldKey(f.key)) {
+        const id = extraFieldId(f.key);
+        seenExtras.add(id);
+        const samples = extraSamples(id);
+        fields.push({ kind: 'extra', key: id, label: f.label, example: samples[0], multiline: samples.some(v => v.length > 60 || v.includes('\n')) });
+        continue;
+      }
+      if (!(f.key in BUILTIN_INPUTS)) continue; // nom, provenance, note Google : à part ou non saisissables.
+      const field: AddLeadField = { kind: 'builtin', key: f.key, label: f.label || BUILTIN_INPUTS[f.key].label };
+      // Un tableau encore vide n'a rien à imiter : on suit alors le seul réglage.
+      const relevant = (f.onDetail ?? true) && (leads.length === 0 || usedBuiltin(f.key));
+      (relevant ? fields : tucked).push(field);
+    }
+    // Les colonnes standard absentes du réglage restent accessibles.
+    for (const key of Object.keys(BUILTIN_INPUTS)) {
+      if (![...fields, ...tucked].some(f => f.kind === 'builtin' && f.key === key)) {
+        tucked.push({ kind: 'builtin', key, label: BUILTIN_INPUTS[key].label });
+      }
+    }
+    // Les informations que des prospects portent sans qu'un champ les déclare.
+    for (const l of recent) {
+      for (const e of extrasOf.get(l.id)!) {
+        if (seenExtras.has(e.key)) continue;
+        seenExtras.add(e.key);
+        const samples = extraSamples(e.key);
+        fields.push({ kind: 'extra', key: e.key, label: e.label, example: samples[0], multiline: samples.some(v => v.length > 60 || v.includes('\n')) });
+      }
+    }
+    return { fields, tucked };
+  }, [cardFields, leads]);
+
+  const shown = [...fields, ...tucked.filter(f => revealed.has(f.key))];
+  const hidden = tucked.filter(f => !revealed.has(f.key));
+  const set = (key: string, v: string) => setValues(prev => ({ ...prev, [key]: v }));
+
+  async function handleSave() {
+    const name = (values.name ?? '').trim();
+    if (!name) {
+      toast.error("Le nom est requis");
       return;
     }
+    setSaving(true);
     try {
-      const lead = await (createLead as any)({ searchId, ...values, status, source });
-      toast.success(`${values.name} ajouté`);
+      const builtin = (key: string) => (values[`b:${key}`] ?? '').trim() || undefined;
+      const lead = await (createLead as any)({
+        searchId,
+        name,
+        phone: builtin('phone'),
+        email: builtin('email'),
+        website: builtin('website'),
+        address: builtin('address'),
+        category: builtin('category'),
+        status,
+        source,
+        extras: shown
+          .filter(f => f.kind === 'extra')
+          .map(f => ({ key: f.key, label: f.label, value: (values[`x:${f.key}`] ?? '').trim() }))
+          .filter(e => e.value),
+      });
+      toast.success(`${name} ajouté`);
       onCreated(lead);
       onClose();
     } catch (err: any) {
       toast.error(err?.message || "Erreur lors de l'ajout");
+    } finally {
+      setSaving(false);
     }
   }
 
+  function renderField(f: AddLeadField) {
+    if (f.kind === 'builtin') {
+      const spec = BUILTIN_INPUTS[f.key];
+      const id = `b:${f.key}`;
+      return (
+        <div key={id} className={spec.wide ? 'sm:col-span-2' : undefined}>
+          <label className='label'>{f.label}</label>
+          {f.key === 'phone' ? (
+            <PhoneInput className='input' value={values[id] ?? ''} onChange={v => set(id, v)} />
+          ) : (
+            <input className='input' type={spec.type ?? 'text'} value={values[id] ?? ''} onChange={e => set(id, e.target.value)} placeholder={spec.placeholder} />
+          )}
+        </div>
+      );
+    }
+    const id = `x:${f.key}`;
+    const example = f.example ? `ex. : ${f.example.length > 50 ? f.example.slice(0, 50) + '…' : f.example}` : '';
+    return (
+      <div key={id} className={f.multiline ? 'sm:col-span-2' : undefined}>
+        <label className='label'>{f.label}</label>
+        {f.multiline ? (
+          <textarea className='input' rows={3} value={values[id] ?? ''} onChange={e => set(id, e.target.value)} placeholder={example} maxLength={MAX_EXTRA_VALUE_CHARS} />
+        ) : (
+          <input className='input' value={values[id] ?? ''} onChange={e => set(id, e.target.value)} placeholder={example} maxLength={MAX_EXTRA_VALUE_CHARS} />
+        )}
+      </div>
+    );
+  }
+
   return (
-    <LeadEditForm
-      initialValues={{ name: '', phone: '', email: '', website: '', address: '', category: '' }}
-      onSave={handleSave}
-      onCancel={onClose}
-      submitLabel='Ajouter le prospect'
-      savingLabel='Ajout…'
-      extraFields={
-        <>
-          <div>
-            <label className='label'>Statut</label>
-            <select className='input' value={status} onChange={e => setStatus(e.target.value)}>
-              {statusConfigs.map(s => (
-                <option key={s.key} value={s.key}>{s.label}</option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label className='label'>Provenance</label>
-            <select className='input' value={source} onChange={e => setSource(e.target.value)}>
-              {(sourceConfigs as LeadSourceOption[]).map(s => (
-                <option key={s.key} value={s.key}>{s.label}</option>
-              ))}
-            </select>
-          </div>
-        </>
-      }
-    />
+    <div className='space-y-4'>
+      <div className='grid grid-cols-1 gap-3 sm:grid-cols-2'>
+        <div className='sm:col-span-2'>
+          <label className='label'>Nom</label>
+          <input className='input' autoFocus value={values.name ?? ''} onChange={e => set('name', e.target.value)} />
+        </div>
+        {shown.map(renderField)}
+      </div>
+
+      {hidden.length > 0 && (
+        <div className='flex flex-wrap items-center gap-1.5'>
+          <span className='text-xs text-muted'>Autres champs :</span>
+          {hidden.map(f => (
+            <button
+              key={f.key}
+              type='button'
+              className='inline-flex items-center gap-1 rounded-md bg-canvas-200 px-2 py-0.5 text-xs font-medium text-ink-700 hover:bg-canvas-300'
+              onClick={() => setRevealed(prev => new Set(prev).add(f.key))}
+            >
+              <LuPlus size={11} />
+              {f.label}
+            </button>
+          ))}
+        </div>
+      )}
+
+      <div className='grid grid-cols-1 gap-3 border-t border-line pt-4 sm:grid-cols-2'>
+        <div>
+          <label className='label'>Colonne</label>
+          <select className='input' value={status} onChange={e => setStatus(e.target.value)}>
+            {statusConfigs.filter(s => s.key !== UNKNOWN_STATUS_KEY).map(s => (
+              <option key={s.key} value={s.key}>{s.label}</option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label className='label'>Provenance</label>
+          <select className='input' value={source} onChange={e => setSource(e.target.value)}>
+            {(sourceConfigs as LeadSourceOption[]).map(s => (
+              <option key={s.key} value={s.key}>{s.label}</option>
+            ))}
+          </select>
+        </div>
+      </div>
+
+      <div className='flex justify-end gap-2 pt-1'>
+        <button className='btn-secondary' onClick={onClose} disabled={saving}>Annuler</button>
+        <button className='btn-primary gap-1.5' onClick={handleSave} disabled={saving}>
+          {saving ? <LuLoader size={14} className='animate-spin' /> : <LuPlus size={14} />}
+          {saving ? 'Ajout…' : 'Ajouter le prospect'}
+        </button>
+      </div>
+    </div>
   );
 }
 
@@ -2932,69 +3090,398 @@ function FetchMoreLeadsModal({
   );
 }
 
-// ─── Leads kanban ─────────────────────────────────────────────────────────────
+// ─── Actions groupées ─────────────────────────────────────────────────────────
+
+type BulkFailure = { lead: Lead; error: string };
 
 /**
- * Un onglet de provenance.
- *
- * Souligné plutôt que pastille pleine, comme les onglets d'une fiche client : la
- * forme dit déjà qu'un seul peut être actif à la fois, là où les puces rondes en
- * dessous se cumulent. La pastille de couleur reprend celle des cartes, pour que
- * l'onglet et le badge d'une carte se reconnaissent l'un l'autre.
+ * Applique `fn` à chaque prospect, `concurrency` à la fois, et rend les échecs
+ * au lieu de s'arrêter au premier : sur vingt envois, un numéro invalide ne doit
+ * pas priver les dix-neuf autres de leur message.
  */
-function SourceTab({
-  label,
-  count,
-  color,
-  active,
-  onClick,
-}: {
-  label: string;
-  count: number;
-  color?: string;
-  active: boolean;
-  onClick: () => void;
-}) {
+async function runBulk(
+  leads: Lead[],
+  fn: (lead: Lead) => Promise<unknown>,
+  { concurrency = 1, onProgress }: { concurrency?: number; onProgress?: (done: number) => void } = {},
+): Promise<BulkFailure[]> {
+  const failures: BulkFailure[] = [];
+  let next = 0;
+  let done = 0;
+  async function worker() {
+    while (next < leads.length) {
+      const lead = leads[next++];
+      try {
+        await fn(lead);
+      } catch (e: any) {
+        failures.push({ lead, error: e?.message || 'Erreur inconnue' });
+      }
+      onProgress?.(++done);
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(concurrency, leads.length) }, worker));
+  return failures;
+}
+
+function BulkFailureList({ failures }: { failures: BulkFailure[] }) {
+  if (failures.length === 0) return null;
   return (
-    <button
-      type='button'
-      onClick={onClick}
-      title={`Afficher uniquement : ${label}`}
-      className={`flex shrink-0 items-center gap-1.5 whitespace-nowrap border-b-2 px-3 py-1.5 text-xs transition-colors ${
-        active
-          ? 'border-accent-600 font-medium text-ink'
-          : 'border-transparent text-muted hover:border-line hover:text-ink'
-      }`}
-    >
-      {color && (
-        <span className='h-1.5 w-1.5 shrink-0 rounded-full' style={{ backgroundColor: color }} />
-      )}
-      {label}
-      <span className={`text-[10px] ${active ? 'text-muted' : 'text-muted/70'}`}>{count}</span>
-    </button>
+    <div className='rounded-xl border border-red-200 bg-red-50 p-3 text-[13px] text-red-700 space-y-1 max-h-40 overflow-y-auto'>
+      {failures.map(f => (
+        <div key={f.lead.id}><span className='font-medium'>{f.lead.name}</span> — {f.error}</div>
+      ))}
+    </div>
   );
 }
 
+/**
+ * Un même courriel ou SMS envoyé à plusieurs prospects.
+ *
+ * Le message s'écrit une fois, avec ses variables (`{{lead.name}}`…), et se
+ * résout pour chaque destinataire au moment de l'envoi. Les envois passent un à
+ * un par les mêmes actions que la fenêtre individuelle — mêmes vérifications,
+ * même historique, même fil de relance — plutôt que par une voie parallèle qui
+ * finirait par diverger.
+ *
+ * Les prospects sans courriel (ou sans téléphone) sont écartés et comptés, pas
+ * oubliés en silence.
+ */
+function BulkMessageModal({
+  channel,
+  leads,
+  searchId,
+  searchTitle,
+  statusConfigs,
+  onBusyChange,
+  onClose,
+  onSent,
+}: {
+  channel: 'email' | 'sms';
+  leads: Lead[];
+  searchId: string;
+  searchTitle: string;
+  statusConfigs: LeadStatusConfig[];
+  onBusyChange: (busy: boolean) => void;
+  onClose: () => void;
+  /** Appelé après l'envoi avec les prospects joints, et la colonne où les déplacer. */
+  onSent: (sentIds: string[], moveTo: string | null) => void;
+}) {
+  const isEmail = channel === 'email';
+  const { data: company } = useQuery(getCurrentCompany);
+  const { data: templatesData } = useQuery(
+    // @ts-ignore -- generated by Wasp on next restart
+    getProspectTemplates,
+    { searchId },
+  );
+  const templates = useMemo(() => templatesFor((templatesData as any[]) ?? [], channel), [templatesData, channel]);
+  const { canSend: emailCanSend, reason: emailReason } = useEmailCapability();
+  const { canSend: smsCanSend, reason: smsReason } = useSmsCapability();
+  const canSend = isEmail ? emailCanSend : smsCanSend;
+  const cannotReason = isEmail ? emailReason : smsReason;
+
+  const reachable = leads.filter(l => (isEmail ? !!(l as any).email : !!(l as any).phone));
+  const skipped = leads.filter(l => !reachable.includes(l));
+
+  const [templateId, setTemplateId] = useState('');
+  const [subject, setSubject] = useState('');
+  const [body, setBody] = useState('');
+  const [withSignature, setWithSignature] = useState(true);
+  const [moveTo, setMoveTo] = useState('');
+  const [phase, setPhase] = useState<'compose' | 'confirm' | 'sending' | 'done'>('compose');
+  const [progress, setProgress] = useState(0);
+  const [failures, setFailures] = useState<BulkFailure[]>([]);
+  const [initialized, setInitialized] = useState(false);
+  const bodyRef = useRef<HTMLTextAreaElement>(null);
+
+  const senderName = (company as any)?.senderName ?? '';
+  const signature = companySignature(company);
+
+  function applyTemplate(id: string) {
+    const tmpl = templates.find(t => t.id === id);
+    if (!tmpl) return;
+    setSubject(tmpl.subject ?? '');
+    setBody(tmpl.body ?? '');
+  }
+
+  // Même présélection que la fenêtre individuelle : le modèle de la colonne
+  // quand toute la sélection en vient, sinon le modèle générique.
+  useEffect(() => {
+    if (initialized || templatesData === undefined) return;
+    const statuses = new Set(leads.map(l => (l as any).status));
+    const tmpl = pickTemplateForStatus(templatesData as any[], channel, statuses.size === 1 ? [...statuses][0] : null);
+    if (tmpl) {
+      setTemplateId(tmpl.id);
+      setSubject(tmpl.subject ?? '');
+      setBody(tmpl.body ?? '');
+    }
+    setInitialized(true);
+  }, [templatesData, initialized]);
+
+  function insertVar(token: string) {
+    const el = bodyRef.current;
+    const start = el?.selectionStart ?? body.length;
+    const end = el?.selectionEnd ?? body.length;
+    setBody(body.slice(0, start) + token + body.slice(end));
+    requestAnimationFrame(() => {
+      el?.focus();
+      el?.setSelectionRange(start + token.length, start + token.length);
+    });
+  }
+
+  const resolve = (text: string, lead: Lead) => resolveTemplateVars(text, lead, company, senderName, searchTitle);
+  const finalBody = (lead: Lead) => resolve(body, lead) + (isEmail && withSignature ? `\n\n${signature}` : '');
+  const sample = reachable[0];
+  const noun = isEmail ? 'courriel' : 'SMS';
+  const plural = reachable.length > 1 ? (isEmail ? 'courriels' : 'SMS') : noun;
+
+  const ready = canSend && reachable.length > 0 && body.trim() !== '' && (!isEmail || subject.trim() !== '');
+
+  async function send() {
+    setPhase('sending');
+    onBusyChange(true);
+    setProgress(0);
+    const failed = await runBulk(
+      reachable,
+      async lead => {
+        const identifier = (lead as any).placeId ?? lead.id;
+        if (isEmail) {
+          await (sendProspectEmail as any)({
+            identifier,
+            to: (lead as any).email,
+            cc: null,
+            subject: resolve(subject, lead).trim(),
+            body: finalBody(lead),
+          });
+        } else {
+          await (sendProspectSms as any)({ identifier, leadId: lead.id, to: (lead as any).phone, body: finalBody(lead) });
+        }
+      },
+      { onProgress: setProgress },
+    );
+    setFailures(failed);
+    setPhase('done');
+    onBusyChange(false);
+    const failedIds = new Set(failed.map(f => f.lead.id));
+    onSent(reachable.filter(l => !failedIds.has(l.id)).map(l => l.id), moveTo || null);
+  }
+
+  if (phase === 'sending' || phase === 'done') {
+    const sent = (phase === 'done' ? reachable.length - failures.length : progress);
+    return (
+      <div className='space-y-4'>
+        {phase === 'sending' ? (
+          <>
+            <p className='text-sm text-ink'>Envoi en cours… {progress} / {reachable.length}</p>
+            <div className='h-2 overflow-hidden rounded-full bg-canvas-200'>
+              <div className='h-full rounded-full bg-accent-500 transition-[width]' style={{ width: `${(progress / reachable.length) * 100}%` }} />
+            </div>
+            <p className='text-xs text-muted'>Gardez cette fenêtre ouverte jusqu'à la fin de l'envoi.</p>
+          </>
+        ) : (
+          <>
+            <div className='flex items-center gap-2 text-sm text-ink'>
+              <LuCheck size={16} className='text-success' />
+              {sent} {sent > 1 ? plural : noun} envoyé{sent > 1 ? 's' : ''}
+              {failures.length > 0 && <span className='text-danger'>· {failures.length} échec{failures.length > 1 ? 's' : ''}</span>}
+            </div>
+            <BulkFailureList failures={failures} />
+            <div className='flex justify-end'>
+              <button className='btn-primary' onClick={onClose}>Fermer</button>
+            </div>
+          </>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div className='space-y-4'>
+      {!canSend && (
+        <div className='text-xs bg-amber-50 border border-amber-200 rounded-md px-3 py-2 text-amber-700'>{cannotReason}</div>
+      )}
+
+      <div className='rounded-xl border border-line bg-canvas-100 px-3.5 py-3 text-[13px] space-y-1'>
+        <div className='font-medium text-ink'>
+          {reachable.length} prospect{reachable.length > 1 ? 's' : ''} recevr{reachable.length > 1 ? 'ont' : 'a'} ce {noun}
+        </div>
+        {skipped.length > 0 && (
+          <div className='text-amber-700'>
+            {skipped.length} sans {isEmail ? 'courriel' : 'téléphone'} ignoré{skipped.length > 1 ? 's' : ''} : {skipped.slice(0, 5).map(l => l.name).join(', ')}
+            {skipped.length > 5 ? `, et ${skipped.length - 5} autre(s)` : ''}
+          </div>
+        )}
+      </div>
+
+      {templates.length > 0 && (
+        <div>
+          <label className='label'>Modèle</label>
+          <select
+            className='input'
+            value={templateId}
+            onChange={e => { setTemplateId(e.target.value); applyTemplate(e.target.value); }}
+          >
+            <option value=''>Aucun modèle</option>
+            {templates.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+          </select>
+        </div>
+      )}
+
+      {isEmail && (
+        <div>
+          <label className='label'>Objet</label>
+          <input className='input' value={subject} onChange={e => setSubject(e.target.value)} placeholder='Objet du courriel' />
+        </div>
+      )}
+
+      <div>
+        <label className='label'>Message</label>
+        <textarea
+          ref={bodyRef}
+          className='input min-h-[140px] text-[13px]'
+          rows={isEmail ? 8 : 5}
+          value={body}
+          onChange={e => setBody(e.target.value)}
+          placeholder={isEmail ? 'Bonjour {{lead.name}},…' : 'Bonjour {{lead.name}}, …'}
+        />
+        <div className='mt-1.5 flex flex-wrap items-center gap-1'>
+          <span className='text-xs text-muted mr-1'>Insérer :</span>
+          {TEMPLATE_VARS.filter(v => ['{{lead.name}}', '{{company.name}}', '{{sender.name}}', '{{lead.email}}', '{{lead.phone}}'].includes(v.token)).map(v => (
+            <button
+              key={v.token}
+              type='button'
+              className='rounded-md bg-canvas-200 px-1.5 py-0.5 text-[11.5px] font-medium text-ink-700 hover:bg-canvas-300'
+              onClick={() => insertVar(v.token)}
+              title={v.token}
+            >
+              {v.label}
+            </button>
+          ))}
+        </div>
+        {isEmail ? (
+          <label className='mt-2 flex items-center gap-2 text-[13px] text-ink'>
+            <input type='checkbox' className='rounded accent-accent-600' checked={withSignature} onChange={e => setWithSignature(e.target.checked)} />
+            Ajouter la signature de l'entreprise
+          </label>
+        ) : (
+          sample && body.trim() && <div className='mt-1.5'><SmsCostHint text={finalBody(sample)} onSimplify={() => setBody(toGsm7(body))} /></div>
+        )}
+      </div>
+
+      {sample && body.trim() && (
+        <div>
+          <div className='mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted'>Aperçu — {sample.name}</div>
+          <div className='rounded-xl border border-line bg-white px-3.5 py-3 text-[13px] leading-5 text-ink whitespace-pre-wrap break-words max-h-48 overflow-y-auto'>
+            {isEmail && <div className='mb-2 font-semibold'>{resolve(subject, sample)}</div>}
+            {finalBody(sample)}
+          </div>
+        </div>
+      )}
+
+      <div>
+        <label className='label'>Après l'envoi</label>
+        <select className='input' value={moveTo} onChange={e => setMoveTo(e.target.value)}>
+          <option value=''>Laisser les prospects dans leur colonne</option>
+          {statusConfigs.filter(s => s.key !== UNKNOWN_STATUS_KEY).map(s => (
+            <option key={s.key} value={s.key}>Déplacer vers « {s.label} »</option>
+          ))}
+        </select>
+      </div>
+
+      {phase === 'confirm' ? (
+        <div className='flex flex-wrap items-center justify-end gap-2 rounded-xl border border-accent-100 bg-accent-50 px-3 py-2.5'>
+          <span className='mr-auto text-sm font-medium text-ink'>
+            Envoyer {reachable.length} {plural} maintenant ?
+          </span>
+          <button className='btn-secondary' onClick={() => setPhase('compose')}>Retour</button>
+          <button className='btn-primary gap-1.5' onClick={send}>
+            <LuSend size={14} />
+            Oui, envoyer
+          </button>
+        </div>
+      ) : (
+        <div className='flex justify-end gap-2'>
+          <button className='btn-secondary' onClick={onClose}>Annuler</button>
+          <button className='btn-primary gap-1.5' disabled={!ready} onClick={() => setPhase('confirm')}>
+            {isEmail ? <LuSend size={14} /> : <LuMessageSquare size={14} />}
+            Envoyer à {reachable.length} prospect{reachable.length > 1 ? 's' : ''}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** La même note posée sur plusieurs prospects — « Appelé, pas de réponse ». */
+function BulkNoteModal({ leads, onClose, onDone }: { leads: Lead[]; onClose: () => void; onDone: () => void }) {
+  const [text, setText] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [failures, setFailures] = useState<BulkFailure[] | null>(null);
+
+  async function save() {
+    if (!text.trim()) return;
+    setSaving(true);
+    const failed = await runBulk(leads, lead => (addLeadNote as any)({ leadId: lead.id, text }), { concurrency: 4 });
+    setSaving(false);
+    onDone();
+    if (failed.length === 0) {
+      toast.success(`Note ajoutée à ${leads.length} prospect${leads.length > 1 ? 's' : ''}`);
+      onClose();
+    } else {
+      setFailures(failed);
+    }
+  }
+
+  return (
+    <div className='space-y-4'>
+      <p className='text-[13px] text-muted'>
+        Cette note sera ajoutée à {leads.length} prospect{leads.length > 1 ? 's' : ''}.
+      </p>
+      <textarea
+        className='input text-[13px]'
+        rows={4}
+        autoFocus
+        value={text}
+        onChange={e => setText(e.target.value)}
+        placeholder='Ex. : Appelé, pas de réponse — rappeler jeudi'
+      />
+      {failures && <BulkFailureList failures={failures} />}
+      <div className='flex justify-end gap-2'>
+        <button className='btn-secondary' onClick={onClose} disabled={saving}>Annuler</button>
+        <button className='btn-primary gap-1.5' onClick={save} disabled={saving || !text.trim()}>
+          {saving ? <LuLoader size={14} className='animate-spin' /> : <LuNotebook size={14} />}
+          Ajouter la note
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ─── Leads kanban ─────────────────────────────────────────────────────────────
+
+/**
+ * Le tableau d'un tableau de prospection : sa barre d'outils (recherche,
+ * provenance, sélection multiple) et le kanban.
+ *
+ * Les puces de filtre héritées de la recherche Google Maps (« Avec courriel »,
+ * « Sans site web »…) n'y sont plus : la page sert d'abord à suivre des
+ * prospects reçus, et la recherche texte couvre ce que ces puces faisaient.
+ */
 function LeadsKanban({
   leads,
   statusConfigs,
   cardFields,
   searchId,
-  searchFilters,
   searchTitle,
-  searchPurpose,
   refetch,
   onNote,
   onEmail,
   onSms,
   onConvert,
+  onDelete,
   onOpenDetail,
   selectedLeadId,
   existingClientNames,
   searchQuery,
   setSearchQuery,
-  activeFilters,
-  setActiveFilters,
   onResetFilters,
   sourceFilter,
   setSourceFilter,
@@ -3013,23 +3500,20 @@ function LeadsKanban({
   /** Les champs affichés sur les cartes, résolus pour ce tableau. */
   cardFields: CardFieldConfig[];
   searchId: string;
-  searchFilters: { businessType?: string; city?: string; province?: string; radius?: number; minRating?: number; requireWebsite?: boolean; maxResults?: number; language?: string };
-  searchTitle?: string;
-  searchPurpose?: string;
-  refetch: () => void;
+  searchTitle: string;
+  refetch: () => unknown;
   onNote: (lead: Lead) => void;
   onEmail: (lead: Lead) => void;
   onSms: (lead: Lead) => void;
   onConvert: (lead: Lead) => void;
+  onDelete: (lead: Lead) => void;
   onOpenDetail: (lead: Lead) => void;
   selectedLeadId: string | null;
   existingClientNames: Set<string>;
   searchQuery: string;
   setSearchQuery: (v: string) => void;
-  activeFilters: Set<string>;
-  setActiveFilters: (fn: (prev: Set<string>) => Set<string>) => void;
   onResetFilters: () => void;
-  /** Onglet de provenance actif. `null` = « Toutes ». */
+  /** Provenance affichée. `null` = toutes. */
   sourceFilter: string | null;
   setSourceFilter: (key: string | null) => void;
   sourceConfigs: LeadSourceOption[];
@@ -3038,7 +3522,7 @@ function LeadsKanban({
   onToggleSelect: (leadId: string) => void;
   /** Opens the bulk-delete confirmation for the given leads. */
   onBulkDelete: (leads: Lead[]) => void;
-  /** Opens the manual "add a prospect" form (the + on the Nouveau column). */
+  /** Opens the manual "add a prospect" form. */
   onAddLead: () => void;
   /** Opens the "search more on Google Maps" modal, owned by the board. */
   onFetchMore: () => void;
@@ -3053,21 +3537,14 @@ function LeadsKanban({
   // plus aucun moyen d'ajouter une carte.
   const firstColumnKey = statusConfigs.find(c => c.key !== UNKNOWN_STATUS_KEY)?.key ?? 'nouveau';
 
-  const onNoteRef = useRef(onNote);
-  onNoteRef.current = onNote;
-  const onEmailRef = useRef(onEmail);
-  onEmailRef.current = onEmail;
-  const onSmsRef = useRef(onSms);
-  onSmsRef.current = onSms;
-  const onConvertRef = useRef(onConvert);
-  onConvertRef.current = onConvert;
-  const onOpenDetailRef = useRef(onOpenDetail);
-  onOpenDetailRef.current = onOpenDetail;
-  const existingClientNamesRef = useRef(existingClientNames);
-  existingClientNamesRef.current = existingClientNames;
+  const [selectionMode, setSelectionMode] = useState(false);
+  function exitSelection() {
+    setSelectionMode(false);
+    setSelectedIds(new Set());
+  }
 
   // Telnyx / SMTP not configured → the matching action is disabled everywhere,
-  // with the reason surfaced as a tooltip rather than failing on click.
+  // with the reason surfaced rather than failing on click.
   const { canSend: smsCanSend, reason: smsReason } = useSmsCapability();
   const { canSend: emailCanSend, reason: emailReason } = useEmailCapability();
 
@@ -3077,74 +3554,36 @@ function LeadsKanban({
   async function reorder(status: string, orderedIds: string[]) {
     await (reorderLeads as any)({ searchId, status, orderedIds });
   }
-  function toggleFilter(key: string) {
-    setActiveFilters(prev => {
-      const next = new Set(prev);
-      if (next.has(key)) next.delete(key); else next.add(key);
-      return next;
-    });
-  }
 
-  function getEmailDomain(email: string): string {
-    return email.split('@')[1]?.toLowerCase() ?? '';
-  }
-  function getWebsiteDomain(url: string): string {
-    try { return new URL(url.startsWith('http') ? url : `https://${url}`).hostname.replace(/^www\./, '').toLowerCase(); }
-    catch { return url.toLowerCase().replace(/^www\./, ''); }
-  }
-  function emailMatchesDomain(lead: Lead): boolean {
-    if (!lead.email || !lead.website) return true;
-    const eDomain = getEmailDomain(lead.email);
-    const wDomain = getWebsiteDomain(lead.website);
-    return eDomain === wDomain || wDomain.endsWith(`.${eDomain}`) || eDomain.endsWith(`.${wDomain}`);
-  }
-
-  // Tout sauf la provenance. Sert deux fois : de base au filtre final, et de base
-  // aux compteurs d'onglets — qui doivent donc s'additionner exactement au compte
-  // de « Toutes », quels que soient la recherche et les puces actives.
+  // Tout sauf la provenance : sert de base au filtre final et aux compteurs du
+  // sélecteur de provenance, qui s'additionnent ainsi exactement à « Toutes ».
   const leadsBeforeSource = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
-    return leads.filter(l => {
-      if (q && ![
-        l.name, l.email, l.phone, l.website, l.address, l.category,
-        // Les informations de carte comptent dans la recherche : une fois qu'un
-        // budget ou une ville se lit sur la carte, chercher « Laval » et ne rien
-        // trouver alors que la carte l'affiche ferait douter du champ de
-        // recherche, pas de la donnée.
-        ...leadExtras(l).map(e => `${e.label} ${e.value}`),
-      ].some(v => v?.toLowerCase().includes(q))) return false;
-      for (const f of activeFilters) {
-        if (f === 'has_email' && !l.email) return false;
-        if (f === 'no_email' && !!l.email) return false;
-        if (f === 'no_website' && !!l.website) return false;
-        if (f === 'email_mismatch' && (!l.email || !l.website || emailMatchesDomain(l))) return false;
-        if (f === 'sms_unread' && !((l as any).smsUnreadCount > 0)) return false;
-        if (f === 'sms_replied' && !(l as any).hasSmsReply) return false;
-      }
-      return true;
-    });
-  }, [leads, activeFilters, searchQuery]);
+    if (!q) return leads;
+    return leads.filter(l => [
+      l.name, l.email, l.phone, l.website, l.address, l.category,
+      // Les informations de carte comptent dans la recherche : une fois qu'un
+      // budget ou une ville se lit sur la carte, chercher « Laval » et ne rien
+      // trouver alors que la carte l'affiche ferait douter du champ de
+      // recherche, pas de la donnée.
+      ...leadExtras(l).map(e => `${e.label} ${e.value}`),
+    ].some(v => v?.toLowerCase().includes(q)));
+  }, [leads, searchQuery]);
 
   const filteredLeads = useMemo(
-    () => (sourceFilter ? leadsBeforeSource.filter(l => (l as any).source === sourceFilter) : leadsBeforeSource),
+    () => (sourceFilter ? leadsBeforeSource.filter(l => ((l as any).source || FALLBACK_SOURCE_KEY) === sourceFilter) : leadsBeforeSource),
     [leadsBeforeSource, sourceFilter],
   );
 
   /**
-   * Les onglets de provenance.
+   * Les provenances du sélecteur. Seulement celles réellement présentes : un
+   * tableau qui n'en connaît qu'une n'affiche pas de sélecteur du tout.
    *
-   * Seulement celles réellement présentes : afficher les huit provenances sur un
-   * tableau qui n'en connaît qu'une donnerait sept onglets vides à traverser pour
-   * atteindre la seule qui compte. Corollaire assumé, une rangée qui n'aurait
-   * qu'un onglet ne s'affiche pas du tout — un tableau alimenté par un seul
-   * webhook garde exactement l'écran qu'il avait avant.
-   *
-   * L'onglet actif survit à sa disparition de la liste : filtrer sur « Facebook »
-   * puis cocher « Sans site web » jusqu'à ce qu'il n'en reste aucun ferait
-   * autrement sauter l'onglet sous le curseur, et l'écran répondrait à une
-   * question qu'on n'a pas posée.
+   * La provenance active survit à sa disparition de la liste : chercher un nom
+   * jusqu'à ce qu'il n'en reste aucune ferait autrement sauter le choix sous le
+   * curseur, et l'écran répondrait à une question qu'on n'a pas posée.
    */
-  const sourceTabs = useMemo(() => {
+  const sourceOptions = useMemo(() => {
     const counts = new Map<string, number>();
     for (const l of leadsBeforeSource) {
       const key = (l as any).source || FALLBACK_SOURCE_KEY;
@@ -3157,35 +3596,55 @@ function LeadsKanban({
       return i === -1 ? Number.MAX_SAFE_INTEGER : i;
     };
     return [...counts.entries()]
-      .map(([key, count]) => ({
-        key,
-        count,
-        label: leadSourceLabel(key, sourceConfigs),
-        color: leadSourceColor(key, sourceConfigs),
-      }))
+      .map(([key, count]) => ({ key, count, label: leadSourceLabel(key, sourceConfigs) }))
       // L'ordre du registre d'abord ; les clés qu'il ignore encore — une provenance
       // apprise à l'instant, avant que la requête ne se rafraîchisse — passent
       // ensuite, la plus fournie en tête.
       .sort((a, b) => orderOf(a.key) - orderOf(b.key) || b.count - a.count || a.label.localeCompare(b.label, 'fr'));
   }, [leadsBeforeSource, sourceConfigs, sourceFilter]);
 
-  // Chip counters, computed before the filters are applied so a chip keeps
-  // showing what it would match once another chip is already on.
-  const smsUnreadLeadCount = useMemo(
-    () => leads.filter(l => (l as any).smsUnreadCount > 0).length,
-    [leads],
-  );
-  const smsRepliedLeadCount = useMemo(
-    () => leads.filter(l => (l as any).hasSmsReply).length,
-    [leads],
-  );
-
   // Only the cards currently on the board can be acted on — the ones hidden by
-  // the search box or the filter chips stay out of every bulk action.
+  // the search box or the provenance stay out of every bulk action.
   const selectedVisible = filteredLeads.filter(l => selectedIds.has(l.id));
 
-  // Whole-column tick from a column header. The board passes the ids it has on
-  // screen, so a filtered-out card is never swept in.
+  const [bulkMessage, setBulkMessage] = useState<'email' | 'sms' | null>(null);
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const [bulkNote, setBulkNote] = useState(false);
+
+  // Un déplacement groupé s'affiche tout de suite, cartes en tête de leur
+  // nouvelle colonne, comme un déplacement par le menu d'une carte — puis on
+  // attend que tout soit écrit et relu avant de rendre la main au serveur.
+  const [moveOverride, setMoveOverride] = useState<{ ids: Set<string>; status: string } | null>(null);
+  const displayLeads = useMemo(() => {
+    if (!moveOverride) return filteredLeads;
+    const moved = filteredLeads.filter(l => moveOverride.ids.has(l.id)).map(l => ({ ...l, status: moveOverride.status }));
+    return [...moved, ...filteredLeads.filter(l => !moveOverride.ids.has(l.id))];
+  }, [filteredLeads, moveOverride]);
+
+  async function bulkMove(ids: string[], status: string) {
+    if (ids.length === 0) return;
+    const idSet = new Set(ids);
+    const label = statusConfigs.find(c => c.key === status)?.label ?? status;
+    setMoveOverride({ ids: idSet, status });
+    const toastId = toast.loading(`Déplacement vers « ${label} »…`);
+    const movers = leads.filter(l => idSet.has(l.id) && (l as any).status !== status);
+    const failures = await runBulk(movers, lead => updateLead({ id: lead.id, status }), { concurrency: 4 });
+    const failedIds = new Set(failures.map(f => f.lead.id));
+    try {
+      const existing = leads.filter(l => (l as any).status === status && !idSet.has(l.id)).map(l => l.id);
+      await reorder(status, [...ids.filter(id => !failedIds.has(id)), ...existing]);
+    } catch {
+      // L'ordre n'est qu'un confort : les cartes sont dans la bonne colonne.
+    }
+    try { await refetch(); } catch { /* le prochain rafraîchissement rattrapera */ }
+    setMoveOverride(null);
+    if (failures.length === 0) {
+      toast.success(`${ids.length} prospect${ids.length > 1 ? 's' : ''} déplacé${ids.length > 1 ? 's' : ''} vers « ${label} »`, { id: toastId });
+    } else {
+      toast.error(`${failures.length} déplacement(s) en échec`, { id: toastId });
+    }
+  }
+
   function selectMany(leadIds: string[], selected: boolean) {
     setSelectedIds(prev => {
       const next = new Set(prev);
@@ -3194,87 +3653,244 @@ function LeadsKanban({
     });
   }
 
-  const cardActionsForLead = useCallback((lead: any): React.ReactNode => {
-    const l = lead as Lead & { notes?: string | null };
-    return (
-      <div className='flex items-center gap-1'>
-        {l.email && (
-          <button
-            className={`w-6 h-6 rounded flex items-center justify-center transition-colors relative ${
-              !emailCanSend
-                ? 'text-muted opacity-40 cursor-not-allowed'
-                : `hover:bg-canvas ${(l as any).hasEmailSent ? 'text-success hover:text-emerald-700' : 'text-muted hover:text-ink'}`
-            }`}
-            disabled={!emailCanSend}
-            title={
-              !emailCanSend
-                ? (emailReason ?? '')
-                : (l as any).hasEmailDraft && !(l as any).hasEmailSent ? 'Reprendre le brouillon' : 'Envoyer un courriel'
-            }
-            onClick={e => { e.stopPropagation(); onEmailRef.current(l); }}
-          >
-            <LuSend size={11} />
-            {emailCanSend && (l as any).hasEmailDraft && !(l as any).hasEmailSent && (
-              <span className='absolute -top-0.5 -right-0.5 w-1.5 h-1.5 rounded-full bg-amber-400 pointer-events-none' />
-            )}
-          </button>
-        )}
-        {l.phone && (
-          <button
-            className={`w-6 h-6 rounded flex items-center justify-center transition-colors relative ${
-              !smsCanSend
-                ? 'text-muted opacity-40 cursor-not-allowed'
-                : `hover:bg-canvas ${(l as any).hasSmsSent ? 'text-success hover:text-emerald-700' : 'text-muted hover:text-ink'}`
-            }`}
-            disabled={!smsCanSend}
-            title={
-              !smsCanSend
-                ? (smsReason ?? '')
-                : (l as any).smsUnreadCount
-                  ? `${(l as any).smsUnreadCount} réponse(s) non lue(s)`
-                  : 'Envoyer un SMS'
-            }
-            onClick={e => { e.stopPropagation(); onSmsRef.current(l); }}
-          >
-            <LuMessageSquare size={11} />
-            {smsCanSend && (l as any).smsUnreadCount > 0 && (
-              <span className='absolute -top-0.5 -right-0.5 w-1.5 h-1.5 rounded-full bg-accent-500 pointer-events-none' />
-            )}
-          </button>
-        )}
-        <button
-          className='w-6 h-6 rounded flex items-center justify-center hover:bg-canvas text-muted hover:text-ink transition-colors relative'
-          title={(l as any).noteCount > 0 || l.notes ? 'Voir les notes' : 'Ajouter une note'}
-          onClick={e => { e.stopPropagation(); onNoteRef.current(l); }}
-        >
-          <LuNotebook size={11} />
-          {((l as any).noteCount > 0 || l.notes) && (
-            <span className='absolute -top-1 -right-1 min-w-[14px] h-3.5 rounded-full bg-accent-500 text-white text-[8px] font-bold flex items-center justify-center px-0.5 pointer-events-none leading-none'>
-              {(l as any).noteCount > 0 ? (l as any).noteCount : ''}
-            </span>
-          )}
-        </button>
-        {(l as any).status === 'qualifie' && (
-          existingClientNamesRef.current.has(l.name.toLowerCase()) ? (
-            <span className='w-6 h-6 rounded flex items-center justify-center text-muted' title='Déjà ajouté comme client'>
-              <LuUserCheck size={11} />
-            </span>
-          ) : (
+  const existingClientNamesRef = useRef(existingClientNames);
+  existingClientNamesRef.current = existingClientNames;
+
+  const cardMenu = (lead: any): KanbanMenuItem[] => {
+    const l = lead as Lead & { [k: string]: any };
+    const items: KanbanMenuItem[] = [
+      { key: 'open', label: 'Ouvrir la fiche', icon: <LuPanelRightOpen size={15} />, onSelect: () => onOpenDetail(l) },
+      {
+        key: 'email',
+        label: l.hasEmailDraft && !l.hasEmailSent ? 'Reprendre le brouillon' : 'Envoyer un courriel',
+        icon: <LuSend size={15} />,
+        onSelect: () => onEmail(l),
+        disabled: !l.email || !emailCanSend,
+        hint: !l.email ? 'Aucun courriel pour ce prospect' : !emailCanSend ? (emailReason ?? undefined) : undefined,
+      },
+      {
+        key: 'sms',
+        label: l.smsUnreadCount > 0 ? `Lire les SMS (${l.smsUnreadCount} non lu${l.smsUnreadCount > 1 ? 's' : ''})` : 'Envoyer un SMS',
+        icon: <LuMessageSquare size={15} />,
+        onSelect: () => onSms(l),
+        disabled: !l.phone || !smsCanSend,
+        hint: !l.phone ? 'Aucun téléphone pour ce prospect' : !smsCanSend ? (smsReason ?? undefined) : undefined,
+      },
+      {
+        key: 'notes',
+        label: l.noteCount > 0 ? `Notes (${l.noteCount})` : 'Ajouter une note',
+        icon: <LuNotebook size={15} />,
+        onSelect: () => onNote(l),
+      },
+    ];
+    if (l.status === 'qualifie' && !existingClientNamesRef.current.has(l.name.toLowerCase())) {
+      items.push({
+        key: 'convert',
+        label: 'Créer un client',
+        icon: <LuUserPlus size={15} />,
+        onSelect: () => onConvert(l),
+        hint: 'Ajoute ce contact dans la page Clients avec ses informations pré-remplies',
+      });
+    }
+    items.push({ key: 'delete', label: 'Supprimer', icon: <LuTrash2 size={15} />, danger: true, onSelect: () => onDelete(l) });
+    return items;
+  };
+
+  // Ce que les anciennes icônes d'action disaient par leur couleur — courriel
+  // envoyé, brouillon en attente, réponse SMS non lue — se lit désormais en
+  // étiquettes, comme « Paid » ou « Complete form » sur les cartes de Facebook.
+  const cardBadges = useCallback((lead: any): React.ReactNode => {
+    const chips = leadStateChips(lead, {
+      smsCanSend,
+      isClient: existingClientNamesRef.current.has(lead.name.toLowerCase()),
+    });
+    return chips.length ? <>{chips}</> : null;
+  }, [smsCanSend]);
+
+  const columnMenu = (status: string): KanbanMenuItem[] => {
+    if (status !== firstColumnKey) return [];
+    const items: KanbanMenuItem[] = [
+      { key: 'add', label: 'Ajouter un prospect', icon: <LuPlus size={15} />, onSelect: onAddLead },
+    ];
+    if (canFetchMore) {
+      items.push({
+        key: 'fetch',
+        label: 'Chercher plus sur Google Maps',
+        icon: fetchingMore ? <LuLoader size={15} className='animate-spin' /> : <LuSearch size={15} />,
+        onSelect: onFetchMore,
+        disabled: fetchingMore,
+      });
+    }
+    return items;
+  };
+
+  const isFiltered = searchQuery.trim() !== '' || !!sourceFilter;
+
+  const toolbar = (
+    <div className='mb-3 space-y-2.5'>
+      <div className='flex flex-wrap items-center gap-2'>
+        <div className='relative min-w-[12rem] flex-1 sm:max-w-xs'>
+          <LuSearch size={16} className='pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted' />
+          <input
+            type='search'
+            value={searchQuery}
+            onChange={e => setSearchQuery(e.target.value)}
+            placeholder='Rechercher un prospect…'
+            aria-label='Rechercher un prospect'
+            className='input h-10 pl-9 pr-9 [&::-webkit-search-cancel-button]:hidden'
+          />
+          {searchQuery && (
             <button
-              className='w-6 h-6 rounded flex items-center justify-center hover:bg-canvas text-emerald-600 hover:text-emerald-700 transition-colors'
-              title='Créer un client depuis ce prospect — ajoute ce contact dans la page Clients avec ses informations pré-remplies'
-              onClick={e => { e.stopPropagation(); onConvertRef.current(l); }}
+              type='button'
+              onClick={() => setSearchQuery('')}
+              className='absolute right-2 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-full text-muted hover:bg-canvas-200 hover:text-ink'
+              aria-label='Effacer la recherche'
             >
-              <LuUserPlus size={11} />
+              <LuX size={15} />
             </button>
-          )
+          )}
+        </div>
+
+        {sourceOptions.length > 1 && (
+          <select
+            value={sourceFilter ?? ''}
+            onChange={e => setSourceFilter(e.target.value || null)}
+            aria-label='Provenance'
+            className='input h-10 w-auto max-w-full py-0 pr-8 text-sm'
+          >
+            <option value=''>Toutes les provenances ({leadsBeforeSource.length})</option>
+            {sourceOptions.map(o => (
+              <option key={o.key} value={o.key}>{o.label} ({o.count})</option>
+            ))}
+          </select>
         )}
+
+        <div className='ml-auto flex items-center gap-2'>
+          {canFetchMore && (
+            <button
+              type='button'
+              className='btn-secondary h-10 px-3'
+              onClick={onFetchMore}
+              disabled={fetchingMore}
+              title='Chercher plus de prospects sur Google Maps avec les mêmes critères'
+            >
+              {fetchingMore ? <LuLoader size={16} className='animate-spin' /> : <LuMapPin size={16} />}
+              <span className='hidden lg:inline'>Chercher plus</span>
+            </button>
+          )}
+          <button
+            type='button'
+            className={`h-10 px-3 ${selectionMode ? 'btn-primary' : 'btn-secondary'}`}
+            onClick={() => (selectionMode ? exitSelection() : setSelectionMode(true))}
+            aria-pressed={selectionMode}
+            title='Sélectionner plusieurs prospects'
+          >
+            <LuListChecks size={16} />
+            <span className='hidden md:inline'>Sélection multiple</span>
+          </button>
+          <button type='button' className='btn-accent h-10 px-3' onClick={onAddLead} title='Ajouter un prospect'>
+            <LuPlus size={16} />
+            <span className='hidden sm:inline'>Ajouter</span>
+          </button>
+        </div>
       </div>
-    );
-    // Everything else is read through refs to keep this stable; the SMS and email
-    // capabilities must be real deps or the buttons would keep the optimistic
-    // "enabled" value they had while the queries were still loading.
-  }, [smsCanSend, smsReason, emailCanSend, emailReason]);
+
+      {isFiltered && (
+        <div className='flex items-center gap-2 text-sm text-muted'>
+          <span>
+            {filteredLeads.length} sur {leads.length} prospect{leads.length !== 1 ? 's' : ''}
+          </span>
+          <button type='button' className='font-medium text-accent-700 hover:underline' onClick={onResetFilters}>
+            Réinitialiser
+          </button>
+        </div>
+      )}
+
+      {selectionMode && (
+        <div className='space-y-2.5 rounded-xl border border-accent-100 bg-accent-50 px-3 py-2.5'>
+          <div className='flex flex-wrap items-center gap-x-3 gap-y-1'>
+            <span className='text-sm font-medium'>
+              {selectedVisible.length > 0
+                ? `${selectedVisible.length} sélectionné${selectedVisible.length > 1 ? 's' : ''}`
+                : 'Touchez les cartes à sélectionner'}
+            </span>
+            {selectedVisible.length < filteredLeads.length && (
+              <button type='button' className='text-sm text-muted underline hover:text-ink' onClick={() => selectMany(filteredLeads.map(l => l.id), true)}>
+                Tout sélectionner ({filteredLeads.length})
+              </button>
+            )}
+            {selectedVisible.length > 0 && (
+              <button type='button' className='text-sm text-muted underline hover:text-ink' onClick={() => setSelectedIds(new Set())}>
+                Désélectionner
+              </button>
+            )}
+            <button type='button' className='btn-secondary ml-auto h-8 px-3 text-sm' onClick={exitSelection}>
+              Terminer
+            </button>
+          </div>
+          {/* Les actions de relance : déplacer, écrire, noter — puis nettoyer. La
+              sélection reste après chacune, sauf la suppression, pour enchaîner
+              « SMS puis déplacer » sur le même groupe. */}
+          <div className='flex flex-wrap items-center gap-2'>
+            <KanbanMenu
+              label='Déplacer la sélection'
+              sheetTitle={`Déplacer ${selectedVisible.length} prospect(s)`}
+              disabled={selectedVisible.length === 0}
+              trigger={<><LuArrowRightLeft size={14} />Déplacer</>}
+              triggerClassName='btn-secondary h-9 px-3 text-sm'
+              sections={() => [{
+                title: 'Déplacer vers',
+                items: statusConfigs.filter(c => c.key !== UNKNOWN_STATUS_KEY).map(c => ({
+                  key: c.key,
+                  label: c.label,
+                  icon: <span className='h-2.5 w-2.5 rounded-full' style={{ backgroundColor: c.color ?? '#6366f1' }} />,
+                  onSelect: () => bulkMove(selectedVisible.map(l => l.id), c.key),
+                })),
+              }]}
+            />
+            <button
+              type='button'
+              className='btn-secondary h-9 px-3 text-sm'
+              disabled={selectedVisible.length === 0 || !emailCanSend}
+              title={!emailCanSend ? (emailReason ?? '') : 'Envoyer un courriel à la sélection'}
+              onClick={() => setBulkMessage('email')}
+            >
+              <LuSend size={14} />
+              Courriel
+            </button>
+            <button
+              type='button'
+              className='btn-secondary h-9 px-3 text-sm'
+              disabled={selectedVisible.length === 0 || !smsCanSend}
+              title={!smsCanSend ? (smsReason ?? '') : 'Envoyer un SMS à la sélection'}
+              onClick={() => setBulkMessage('sms')}
+            >
+              <LuMessageSquare size={14} />
+              SMS
+            </button>
+            <button
+              type='button'
+              className='btn-secondary h-9 px-3 text-sm'
+              disabled={selectedVisible.length === 0}
+              onClick={() => setBulkNote(true)}
+            >
+              <LuNotebook size={14} />
+              Note
+            </button>
+            <button
+              type='button'
+              className='btn-danger h-9 px-3 text-sm'
+              onClick={() => onBulkDelete(selectedVisible)}
+              disabled={selectedVisible.length === 0}
+            >
+              <LuTrash2 size={14} />
+              Supprimer
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
 
   if (statusConfigs.length === 0) {
     return <div className='text-muted text-sm py-8 text-center'>Chargement des statuts…</div>;
@@ -3282,174 +3898,59 @@ function LeadsKanban({
 
   return (
     <>
-      <LeadKanbanBoard
-        leads={filteredLeads}
-        statusConfigs={statusConfigs}
-        cardFields={cardFields}
-        updateStatus={updateStatus}
-        reorder={reorder}
-        refetch={refetch}
-        cardActions={cardActionsForLead}
-        onCardClick={lead => onOpenDetailRef.current(lead)}
-        selectedLeadId={selectedLeadId}
-        columnExtra={keyField => keyField === firstColumnKey ? (
-          <>
-            <button
-              className='w-5 h-5 rounded flex items-center justify-center text-muted hover:text-ink hover:bg-canvas transition-colors shrink-0'
-              title='Ajouter un prospect manuellement'
-              onClick={e => { e.stopPropagation(); onAddLead(); }}
-            >
-              <LuPlus size={12} />
-            </button>
-            {canFetchMore && (
-            <button
-              className='w-5 h-5 rounded flex items-center justify-center text-muted hover:text-ink hover:bg-canvas transition-colors shrink-0'
-              title='Chercher plus de prospects sur Google Maps avec les mêmes critères'
-              onClick={e => { e.stopPropagation(); onFetchMore(); }}
-              disabled={fetchingMore}
-            >
-              {fetchingMore ? <LuLoader size={12} className='animate-spin' /> : <LuSearch size={12} />}
-            </button>
-            )}
-          </>
-        ) : undefined}
-        mobileColumnExtra={col => col.key === firstColumnKey ? (
-          <>
-            <button
-              className='w-6 h-6 rounded flex items-center justify-center text-muted hover:text-ink hover:bg-canvas'
-              title='Ajouter un prospect manuellement'
-              onClick={e => { e.stopPropagation(); onAddLead(); }}
-            >
-              <LuPlus size={12} />
-            </button>
-            {canFetchMore && (
-            <button
-              className='w-6 h-6 rounded flex items-center justify-center text-muted hover:text-ink hover:bg-canvas'
-              title='Chercher plus de prospects sur Google Maps'
-              onClick={e => { e.stopPropagation(); onFetchMore(); }}
-              disabled={fetchingMore}
-            >
-              {fetchingMore ? <LuLoader size={12} className='animate-spin' /> : <LuSearch size={12} />}
-            </button>
-            )}
-          </>
-        ) : undefined}
-        searchBarSlot={(() => {
-          const chips: { key: string; label: string; title: string }[] = [
-            { key: 'has_email', label: '✉ Avec courriel', title: 'Afficher uniquement les prospects avec un courriel' },
-            { key: 'no_email', label: '✉ Sans courriel', title: 'Afficher uniquement les prospects sans courriel' },
-            { key: 'no_website', label: '🌐 Sans site web', title: 'Afficher uniquement les prospects sans site web' },
-            { key: 'email_mismatch', label: '⚠ Courriel hors domaine', title: 'Courriel dont le domaine ne correspond pas au site web (opportunité de vente)' },
-          ];
-          // Reply filters only make sense where SMS is configured — the unread
-          // badges they mirror are hidden in that case too.
-          if (smsCanSend) {
-            chips.push({
-              key: 'sms_unread',
-              label: `💬 Réponse SMS non lue${smsUnreadLeadCount > 0 ? ` (${smsUnreadLeadCount})` : ''}`,
-              title: 'Afficher uniquement les prospects avec une réponse SMS non lue',
-            });
-            chips.push({
-              key: 'sms_replied',
-              label: `↩ A répondu par SMS${smsRepliedLeadCount > 0 ? ` (${smsRepliedLeadCount})` : ''}`,
-              title: 'Afficher tous les prospects ayant déjà répondu par SMS, lues ou non',
-            });
-          }
-          const isFiltered = activeFilters.size > 0 || searchQuery.trim() !== '' || !!sourceFilter;
-          return (
-            <>
-            {/* ── Onglets de provenance ──
-                Volontairement distincts des puces qui suivent : un onglet répond à
-                « où suis-je », une puce à « que veux-je voir en plus ». Les rendre
-                pareils ferait lire deux mécaniques différentes comme une seule. */}
-            {sourceTabs.length > 1 && (
-              <div className='-mx-4 mb-3 overflow-x-auto px-4'>
-                <div className='flex items-center gap-1 border-b border-line'>
-                  <SourceTab
-                    label='Toutes'
-                    count={leadsBeforeSource.length}
-                    active={!sourceFilter}
-                    onClick={() => setSourceFilter(null)}
-                  />
-                  {sourceTabs.map(t => (
-                    <SourceTab
-                      key={t.key}
-                      label={t.label}
-                      count={t.count}
-                      color={t.color}
-                      active={sourceFilter === t.key}
-                      onClick={() => setSourceFilter(t.key)}
-                    />
-                  ))}
-                </div>
-              </div>
-            )}
-            {selectedVisible.length > 0 && (
-              <div className='mb-3 flex items-center gap-3 flex-wrap rounded-xl border border-accent-100 bg-accent-50 px-3 py-2'>
-                <span className='text-sm font-medium'>{selectedVisible.length} sélectionné(s)</span>
-                <button
-                  className='text-xs text-muted hover:text-ink underline'
-                  onClick={() => setSelectedIds(new Set())}
-                >
-                  Tout désélectionner
-                </button>
-                <button
-                  className='btn-danger gap-1.5 text-sm ml-auto'
-                  onClick={() => onBulkDelete(selectedVisible)}
-                >
-                  <LuTrash2 size={14} />
-                  Supprimer
-                </button>
-              </div>
-            )}
-            <div className='flex items-center gap-2 flex-wrap pb-3'>
-              <div className='relative'>
-                <LuSearch size={13} className='absolute left-2.5 top-1/2 -translate-y-1/2 text-muted pointer-events-none' />
-                <input
-                  type='text'
-                  value={searchQuery}
-                  onChange={e => setSearchQuery(e.target.value)}
-                  placeholder='Rechercher…'
-                  className='text-xs pl-7 pr-2.5 py-1 rounded-full border border-line bg-canvas text-ink placeholder-muted focus:outline-none focus:border-accent-400 w-40'
-                />
-              </div>
-              {chips.map(c => (
-                <button
-                  key={c.key}
-                  title={c.title}
-                  onClick={() => toggleFilter(c.key)}
-                  className={`text-xs px-2.5 py-1 rounded-full border transition-colors ${
-                    activeFilters.has(c.key)
-                      ? 'bg-accent-600 border-accent-600 text-white'
-                      : 'bg-canvas border-line text-muted hover:border-accent-400 hover:text-ink'
-                  }`}
-                >
-                  {c.label}
-                </button>
-              ))}
-              {isFiltered && (
-                <button
-                  onClick={() => onResetFilters()}
-                  className='text-xs px-2 py-1 text-muted hover:text-ink transition-colors'
-                  title='Réinitialiser les filtres'
-                >
-                  Réinitialiser
-                </button>
-              )}
-              {isFiltered && (
-                <span className='text-xs text-muted ml-auto'>
-                  {filteredLeads.length} / {leads.length} prospect{leads.length !== 1 ? 's' : ''}
-                </span>
-              )}
-            </div>
-            </>
-          );
-        })()}
-        selectedIds={selectedIds}
-        onToggleSelect={onToggleSelect}
-        onSelectMany={selectMany}
-        sources={sourceConfigs}
-      />
+    <Modal
+      open={bulkMessage !== null}
+      title={bulkMessage === 'email' ? `Courriel groupé — ${selectedVisible.length} prospect(s)` : `SMS groupé — ${selectedVisible.length} prospect(s)`}
+      onClose={() => { if (!bulkBusy) setBulkMessage(null); }}
+    >
+      {bulkMessage && (
+        <BulkMessageModal
+          channel={bulkMessage}
+          leads={selectedVisible}
+          searchId={searchId}
+          searchTitle={searchTitle}
+          statusConfigs={statusConfigs}
+          onBusyChange={setBulkBusy}
+          onClose={() => setBulkMessage(null)}
+          onSent={(sentIds, moveTo) => {
+            if (moveTo && sentIds.length) bulkMove(sentIds, moveTo);
+            else refetch();
+          }}
+        />
+      )}
+    </Modal>
+    <Modal
+      open={bulkNote}
+      title={`Note groupée — ${selectedVisible.length} prospect(s)`}
+      onClose={() => setBulkNote(false)}
+    >
+      {bulkNote && <BulkNoteModal leads={selectedVisible} onClose={() => setBulkNote(false)} onDone={() => refetch()} />}
+    </Modal>
+    <LeadKanbanBoard
+      leads={displayLeads}
+      statusConfigs={statusConfigs}
+      cardFields={cardFields}
+      sources={sourceConfigs}
+      updateStatus={updateStatus}
+      reorder={reorder}
+      refetch={refetch}
+      cardMenu={cardMenu}
+      cardBadges={cardBadges}
+      columnMenu={columnMenu}
+      emptyColumnAction={status => status === firstColumnKey ? (
+        <button type='button' className='btn-secondary mt-2 h-9 px-3 text-sm' onClick={onAddLead}>
+          <LuPlus size={14} />
+          Ajouter un prospect
+        </button>
+      ) : null}
+      toolbar={toolbar}
+      onCardClick={lead => onOpenDetail(lead)}
+      selectedLeadId={selectedLeadId}
+      selectionMode={selectionMode}
+      selectedIds={selectedIds}
+      onToggleSelect={onToggleSelect}
+      onSelectMany={selectMany}
+    />
     </>
   );
 }
@@ -3491,25 +3992,18 @@ function LeadsBoard({ searchId, onBack }: { searchId: string; onBack: () => void
   const navigate = useNavigate();
   const kanbanQuery = searchParams.get('kq') ?? '';
   function setKanbanQuery(val: string) {
-    setSearchParams(prev => { const next = new URLSearchParams(prev); if (val) next.set('kq', val); else next.delete('kq'); return next; });
-  }
-  const kanbanFiltersRaw = searchParams.get('kf') ?? '';
-  const kanbanActiveFilters = useMemo(() => new Set(kanbanFiltersRaw ? kanbanFiltersRaw.split(',') : []), [kanbanFiltersRaw]);
-  function setKanbanActiveFilters(fn: (prev: Set<string>) => Set<string>) {
-    const next = fn(kanbanActiveFilters);
-    setSearchParams(prev => { const p = new URLSearchParams(prev); const arr = [...next]; if (arr.length) p.set('kf', arr.join(',')); else p.delete('kf'); return p; });
+    setSearchParams(prev => { const next = new URLSearchParams(prev); if (val) next.set('kq', val); else next.delete('kq'); return next; }, { replace: true });
   }
   // ── Provenance : l'onglet actif du tableau ──────────────────────────────────
   //
   // L'URL fait foi — elle survit au rafraîchissement et se partage par lien, comme
-  // `kq` et `kf`. Le stockage local ne fait que l'écho, pour le cas que l'URL ne
+  // `kq`. Le stockage local ne fait que l'écho, pour le cas que l'URL ne
   // couvre pas : revenir sur le tableau depuis ailleurs dans l'application, avec
   // une adresse nue.
   //
   // `{ replace: true }` sur chaque changement : un onglet est un point de vue, pas
   // une étape de navigation, et empiler une entrée d'historique par clic
-  // transformerait le bouton « précédent » en défaite d'onglets. (Les puces
-  // existantes ont ce défaut ; on ne le reproduit pas ici.)
+  // transformerait le bouton « précédent » en défaite d'onglets.
   const sourceFilterParam = searchParams.get('ks');
   const sourceFilter = sourceFilterParam || null;
   const sourcePrefKey = `leadSource.${searchId}`;
@@ -3549,7 +4043,7 @@ function LeadsBoard({ searchId, onBack }: { searchId: string; onBack: () => void
 
   function resetKanbanFilters() {
     writePref(sourcePrefKey, '');
-    setSearchParams(prev => { const p = new URLSearchParams(prev); p.delete('kf'); p.delete('kq'); p.delete('ks'); return p; });
+    setSearchParams(prev => { const p = new URLSearchParams(prev); p.delete('kf'); p.delete('kq'); p.delete('ks'); return p; }, { replace: true });
   }
   // Lead shown in the right-side detail panel (kept in the URL so it survives
   // a reload and can be shared).
@@ -3701,6 +4195,19 @@ function LeadsBoard({ searchId, onBack }: { searchId: string; onBack: () => void
       setBulkDeleting(false);
     }
   }
+
+  const boardSettings: KanbanMenuItem[] = [
+    ...(kind !== 'manual' ? [{
+      key: 'details',
+      label: isWebhookBoard ? 'Source de prospects' : 'Critères de la recherche',
+      icon: <LuEye size={15} />,
+      onSelect: () => setShowDetails(true),
+    }] : []),
+    { key: 'statuses', label: 'Statuts', icon: <LuSlidersHorizontal size={15} />, onSelect: () => setShowBoardStatuses(true) },
+    { key: 'fields', label: 'Champs des cartes', icon: <LuIdCard size={15} />, onSelect: () => setShowBoardCardFields(true) },
+    { key: 'templates', label: 'Modèles courriel / SMS', icon: <LuFilePen size={15} />, onSelect: () => setShowTemplates(true) },
+    { key: 'export', label: 'Exporter en CSV', icon: <LuDownload size={15} />, onSelect: () => handleExport(), disabled: exporting },
+  ];
 
   async function handleExport() {
     setExporting(true);
@@ -3880,6 +4387,8 @@ function LeadsBoard({ searchId, onBack }: { searchId: string; onBack: () => void
           <AddLeadModal
             searchId={searchId}
             statusConfigs={statusConfigs as LeadStatusConfig[]}
+            cardFields={cardFieldConfigs as CardFieldConfig[]}
+            leads={leads}
             onClose={() => setShowAddLead(false)}
             onCreated={lead => { refetch(); setDetailLeadId(lead.id); }}
           />
@@ -3970,106 +4479,127 @@ function LeadsBoard({ searchId, onBack }: { searchId: string; onBack: () => void
         style={panelInset ? { marginRight: panelInset } : undefined}
       >
       {/* Header */}
-      <div className='flex flex-col gap-3 mb-5'>
-        {/* Top row: title + actions */}
-        <div className='flex items-start gap-2 sm:gap-4'>
-          {/* Title block */}
-          <div className='flex-1 min-w-0'>
-            <div className='flex items-center gap-1.5'>
-              <h2 className='text-base sm:text-lg font-semibold truncate'>{search.title}</h2>
-              {kind !== 'manual' && (
-                <button
-                  className='w-6 h-6 rounded flex items-center justify-center hover:bg-canvas text-muted hover:text-ink transition-colors shrink-0'
-                  title={isWebhookBoard ? 'Source de prospects' : 'Détails de la recherche'}
-                  onClick={() => setShowDetails(true)}
-                >
-                  <LuEye size={14} />
-                </button>
-              )}
-              <button
-                className='w-6 h-6 rounded flex items-center justify-center hover:bg-canvas text-muted hover:text-ink transition-colors shrink-0'
-                title='Statuts de ce tableau'
-                onClick={() => setShowBoardStatuses(true)}
-              >
-                <LuSlidersHorizontal size={14} />
-              </button>
-              <button
-                className='w-6 h-6 rounded flex items-center justify-center hover:bg-canvas text-muted hover:text-ink transition-colors shrink-0'
-                title='Champs affichés sur les cartes'
-                onClick={() => setShowBoardCardFields(true)}
-              >
-                <LuStar size={14} />
-              </button>
+      {/* Passe à la ligne selon la place réelle et non selon l'écran : le panneau
+          latéral ouvert retire 420 px au contenu sans changer de point de rupture. */}
+      <div className='mb-4 flex flex-wrap items-start justify-between gap-x-6 gap-y-3'>
+        <div className='min-w-0 flex-1 basis-[18rem]'>
+          <div className='flex items-start gap-2'>
+            <h2 className='min-w-0 flex-1 text-xl font-semibold leading-tight text-ink break-words'>{search.title}</h2>
+            {/* Téléphone : les cinq réglages tiennent dans un menu plutôt que sur
+                deux rangées de boutons qui repousseraient le tableau hors de l'écran. */}
+            <div className='sm:hidden'>
+              <KanbanMenu
+                label='Réglages du tableau'
+                sheetTitle={search.title}
+                vertical={false}
+                sections={() => [{ items: boardSettings }]}
+              />
             </div>
-            {search.description && (
-              <p className='text-sm text-muted italic'>{search.description}</p>
-            )}
-            {(search as any).purpose && (
-              <p className='text-xs text-muted'>Objectif : {(search as any).purpose}</p>
-            )}
-            <div className='flex flex-wrap gap-1.5 mt-1'>
-              <BoardKindBadge kind={kind} />
+          </div>
+          {search.description && (
+            <p className='mt-1 text-sm text-muted'>{search.description}</p>
+          )}
+          {(search as any).purpose && (
+            <p className='mt-0.5 text-sm text-muted'>Objectif : {(search as any).purpose}</p>
+          )}
+          <div className='mt-2 flex flex-wrap items-center gap-1.5'>
+            <BoardKindBadge kind={kind} />
 
-              {isWebhookBoard && (
-                !inbound?.isActive ? (
-                  <span className='badge-neutral text-amber-700'>En pause</span>
-                ) : inbound?.lastReceivedAt ? (
-                  <span className='badge-neutral'>
-                    Dernier prospect le {formatMontrealTime(inbound.lastReceivedAt)}
+            {isWebhookBoard && (
+              !inbound?.isActive ? (
+                <span className='badge-neutral text-amber-700'>En pause</span>
+              ) : inbound?.lastReceivedAt ? (
+                <span className='badge-neutral'>
+                  Dernier prospect le {formatMontrealTime(inbound.lastReceivedAt)}
+                </span>
+              ) : (
+                <span className='badge-neutral'>En attente de configuration</span>
+              )
+            )}
+
+            {isGoogleBoard && (
+              <>
+                {filters.businessType && (
+                  <span className='badge-info'>{filters.businessType}</span>
+                )}
+                {filters.city && (
+                  <span className='badge-neutral flex items-center gap-1'>
+                    <LuMapPin size={11} />{filters.city}{filters.province ? `, ${filters.province}` : ''}
                   </span>
-                ) : (
-                  <span className='badge-neutral'>En attente de configuration</span>
-                )
-              )}
-
-              {isGoogleBoard && (
-                <>
-                  {filters.businessType && (
-                    <span className='badge-info'>{filters.businessType}</span>
-                  )}
-                  {filters.city && (
-                    <span className='badge-neutral flex items-center gap-1'>
-                      <LuMapPin size={11} />{filters.city}{filters.province ? `, ${filters.province}` : ''}
-                    </span>
-                  )}
-                  {filters.radius && (
-                    <span className='badge-neutral'>
-                      {RADIUS_OPTIONS.find(r => r.value === filters.radius)?.label ?? `${filters.radius / 1000} km`}
-                    </span>
-                  )}
-                  {filters.minRating > 0 && (
-                    <span className='badge-neutral flex items-center gap-1'>
-                      <LuStar size={11} />{filters.minRating}+
-                    </span>
-                  )}
-                  {filters.requireWebsite && (
-                    <span className='badge-neutral flex items-center gap-1'>
-                      <LuGlobe size={11} />Site web requis
-                    </span>
-                  )}
-                  {filters.language && (
-                    <span className='badge-neutral'>{filters.language === 'fr' ? 'Français' : 'English'}</span>
-                  )}
-                </>
-              )}
-              <span className='text-xs text-muted self-center'>{leads.length} prospect(s)</span>
-            </div>
+                )}
+                {filters.radius && (
+                  <span className='badge-neutral'>
+                    {RADIUS_OPTIONS.find(r => r.value === filters.radius)?.label ?? `${filters.radius / 1000} km`}
+                  </span>
+                )}
+                {filters.minRating > 0 && (
+                  <span className='badge-neutral flex items-center gap-1'>
+                    <LuStar size={11} />{filters.minRating}+
+                  </span>
+                )}
+                {filters.requireWebsite && (
+                  <span className='badge-neutral flex items-center gap-1'>
+                    <LuGlobe size={11} />Site web requis
+                  </span>
+                )}
+                {filters.language && (
+                  <span className='badge-neutral'>{filters.language === 'fr' ? 'Français' : 'English'}</span>
+                )}
+              </>
+            )}
+            <span className='text-sm text-muted'>
+              {leads.length} prospect{leads.length !== 1 ? 's' : ''}
+            </span>
           </div>
         </div>
 
-        {/* Action bar (wraps on mobile) */}
-        <div className='flex items-center gap-2 flex-wrap'>
-          <button className='btn-ghost gap-1.5 text-sm' onClick={() => setShowTemplates(true)}>
-            <LuFilePen size={14} />
-            <span className='hidden xs:inline'>Modèles courriel / SMS</span>
-            <span className='xs:hidden'>Modèles</span>
+        {/* Réglages du tableau — comme la barre du Leads Center : des boutons
+            nommés plutôt que des icônes à deviner, qui passent à la ligne sur
+            téléphone. */}
+        <div className='hidden flex-wrap items-center gap-2 sm:flex'>
+          {kind !== 'manual' && (
+            <button
+              className='btn-secondary h-9 px-3 text-sm'
+              title={isWebhookBoard ? 'Source de prospects' : 'Détails de la recherche'}
+              onClick={() => setShowDetails(true)}
+            >
+              <LuEye size={15} />
+              {isWebhookBoard ? 'Source' : 'Critères'}
+            </button>
+          )}
+          <button
+            className='btn-secondary h-9 px-3 text-sm'
+            title='Statuts de ce tableau'
+            onClick={() => setShowBoardStatuses(true)}
+          >
+            <LuSlidersHorizontal size={15} />
+            Statuts
           </button>
-          <button className='btn-secondary gap-1.5 text-sm' onClick={handleExport} disabled={exporting}>
-            {exporting ? <LuLoader size={14} className='animate-spin' /> : <LuDownload size={14} />}
-            <span className='hidden xs:inline'>Exporter CSV</span>
-            <span className='xs:hidden'>CSV</span>
+          <button
+            className='btn-secondary h-9 px-3 text-sm'
+            title='Champs affichés sur les cartes'
+            onClick={() => setShowBoardCardFields(true)}
+          >
+            <LuIdCard size={15} />
+            Cartes
           </button>
-
+          <button
+            className='btn-secondary h-9 px-3 text-sm'
+            title='Modèles de courriels et de SMS'
+            onClick={() => setShowTemplates(true)}
+          >
+            <LuFilePen size={15} />
+            Modèles
+          </button>
+          <button
+            className='btn-secondary h-9 px-3 text-sm'
+            title='Exporter les prospects en CSV'
+            onClick={handleExport}
+            disabled={exporting}
+          >
+            {exporting ? <LuLoader size={15} className='animate-spin' /> : <LuDownload size={15} />}
+            Exporter
+          </button>
         </div>
       </div>
 
@@ -4078,21 +4608,18 @@ function LeadsBoard({ searchId, onBack }: { searchId: string; onBack: () => void
           statusConfigs={statusConfigs as LeadStatusConfig[]}
           cardFields={cardFieldConfigs as CardFieldConfig[]}
           searchId={searchId}
-          searchFilters={filters}
           searchTitle={search.title}
-          searchPurpose={(search as any).purpose ?? undefined}
           refetch={refetch}
           onNote={setNoteTarget}
           onEmail={setEmailTarget}
           onSms={setSmsTarget}
           onConvert={setConvertTarget}
+          onDelete={setDeleteTarget}
           onOpenDetail={lead => setDetailLeadId(lead.id)}
           selectedLeadId={detailLeadId}
           existingClientNames={existingClientNames}
           searchQuery={kanbanQuery}
           setSearchQuery={setKanbanQuery}
-          activeFilters={kanbanActiveFilters}
-          setActiveFilters={setKanbanActiveFilters}
           onResetFilters={resetKanbanFilters}
           sourceFilter={sourceFilter}
           setSourceFilter={setSourceFilter}
@@ -4449,7 +4976,7 @@ export default function LeadSearchPage() {
                   Statuts
                 </button>
                 <button className='btn-secondary gap-1.5' onClick={() => setShowManageCardFields(true)}>
-                  <LuStar size={14} />
+                  <LuIdCard size={14} />
                   Cartes
                 </button>
                 <button className='btn-secondary gap-1.5' onClick={() => setShowManageSources(true)}>

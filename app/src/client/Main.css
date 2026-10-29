@@ -17,8 +17,6 @@
 @import "../../node_modules/@syncfusion/ej2-richtexteditor/styles/material.css";
 @import "../../node_modules/@syncfusion/ej2-spreadsheet/styles/material.css";
 @import "../../node_modules/@syncfusion/ej2-documenteditor/styles/material.css";
-/* Syncfusion Kanban styles */
-@import "../../node_modules/@syncfusion/ej2-kanban/styles/material.css";
 
 @tailwind base;
 @tailwind components;
@@ -319,16 +317,12 @@ html[data-sms-widget='open'] { --gestia-toast-bottom: 88px; }
   animation: shimmer-badge 3s linear infinite;
 }
 
-/* ─── Prospection kanban: card selected in the detail panel ───────────────── */
-.gestia-kanban .e-card.gestia-card-selected {
-  outline: 2px solid #ff6a3d;
-  outline-offset: -2px;
-  box-shadow: 0 4px 16px -4px rgb(10 10 11 / 0.18);
+/* ─── Bande défilante sans barre (sélecteur de colonnes du kanban) ─────────── */
+.no-scrollbar {
+  scrollbar-width: none;
 }
-
-/* ─── Prospection kanban: card ticked for a bulk action ───────────────────── */
-.gestia-kanban .e-card.gestia-card-checked {
-  background-color: #fff1eb;
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
 }
 
 .feature-card {

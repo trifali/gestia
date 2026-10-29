@@ -2,7 +2,7 @@
 //
 // À ne pas confondre avec `alerts.ts`, qui prévient l'*entreprise*. Ici le
 // destinataire est le prospect, le texte est celui que l'entreprise a écrit pour
-// la tranche horaire du moment, et chaque envoi est une ligne de `LeadSmsLog`
+// la plage horaire du moment, et chaque envoi est une ligne de `LeadSmsLog`
 // dans le fil du prospect : sa réponse éventuelle s'y rattache, l'alerte de
 // réponse différée s'y applique, et la fiche montre ce qu'on lui a dit.
 //
@@ -20,10 +20,12 @@ import {
   AUTO_REPLY_MAX_LEADS_PER_CALL,
   AUTO_REPLY_MAX_LEADS_PER_HOUR,
   AUTO_REPLY_REPEAT_FLOOR_MS,
-  autoReplyWindowAt,
+  autoReplyRuleAt,
+  autoReplyRuleLabel,
   isAutoReplyActive,
   isOptOutMessage,
   normalizeAutoReply,
+  pickAutoReplyText,
   renderAutoReply,
 } from '../../shared/leadIntakeAutoReply';
 
@@ -52,7 +54,7 @@ type SkipReason =
   | 'empty_text';
 
 /**
- * Envoie à chaque prospect du lot le message de la tranche en cours.
+ * Envoie à chaque prospect du lot un des messages de la plage en cours.
  *
  * Best-effort de bout en bout : la réponse HTTP à l'émetteur est déjà partie, et
  * un Telnyx en panne ne doit ni faire rejouer l'appel ni empêcher le prospect
@@ -73,12 +75,13 @@ export async function deliverIntakeAutoReplies(
   const cfg = normalizeAutoReply(webhook.autoReply);
   if (!isAutoReplyActive(cfg)) return 0;
 
-  const windowKey = autoReplyWindowAt(cfg, now);
-  const window = cfg[windowKey];
-  if (!window.enabled || !window.text.trim()) {
-    console.log(`[intake] réponse automatique : tranche « ${windowKey} » éteinte, rien envoyé.`);
+  // Aucune plage active à cette heure : un trou volontaire, rien ne part.
+  const rule = autoReplyRuleAt(cfg, now);
+  if (!rule) {
+    console.log('[intake] réponse automatique : aucune plage active à cette heure, rien envoyé.');
     return 0;
   }
+  const ruleLabel = autoReplyRuleLabel(rule);
 
   // ── Garde-fous sur le lot ──────────────────────────────────────────────────
 
@@ -128,7 +131,9 @@ export async function deliverIntakeAutoReplies(
       continue;
     }
 
-    const text = renderAutoReply(window.text, {
+    // Tiré pour chaque prospect, pas une fois par appel : deux prospects du même
+    // lot ne reçoivent pas forcément le même texte.
+    const text = renderAutoReply(pickAutoReplyText(rule), {
       leadName: lead.name,
       companyName: company?.name,
       searchTitle: webhook.search.title,
@@ -169,7 +174,7 @@ export async function deliverIntakeAutoReplies(
     sent++;
   }
 
-  if (sent > 0) console.log(`[intake] ${sent} réponse(s) automatique(s) envoyée(s) (tranche « ${windowKey} »).`);
+  if (sent > 0) console.log(`[intake] ${sent} réponse(s) automatique(s) envoyée(s) (plage « ${ruleLabel} »).`);
   return sent;
 }
 

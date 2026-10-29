@@ -2137,6 +2137,8 @@ export const createLead = async (
     category?: string;
     status?: string;
     source?: string;
+    /** Les informations propres au tableau (budget, créneau…), comme dans `updateLead`. */
+    extras?: { key?: string; label?: string; value?: string }[];
   },
   context: any,
 ): Promise<any> => {
@@ -2166,6 +2168,7 @@ export const createLead = async (
       source: args.source?.trim()
         ? await requireKnownSource(context.entities, companyId, args.source)
         : 'manual',
+      extras: normalizeLeadExtras(args.extras ?? []),
     },
   });
   await syncTotalFound(context.entities, args.searchId);

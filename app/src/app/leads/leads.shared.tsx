@@ -3,10 +3,7 @@
  * Used by both LeadSearchPage (authenticated) and ProspectPortalPage (public token).
  */
 
-import React, { useState, useRef, useEffect, useMemo, useCallback, type ReactNode, type FormEvent } from 'react';
-import { KanbanComponent, ColumnsDirective, ColumnDirective } from '@syncfusion/ej2-react-kanban';
-import { extend } from '@syncfusion/ej2-base';
-import toast from 'react-hot-toast';
+import { useState, useRef, useEffect, type ReactNode, type FormEvent } from 'react';
 import {
   LuClock,
   LuGlobe,
@@ -19,8 +16,12 @@ import {
   LuTrash2,
   LuLoader,
   LuSend,
-  LuChevronDown,
   LuCopy,
+  LuMessageSquare,
+  LuMessageSquareReply,
+  LuFilePen,
+  LuNotebook,
+  LuUserCheck,
   LuCheck,
 } from 'react-icons/lu';
 
@@ -111,63 +112,30 @@ export function NoteThread({
   /** Disable the timeline's own scroll area when the container already scrolls. */
   scrollable?: boolean;
 }) {
-  const bottomRef = useRef<HTMLDivElement>(null);
+  const timelineRef = useRef<HTMLDivElement>(null);
   const prevCount = useRef<number | null>(null);
 
-  // Scroll to the newest note when one is added — but not on the first render,
-  // which would drag an embedding panel down past its other sections.
+  // La plus récente d'abord : c'est elle qu'on vient lire. Le serveur les rend
+  // dans l'ordre chronologique, le tri se fait donc ici.
+  const ordered = [...notes].sort(
+    (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+  );
+
+  // Une note ajoutée arrive en tête : on remonte la liste pour la montrer — mais
+  // pas au premier rendu, qui déplacerait un panneau qui l'intègre.
   useEffect(() => {
     if (prevCount.current !== null && notes.length > prevCount.current) {
-      bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      timelineRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
     }
     prevCount.current = notes.length;
   }, [notes.length]);
 
   return (
     <div className='flex flex-col gap-4'>
-      {/* Timeline */}
-      <div
-        className={`flex flex-col gap-3 pr-1 ${
-          scrollable ? 'max-h-80 overflow-y-auto overscroll-contain' : ''
-        }`}
-      >
-        {notes.length === 0 ? (
-          <p className='text-sm text-muted text-center py-6'>Aucune note pour ce prospect.</p>
-        ) : (
-          notes.map(n => (
-            <div key={n.id} className='flex gap-3 group'>
-              <div className='flex flex-col items-center'>
-                <div className='w-2 h-2 rounded-full bg-accent-500 mt-1.5 shrink-0' />
-                <div className='w-px flex-1 bg-line mt-1' />
-              </div>
-              <div className='flex-1 pb-3'>
-                <div className='flex items-start justify-between gap-2'>
-                  <p className='text-xs text-muted'>{formatMontrealTime(n.createdAt)}</p>
-                  <button
-                    className='opacity-0 group-hover:opacity-100 transition-opacity text-muted hover:text-red-500'
-                    onClick={() => onDelete(n.id)}
-                    disabled={deletingId === n.id}
-                    title='Supprimer'
-                  >
-                    {deletingId === n.id ? (
-                      <LuLoader size={12} className='animate-spin' />
-                    ) : (
-                      <LuTrash2 size={12} />
-                    )}
-                  </button>
-                </div>
-                <p className='text-sm mt-0.5 whitespace-pre-wrap'>{n.text}</p>
-              </div>
-            </div>
-          ))
-        )}
-        <div ref={bottomRef} />
-      </div>
-
-      {/* Composer */}
-      <form onSubmit={onSubmit} className='flex gap-2 border-t border-line pt-3'>
+      {/* Composer — en haut, juste au-dessus de la note qu'il va créer. */}
+      <form onSubmit={onSubmit} className='flex gap-2'>
         <textarea
-          className='input resize-none flex-1 text-sm'
+          className='input resize-none flex-1 text-[13px]'
           rows={2}
           placeholder='Ajouter une note…'
           value={text}
@@ -184,10 +152,54 @@ export function NoteThread({
           type='submit'
           className='btn-primary self-end gap-1.5'
           disabled={saving || !text.trim()}
+          aria-label='Ajouter la note'
         >
           {saving ? <LuLoader size={14} className='animate-spin' /> : <LuSend size={14} />}
         </button>
       </form>
+
+      {/* Timeline */}
+      <div
+        ref={timelineRef}
+        className={`flex flex-col pr-1 ${
+          scrollable ? 'max-h-80 overflow-y-auto overscroll-contain' : ''
+        }`}
+      >
+        {ordered.length === 0 ? (
+          <p className='text-[13px] text-muted text-center py-6'>Aucune note pour ce prospect.</p>
+        ) : (
+          ordered.map((n, i) => (
+            <div key={n.id} className='flex gap-3 group'>
+              <div className='flex flex-col items-center'>
+                <div className={`w-2 h-2 rounded-full mt-2 shrink-0 ${i === 0 ? 'bg-accent-500' : 'bg-line'}`} />
+                {i < ordered.length - 1 && <div className='w-px flex-1 bg-line mt-1' />}
+              </div>
+              <div className='min-w-0 flex-1 pb-3'>
+                <div className='rounded-xl border border-line bg-white px-3 py-2.5 shadow-soft'>
+                  <div className='flex items-start justify-between gap-2'>
+                    <p className='text-xs text-muted'>{formatMontrealTime(n.createdAt)}</p>
+                    {/* Toujours visible sur écran tactile : il n'y a pas de survol. */}
+                    <button
+                      className='-mr-1 -mt-0.5 flex h-6 w-6 items-center justify-center rounded-full text-muted transition-opacity hover:bg-red-50 hover:text-red-500 sm:opacity-0 sm:group-hover:opacity-100 focus:opacity-100'
+                      onClick={() => onDelete(n.id)}
+                      disabled={deletingId === n.id}
+                      title='Supprimer'
+                      aria-label='Supprimer la note'
+                    >
+                      {deletingId === n.id ? (
+                        <LuLoader size={12} className='animate-spin' />
+                      ) : (
+                        <LuTrash2 size={12} />
+                      )}
+                    </button>
+                  </div>
+                  <p className='mt-1 text-[13px] leading-5 text-ink whitespace-pre-wrap break-words'>{n.text}</p>
+                </div>
+              </div>
+            </div>
+          ))
+        )}
+      </div>
     </div>
   );
 }
@@ -362,11 +374,6 @@ export function LeadEditForm({
   );
 }
 
-// ─── Lead card info ───────────────────────────────────────────────────────────
-// The non-interactive part of a lead card: name, timestamp, contact links,
-// rating and Maps link. Used in both the Kanban card template and mobile
-// accordion rows. Pass `actions` for the button row.
-
 // ─── Informations de carte ────────────────────────────────────────────────────
 // Ce qu'un webhook a câblé en plus des sept champs du prospect : un budget, un
 // créneau de rappel, un numéro de dossier. Voir `shared/leadIntake` (`ExtraField`)
@@ -416,22 +423,136 @@ export function leadExtras(lead: unknown): LeadExtra[] {
 export type { LeadExtra };
 export { MAX_EXTRA_FIELDS, MAX_EXTRA_LABEL_CHARS, MAX_EXTRA_VALUE_CHARS };
 
+/** Les initiales d'un nom, pour l'avatar d'une carte : « Cybèle Goupil » → « CG ». */
+function initialsOf(name: string): string {
+  const words = name
+    .replace(/[^\p{L}\p{N}\s]/gu, ' ')
+    .split(/\s+/)
+    .filter(Boolean);
+  if (words.length === 0) return '?';
+  const first = words[0][0];
+  const second = words.length > 1 ? words[words.length - 1][0] : words[0][1] ?? '';
+  return (first + second).toUpperCase();
+}
+
+export function LeadAvatar({ name, size = 32 }: { name: string; size?: number }) {
+  return (
+    <span
+      aria-hidden
+      className='flex shrink-0 items-center justify-center rounded-full bg-canvas-200 font-semibold text-ink-700'
+      style={{ width: size, height: size, fontSize: Math.round(size * 0.36) }}
+    >
+      {initialsOf(name)}
+    </span>
+  );
+}
+
+const CHIP_TONES = {
+  neutral: 'bg-canvas-200 text-ink-700',
+  success: 'bg-emerald-50 text-emerald-700',
+  warning: 'bg-amber-50 text-amber-700',
+  accent: 'bg-accent-50 text-accent-700',
+  solid: 'bg-accent-500 text-white',
+} as const;
+
 /**
- * La partie non interactive d'une carte de prospect.
+ * Une étiquette de carte — « Courriel envoyé », « 2 notes ». Rectangle arrondi
+ * plutôt que pilule : la forme des étiquettes du Leads Center de Facebook, et ce
+ * qui les distingue des pastilles de filtre ailleurs dans l'application.
+ */
+export function LeadChip({
+  tone = 'neutral',
+  icon,
+  title,
+  children,
+}: {
+  tone?: keyof typeof CHIP_TONES;
+  icon?: ReactNode;
+  title?: string;
+  children: ReactNode;
+}) {
+  return (
+    <span
+      className={`inline-flex max-w-full items-center gap-1 whitespace-nowrap rounded-md px-1.5 py-px text-[11px] font-medium leading-[18px] ${CHIP_TONES[tone]}`}
+      title={title}
+    >
+      {icon}
+      <span className='truncate'>{children}</span>
+    </span>
+  );
+}
+
+/**
+ * Les étiquettes d'état d'un prospect — courriel envoyé, brouillon, réponse SMS,
+ * notes, déjà client. Une seule définition pour la carte et pour la fiche : les
+ * deux doivent dire la même chose du même prospect.
+ */
+export function leadStateChips(
+  lead: any,
+  { smsCanSend = true, isClient = false, notes = true }: { smsCanSend?: boolean; isClient?: boolean; notes?: boolean } = {},
+): ReactNode[] {
+  const chips: ReactNode[] = [];
+  if (smsCanSend && lead.smsUnreadCount > 0) {
+    chips.push(
+      <LeadChip key='sms-unread' tone='solid' icon={<LuMessageSquareReply size={11} />} title='Réponse SMS reçue, pas encore lue'>
+        {lead.smsUnreadCount} SMS non lu{lead.smsUnreadCount > 1 ? 's' : ''}
+      </LeadChip>,
+    );
+  } else if (lead.hasSmsReply) {
+    chips.push(
+      <LeadChip key='sms-reply' tone='accent' icon={<LuMessageSquareReply size={11} />} title='Ce prospect a répondu à un SMS (réponse déjà lue)'>
+        A répondu par SMS
+      </LeadChip>,
+    );
+  } else if (lead.hasSmsSent) {
+    chips.push(
+      <LeadChip key='sms-sent' tone='success' icon={<LuMessageSquare size={11} />} title='Un SMS a été envoyé, pas encore de réponse'>
+        SMS envoyé
+      </LeadChip>,
+    );
+  }
+  if (lead.hasEmailSent) {
+    chips.push(
+      <LeadChip key='email-sent' tone='success' icon={<LuSend size={11} />} title='Un courriel a été envoyé à ce prospect'>
+        Courriel envoyé
+      </LeadChip>,
+    );
+  } else if (lead.hasEmailDraft) {
+    chips.push(
+      <LeadChip key='email-draft' tone='warning' icon={<LuFilePen size={11} />} title="Un courriel est en brouillon, pas encore envoyé">
+        Brouillon de courriel
+      </LeadChip>,
+    );
+  }
+  if (notes && (lead.noteCount > 0 || lead.notes)) {
+    chips.push(
+      <LeadChip key='notes' icon={<LuNotebook size={11} />}>
+        {lead.noteCount > 0 ? `${lead.noteCount} note${lead.noteCount > 1 ? 's' : ''}` : 'Note'}
+      </LeadChip>,
+    );
+  }
+  if (isClient && lead.status === 'qualifie') {
+    chips.push(<LeadChip key='client' tone='success' icon={<LuUserCheck size={11} />}>Client</LeadChip>);
+  }
+  return chips;
+}
+
+/**
+ * Le contenu d'une carte de prospect : avatar, nom, étiquettes, puis les champs.
  *
- * Ne décide plus de ce qu'elle montre : elle applique `cardFields`, le jeu résolu
+ * Ne décide pas de ce qu'elle montre : elle applique `cardFields`, le jeu résolu
  * pour ce tableau (voir `shared/leadCardFields`). C'est ce qui permet à un tableau
  * de formulaire d'afficher un budget là où un tableau Google Maps affiche une note
  * et un lien Maps, sans deux composants ni un `if` par provenance.
  *
- * L'ordre de la configuration est respecté tel quel, y compris pour la pastille de
- * provenance et la note Google, qui ont chacune leur forme mais pas de place
- * réservée : ce que l'écran de réglage montre de haut en bas est ce que la carte
- * montre de haut en bas.
+ * La provenance n'est pas une ligne mais une étiquette, rangée avec les autres
+ * sous le nom ; son interrupteur dans le réglage « Cartes » décide toujours si
+ * elle s'affiche. Les autres champs suivent l'ordre de la configuration.
  */
 export function LeadCardInfo({
   lead,
-  actions,
+  menu,
+  badges,
   selection,
   sources,
   cardFields,
@@ -452,22 +573,17 @@ export function LeadCardInfo({
     /** Informations libres. Lues via `leadExtras`. */
     extras?: unknown;
   };
-  /** Optional button row rendered below contact info. */
-  actions?: ReactNode;
-  /** Optional selection checkbox rendered next to the name. */
+  /** Le bouton ⋮ de la carte, aligné sur le nom. */
+  menu?: ReactNode;
+  /** Étiquettes d'état (`LeadChip`) rangées après la provenance. */
+  badges?: ReactNode;
+  /** Case de sélection, en tête de carte. */
   selection?: ReactNode;
-  /**
-   * Le registre des provenances, passé en prop et jamais lu par `useQuery` ici :
-   * ce composant est rendu dans le `cardTemplate` de Syncfusion, hors de l'arbre
-   * React normal, où les hooks de Wasp n'ont pas de contexte. Absent, on retombe
-   * sur les étiquettes d'origine puis sur la clé dé-sluggifiée.
-   */
+  /** Le registre des provenances. Absent, on retombe sur les étiquettes d'origine. */
   sources?: readonly LeadSourceOption[] | null;
   /**
-   * Les champs à afficher, dans l'ordre. Même raison que `sources` de passer par
-   * une prop. Absent — l'aperçu d'une correspondance, un appelant pas encore
-   * migré — on retombe sur le jeu par défaut, qui est exactement ce que la carte
-   * montrait avant que ce réglage n'existe.
+   * Les champs à afficher, dans l'ordre. Absent — l'aperçu d'une correspondance,
+   * un appelant pas encore migré — on retombe sur le jeu par défaut.
    */
   cardFields?: readonly CardFieldConfig[] | null;
 }) {
@@ -489,34 +605,20 @@ export function LeadCardInfo({
       ? cardFields
       : DEFAULT_CARD_FIELDS.map((f, order) => ({ ...f, order })),
   );
+  const showSource = shown.some(f => f.key === 'source');
 
   /** Le rendu d'un champ, ou `null` quand ce prospect n'a rien à y mettre. */
   function renderField(key: string): ReactNode {
-    if (key === 'name') return null; // rendu dans l'en-tête, avec la sélection.
-
-    if (key === 'source') {
-      return (
-        <span
-          key={key}
-          className='flex w-fit items-center gap-1 text-[9px] leading-none px-1 py-[1px] rounded bg-canvas border border-line text-muted whitespace-nowrap'
-          title={`Provenance : ${leadSourceLabel(lead.source, sources)}`}
-        >
-          <span
-            className='w-1.5 h-1.5 rounded-full shrink-0'
-            style={{ backgroundColor: leadSourceColor(lead.source, sources) }}
-          />
-          {leadSourceLabel(lead.source, sources)}
-        </span>
-      );
-    }
+    // Le nom est dans l'en-tête, la provenance parmi les étiquettes.
+    if (key === 'name' || key === 'source') return null;
 
     if (key === 'rating') {
       if (lead.rating == null && !lead.mapsUrl) return null;
       return (
-        <div key={key} className='flex items-center gap-1.5'>
+        <div key={key} className='flex items-center gap-2'>
           {lead.rating != null && (
-            <span className='flex items-center gap-0.5 text-xs'>
-              <LuStar size={10} className='text-amber-400 fill-amber-400' />
+            <span className='flex items-center gap-1'>
+              <LuStar size={13} className='text-amber-400 fill-amber-400' />
               <span className='font-medium'>{Number(lead.rating).toFixed(1)}</span>
             </span>
           )}
@@ -525,10 +627,11 @@ export function LeadCardInfo({
               href={lead.mapsUrl}
               target='_blank'
               rel='noopener noreferrer'
-              className='text-xs text-accent-700 hover:underline flex items-center gap-0.5'
+              draggable={false}
+              className='flex items-center gap-1 text-accent-700 hover:underline'
               onClick={e => e.stopPropagation()}
             >
-              <LuExternalLink size={10} />
+              <LuExternalLink size={12} />
               Maps
             </a>
           )}
@@ -538,12 +641,13 @@ export function LeadCardInfo({
 
     if (key === 'website' && lead.website) {
       return (
-        <div key={key} className='flex items-center gap-1.5 text-xs'>
-          <LuGlobe size={10} className='text-muted shrink-0' />
+        <div key={key} className='flex items-center gap-2'>
+          <LuGlobe size={13} className='text-muted shrink-0' />
           <a
             href={lead.website}
             target='_blank'
             rel='noopener noreferrer'
+            draggable={false}
             className='text-accent-700 hover:underline truncate'
             onClick={e => e.stopPropagation()}
           >
@@ -555,10 +659,11 @@ export function LeadCardInfo({
 
     if (key === 'phone' && lead.phone) {
       return (
-        <div key={key} className='flex items-center gap-1.5 text-xs'>
-          <LuPhone size={10} className='text-muted shrink-0' />
+        <div key={key} className='flex items-center gap-2'>
+          <LuPhone size={13} className='text-muted shrink-0' />
           <a
             href={`tel:${lead.phone}`}
+            draggable={false}
             className='text-accent-700 hover:underline truncate'
             onClick={e => e.stopPropagation()}
           >
@@ -570,10 +675,11 @@ export function LeadCardInfo({
 
     if (key === 'email' && lead.email) {
       return (
-        <div key={key} className='flex items-center gap-1.5 text-xs'>
-          <LuMail size={10} className='text-muted shrink-0' />
+        <div key={key} className='flex items-center gap-2'>
+          <LuMail size={13} className='text-muted shrink-0' />
           <a
             href={`mailto:${lead.email}`}
+            draggable={false}
             className='text-accent-700 hover:underline truncate'
             onClick={e => e.stopPropagation()}
           >
@@ -585,8 +691,8 @@ export function LeadCardInfo({
 
     if (key === 'address' && lead.address) {
       return (
-        <div key={key} className='flex items-start gap-1.5 text-xs'>
-          <LuMapPin size={10} className='text-muted shrink-0 mt-0.5' />
+        <div key={key} className='flex items-start gap-2'>
+          <LuMapPin size={13} className='text-muted shrink-0 mt-[3px]' />
           <span className='text-ink break-words'>{lead.address}</span>
         </div>
       );
@@ -594,8 +700,8 @@ export function LeadCardInfo({
 
     if (key === 'category' && lead.category) {
       return (
-        <div key={key} className='flex items-start gap-1.5 text-xs'>
-          <LuTag size={10} className='text-muted shrink-0 mt-0.5' />
+        <div key={key} className='flex items-start gap-2'>
+          <LuTag size={13} className='text-muted shrink-0 mt-[3px]' />
           <span className='text-ink break-words'>{lead.category}</span>
         </div>
       );
@@ -609,12 +715,12 @@ export function LeadCardInfo({
       // ligne se fait tronquer au milieu de la valeur, qui est la moitié utile.
       return (
         <div key={key} className='min-w-0'>
-          <div className='text-[9px] font-semibold uppercase tracking-wide text-muted leading-tight'>
+          <div className='text-[11px] font-semibold uppercase tracking-wide text-muted leading-tight'>
             {extra.label}
           </div>
           <LeadValueText
             value={extra.value}
-            className='block text-xs text-ink leading-snug break-words whitespace-pre-wrap'
+            className='block text-ink leading-snug break-words whitespace-pre-wrap'
           />
         </div>
       );
@@ -624,106 +730,62 @@ export function LeadCardInfo({
   }
 
   const body = shown.map(field => renderField(field.key)).filter(Boolean);
+  const sourceChip = showSource ? (
+    <LeadChip
+      title={`Provenance : ${leadSourceLabel(lead.source, sources)}`}
+      icon={
+        <span
+          className='w-2 h-2 rounded-full shrink-0'
+          style={{ backgroundColor: leadSourceColor(lead.source, sources) }}
+        />
+      }
+    >
+      {leadSourceLabel(lead.source, sources)}
+    </LeadChip>
+  ) : null;
 
   return (
-    <div className='p-3 space-y-2'>
+    <div className='p-2.5'>
       <div className='flex items-start gap-2'>
         {selection}
-        {unopened && (
-          <span
-            className='w-2 h-2 rounded-full bg-accent-500 shrink-0 mt-[5px]'
-            title='Jamais ouvert'
-            aria-label='Jamais ouvert'
-          />
-        )}
-        <div
-          className={`text-sm leading-tight flex-1 min-w-0 ${
-            unopened ? 'font-bold text-ink' : 'font-semibold'
-          }`}
-        >
-          {lead.name}
+        <LeadAvatar name={lead.name} />
+        <div className='min-w-0 flex-1'>
+          <div className='flex items-start gap-1'>
+            <div
+              className={`min-w-0 flex-1 pt-px text-sm leading-snug text-ink break-words ${
+                unopened ? 'font-bold' : 'font-semibold'
+              }`}
+            >
+              {unopened && (
+                <span
+                  className='mr-1.5 inline-block h-2 w-2 rounded-full bg-accent-500 align-middle'
+                  title='Jamais ouvert'
+                  aria-label='Jamais ouvert'
+                />
+              )}
+              {lead.name}
+            </div>
+            {menu}
+          </div>
+          {(sourceChip || badges) && (
+            <div className='mt-1 flex flex-wrap gap-1'>
+              {sourceChip}
+              {badges}
+            </div>
+          )}
         </div>
       </div>
 
+      {body.length > 0 && <div className='mt-2 space-y-0.5 text-xs leading-5'>{body}</div>}
+
       {/* La date de déplacement n'est pas un champ du prospect mais une trace du
-          tableau : elle ne se règle donc pas et garde sa place sous le nom. */}
+          tableau : elle ne se règle donc pas et garde sa place en pied de carte. */}
       {movedLabel && (
-        <div
-          className='flex items-center gap-1 text-[10px] text-muted'
-          title={`Déplacé le ${movedLabel}`}
-        >
-          <LuClock size={9} className='shrink-0' />
+        <div className='mt-1.5 flex items-center gap-1 text-[11px] text-muted' title={`Déplacé le ${movedLabel}`}>
+          <LuClock size={11} className='shrink-0' />
           <span>{movedLabel}</span>
         </div>
       )}
-
-      {body.length > 0 && <div className='space-y-1'>{body}</div>}
-
-      {actions && <div className='pt-1.5 border-t border-line'>{actions}</div>}
-    </div>
-  );
-}
-
-// ─── Clickable card shell ─────────────────────────────────────────────────────
-// Wraps a card so a plain click opens the detail panel while a drag does not.
-// Inner buttons/links stop propagation, so they keep their own behaviour.
-
-function CardClickShell({
-  onClick,
-  children,
-}: {
-  onClick?: () => void;
-  children: ReactNode;
-}) {
-  const start = useRef<{ x: number; y: number } | null>(null);
-
-  if (!onClick) return <>{children}</>;
-
-  return (
-    <div
-      className='cursor-pointer'
-      onPointerDown={e => {
-        start.current = { x: e.clientX, y: e.clientY };
-      }}
-      onClick={e => {
-        const s = start.current;
-        // Ignore the click that ends a drag.
-        if (s && Math.hypot(e.clientX - s.x, e.clientY - s.y) > 6) return;
-        onClick();
-      }}
-    >
-      {children}
-    </div>
-  );
-}
-
-// ─── Kanban column header ─────────────────────────────────────────────────────
-// Color dot + label + count badge. Pass `extra` for additional controls
-// (e.g. the "fetch more" button in the authenticated view).
-
-export function KanbanColumnHeader({
-  label,
-  color,
-  count,
-  extra,
-  selection,
-}: {
-  label: string;
-  color: string;
-  count: number;
-  extra?: ReactNode;
-  /** Optional checkbox selecting every card of the column. */
-  selection?: ReactNode;
-}) {
-  return (
-    <div className='flex items-center gap-2 px-1 py-0.5'>
-      {selection}
-      <div className='w-3 h-3 rounded-full shrink-0' style={{ backgroundColor: color }} />
-      <span className='font-semibold text-sm'>{label}</span>
-      <span className='text-xs text-muted ml-auto bg-canvas px-1.5 py-0.5 rounded-full'>
-        {count}
-      </span>
-      {extra}
     </div>
   );
 }
@@ -759,526 +821,6 @@ export function LeadDeleteConfirmModal({
           {deleting ? <LuLoader size={14} className='animate-spin' /> : <LuTrash2 size={14} />}
           {deleting ? 'Suppression…' : 'Supprimer'}
         </button>
-      </div>
-    </div>
-  );
-}
-
-// ─── Kanban board (mobile accordion + desktop Syncfusion Kanban) ──────────────
-// Shared layout for both the authenticated view and the public portal.
-// The parent provides pre-filtered leads, action buttons, and status update ops.
-
-// While a drag is in flight Syncfusion keeps the dragged card in its original
-// slot (marked `e-kanban-dragged-card`), leaves a floating ghost copy at the end
-// of the source column (`e-cloned-card`) and marks the slot the card would land
-// in with a placeholder (`e-target-dropped-clone`). `dragStop` fires while the
-// board is still in that state, so walking the target column then gives the
-// exact order the user is about to see.
-const DROP_SLOT_CLASS = 'e-target-dropped-clone';
-
-function isDroppableCard(el: Element): boolean {
-  return (
-    el.classList.contains('e-card') &&
-    !el.classList.contains('e-cloned-card') &&
-    !el.classList.contains('e-kanban-dragged-card')
-  );
-}
-
-/** Viewport Y of the pointer behind a Kanban drag event, mouse or touch. */
-function dragClientY(args: any): number | null {
-  const e = args?.event;
-  const src = e?.event?.changedTouches?.[0] ?? e?.changedTouches?.[0] ?? e?.event ?? e;
-  return typeof src?.clientY === 'number' ? src.clientY : null;
-}
-
-/**
- * Syncfusion always drops the placeholder *after* the card under the pointer and
- * only tests the pointer against a card's midpoint for the first card of a
- * column (`insertClone` is hard-set to `'afterend'` in its `drag` handler), so
- * hovering the top half of any other card still lands the card below it. This
- * re-places the placeholder against every card's midpoint. It runs on the `drag`
- * event, which fires right after Syncfusion positioned the placeholder and
- * before the browser paints, so the correction is invisible.
- */
-function realignDropSlot(root: HTMLElement | null, clientY: number | null): void {
-  if (clientY === null) return;
-  const slot = root?.querySelector(`.${DROP_SLOT_CLASS}`);
-  const wrapper = slot?.parentElement;
-  if (!slot || !wrapper) return;
-
-  const cards: Element[] = [];
-  let slotIndex = 0;
-  for (const el of Array.from(wrapper.children)) {
-    if (el === slot) slotIndex = cards.length;
-    else if (isDroppableCard(el)) cards.push(el);
-  }
-
-  // The placeholder takes up room, so the cards it pushed aside already sit
-  // where they would land once the card is released. Measuring against those
-  // shifted midpoints gives a card-height of hysteresis, which keeps the slot
-  // from flipping back and forth around a boundary.
-  let index = 0;
-  while (index < cards.length) {
-    const rect = cards[index].getBoundingClientRect();
-    if (rect.top + rect.height / 2 >= clientY) break;
-    index++;
-  }
-  if (index === slotIndex) return;
-
-  if (index < cards.length) wrapper.insertBefore(slot, cards[index]);
-  else cards[cards.length - 1].insertAdjacentElement('afterend', slot);
-}
-
-/**
- * The target column's card ids in their post-drop order, or null when the drop
- * placeholder is gone — Syncfusion removes it when the card is released outside
- * a valid slot (typically right back onto its own position) and then applies no
- * change of its own, so nothing must be persisted either.
- */
-function readDroppedColumnOrder(
-  root: HTMLElement | null,
-  status: string,
-  movedIds: string[],
-): string[] | null {
-  const cell = root?.querySelector(
-    `.e-content-row:not(.e-swimlane-row) .e-content-cells[data-key="${CSS.escape(status)}"]`,
-  );
-  const wrapper = cell?.querySelector('.e-card-wrapper');
-  if (!wrapper?.querySelector(`.${DROP_SLOT_CLASS}`)) return null;
-
-  const moved = new Set(movedIds);
-  const ids: string[] = [];
-  for (const el of Array.from(wrapper.children)) {
-    if (el.classList.contains(DROP_SLOT_CLASS)) {
-      ids.push(...movedIds);
-      continue;
-    }
-    // The dragged cards keep their old slot in the DOM; the placeholder above is
-    // where they actually end up.
-    if (!isDroppableCard(el)) continue;
-    const id = el.getAttribute('data-id');
-    if (id && !moved.has(id)) ids.push(id);
-  }
-  return ids;
-}
-
-export function LeadKanbanBoard({
-  leads,
-  statusConfigs,
-  updateStatus,
-  reorder,
-  refetch,
-  cardActions,
-  columnExtra,
-  mobileColumnExtra,
-  searchBarSlot,
-  onCardClick,
-  selectedLeadId,
-  selectedIds,
-  onToggleSelect,
-  onSelectMany,
-  sources,
-  cardFields,
-  cssClass = 'gestia-kanban',
-}: {
-  /** Already-filtered leads to display. */
-  leads: any[];
-  statusConfigs: any[];
-  /** Le registre des provenances, pour l'étiquette et la pastille des cartes. */
-  sources?: readonly LeadSourceOption[] | null;
-  /** Les champs à afficher sur les cartes, résolus pour ce tableau. */
-  cardFields?: readonly CardFieldConfig[] | null;
-  /** API call only — no toast, no refetch. Throws on error. */
-  updateStatus: (leadId: string, newStatus: string) => Promise<void>;
-  /**
-   * Persists the manual card order of one column, `orderedIds` being the column
-   * exactly as displayed. API call only — no toast, no refetch. Throws on error.
-   */
-  reorder?: (status: string, orderedIds: string[]) => Promise<void>;
-  refetch: () => void;
-  /** Action buttons rendered inside each card's actions area. */
-  cardActions: (lead: any) => ReactNode;
-  /** Opens the detail panel. Not fired when the pointer moved (i.e. a drag). */
-  onCardClick?: (lead: any) => void;
-  /** Highlights the card currently shown in the detail panel. */
-  selectedLeadId?: string | null;
-  /** Ids ticked for a bulk action. Cards only get a checkbox when `onToggleSelect` is passed. */
-  selectedIds?: Set<string>;
-  onToggleSelect?: (leadId: string) => void;
-  /** Ticks/unticks a whole column at once. Adds a checkbox to the column header. */
-  onSelectMany?: (leadIds: string[], selected: boolean) => void;
-  /** Extra element for desktop column headers (e.g. "fetch more" button). */
-  columnExtra?: (keyField: string) => ReactNode;
-  /** Extra element for mobile accordion column headers. */
-  mobileColumnExtra?: (col: any) => ReactNode;
-  /** Rendered above the board (search input, filter chips, etc.). */
-  searchBarSlot?: ReactNode;
-  cssClass?: string;
-}) {
-  const [openSections, setOpenSections] = useState<Set<string>>(() => new Set());
-
-  // Stable refs so callbacks stay referentially stable across re-renders.
-  const updateStatusRef = useRef(updateStatus);
-  updateStatusRef.current = updateStatus;
-  const reorderRef = useRef(reorder);
-  reorderRef.current = reorder;
-  const leadsRef = useRef(leads);
-  leadsRef.current = leads;
-  const refetchRef = useRef(refetch);
-  refetchRef.current = refetch;
-  const cardActionsRef = useRef(cardActions);
-  cardActionsRef.current = cardActions;
-  const columnExtraRef = useRef(columnExtra);
-  columnExtraRef.current = columnExtra;
-  const onCardClickRef = useRef(onCardClick);
-  onCardClickRef.current = onCardClick;
-  const selectedIdsRef = useRef(selectedIds);
-  selectedIdsRef.current = selectedIds;
-  const onToggleSelectRef = useRef(onToggleSelect);
-  onToggleSelectRef.current = onToggleSelect;
-  const onSelectManyRef = useRef(onSelectMany);
-  onSelectManyRef.current = onSelectMany;
-  const sourcesRef = useRef(sources);
-  sourcesRef.current = sources;
-  // Même raison que `sourcesRef` : le gabarit de carte de Syncfusion est rendu
-  // hors de l'arbre React normal, et lire la prop directement y donnerait la
-  // valeur figée du premier rendu.
-  const cardFieldsRef = useRef(cardFields);
-  cardFieldsRef.current = cardFields;
-  const boardRef = useRef<HTMLDivElement>(null);
-  const rootRef = useRef<HTMLDivElement>(null);
-
-  // Same constraint as the selected-card outline below: Syncfusion re-renders
-  // cards on its own schedule, so the checkbox is uncontrolled (its initial
-  // state read from the ref at mount) and the current selection is pushed back
-  // onto the DOM by the effect underneath.
-  const renderSelection = useCallback((lead: any): ReactNode => {
-    if (!onToggleSelectRef.current) return null;
-    return (
-      <input
-        type='checkbox'
-        data-lead-select={lead.id}
-        className='w-3.5 h-3.5 mt-0.5 rounded accent-accent-600 shrink-0 cursor-pointer'
-        title='Sélectionner'
-        defaultChecked={!!selectedIdsRef.current?.has(lead.id)}
-        onClick={e => e.stopPropagation()}
-        onChange={() => onToggleSelectRef.current?.(lead.id)}
-      />
-    );
-  }, []);
-
-  // Ids of the cards a column header checkbox stands for.
-  const columnIdsOf = useCallback(
-    (status: string) => leadsRef.current.filter((l: any) => l.status === status).map((l: any) => l.id),
-    [],
-  );
-
-  const renderColumnSelection = useCallback((status: string): ReactNode => {
-    if (!onSelectManyRef.current) return null;
-    return (
-      <input
-        type='checkbox'
-        data-column-select={status}
-        className='w-3.5 h-3.5 rounded accent-accent-600 shrink-0 cursor-pointer'
-        title='Sélectionner tous les prospects de cette colonne'
-        onClick={e => e.stopPropagation()}
-        onKeyDown={e => e.stopPropagation()}
-        onChange={e => onSelectManyRef.current?.(columnIdsOf(status), e.target.checked)}
-      />
-    );
-  }, [columnIdsOf]);
-
-  useEffect(() => {
-    if (!onToggleSelect && !onSelectMany) return;
-    const raf = requestAnimationFrame(() => {
-      const root = rootRef.current;
-      if (!root) return;
-      root.querySelectorAll<HTMLInputElement>('input[data-lead-select]').forEach(el => {
-        const id = el.dataset.leadSelect;
-        const checked = !!(id && selectedIds?.has(id));
-        el.checked = checked;
-        el.closest('.e-card')?.classList.toggle('gestia-card-checked', checked);
-      });
-      root.querySelectorAll<HTMLInputElement>('input[data-column-select]').forEach(el => {
-        const status = el.dataset.columnSelect;
-        const ids = status ? leads.filter((l: any) => l.status === status).map((l: any) => l.id) : [];
-        const picked = ids.filter(id => selectedIds?.has(id)).length;
-        el.checked = ids.length > 0 && picked === ids.length;
-        el.indeterminate = picked > 0 && picked < ids.length;
-        el.disabled = ids.length === 0;
-      });
-    });
-    return () => cancelAnimationFrame(raf);
-    // `openSections` is a dependency because the mobile accordion mounts its
-    // checkboxes on expand, after the selection they need to reflect is set.
-  }, [selectedIds, leads, openSections, onToggleSelect, onSelectMany]);
-
-  // Syncfusion owns the card DOM, so the selected-card outline is toggled by
-  // class on the rendered `.e-card` rather than through the React template.
-  useEffect(() => {
-    const raf = requestAnimationFrame(() => {
-      const root = boardRef.current;
-      if (!root) return;
-      root
-        .querySelectorAll('.e-card.gestia-card-selected')
-        .forEach(el => el.classList.remove('gestia-card-selected'));
-      if (selectedLeadId) {
-        root
-          .querySelector(`.e-card[data-id="${CSS.escape(selectedLeadId)}"]`)
-          ?.classList.add('gestia-card-selected');
-      }
-    });
-    return () => cancelAnimationFrame(raf);
-  }, [selectedLeadId, leads]);
-
-  // Kanban columns share the container width evenly, so insetting the board for
-  // the detail panel would squeeze them. Instead the board is pinned to the
-  // width it had before the panel opened and the viewport scrolls horizontally.
-  const panelOpen = !!selectedLeadId;
-  const panelOpenRef = useRef(panelOpen);
-  panelOpenRef.current = panelOpen;
-  const trackRef = useRef<HTMLDivElement>(null);
-  const naturalWidth = useRef<number | null>(null);
-  const [pinnedWidth, setPinnedWidth] = useState<number | null>(null);
-
-  useEffect(() => {
-    const el = trackRef.current;
-    if (!el || typeof ResizeObserver === 'undefined') return;
-    const observer = new ResizeObserver(() => {
-      if (!panelOpenRef.current) naturalWidth.current = el.clientWidth;
-    });
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, []);
-
-  useEffect(() => {
-    setPinnedWidth(panelOpen ? naturalWidth.current : null);
-  }, [panelOpen]);
-
-  function toggleSection(key: string) {
-    setOpenSections(prev => {
-      const next = new Set(prev);
-      if (next.has(key)) next.delete(key);
-      else next.add(key);
-      return next;
-    });
-  }
-
-  const kanbanData = useMemo(
-    () => extend([], leads.map(l => ({ ...l })), undefined, true) as any[],
-    [leads],
-  );
-
-  // Drops are persisted one after another: each one reads the column back from
-  // the server, so overlapping round-trips would race on a stale order.
-  const persistQueue = useRef<Promise<void>>(Promise.resolve());
-
-  function handleDrag(args: any) {
-    realignDropSlot(boardRef.current, dragClientY(args));
-  }
-
-  // Stays synchronous — the board DOM is read before Syncfusion applies the drop
-  // and tears the placeholders down, which it does as soon as this returns.
-  function handleDragStop(args: any) {
-    if (!args?.data?.length) return;
-
-    // One card per drag, always. Syncfusion drags every `e-selection` card of
-    // the row at once, so should one ever slip through, only the card that was
-    // actually dropped is persisted and the refetch snaps the others back.
-    const dragged = args.data.slice(0, 1);
-    const targetStatus = dragged[0].status;
-    const movedIds = dragged.map((c: any) => c.id);
-    const columnIds = readDroppedColumnOrder(boardRef.current, targetStatus, movedIds);
-    if (!columnIds) return;
-
-    const statusChanges = dragged.filter(
-      (c: any) => leadsRef.current.find((l: any) => l.id === c.id)?.status !== c.status,
-    );
-
-    // Dropping a card back where it came from changes nothing — writing anyway
-    // would make the board flicker through a refetch for no reason.
-    const currentIds = leadsRef.current
-      .filter((l: any) => l.status === targetStatus)
-      .map((l: any) => l.id);
-    const sameOrder =
-      currentIds.length === columnIds.length && currentIds.every((id, i) => id === columnIds[i]);
-    if (statusChanges.length === 0 && sameOrder) return;
-
-    persistQueue.current = persistQueue.current.then(async () => {
-      for (const card of statusChanges) {
-        try {
-          await updateStatusRef.current(card.id, card.status);
-        } catch {
-          toast.error('Erreur lors de la mise à jour du statut');
-          refetchRef.current();
-          return;
-        }
-      }
-
-      // Without this the card would snap back to its stored position on the next
-      // refetch instead of staying where it was dropped.
-      if (reorderRef.current) {
-        try {
-          await reorderRef.current(targetStatus, columnIds);
-        } catch {
-          toast.error("Erreur lors de la mise à jour de l'ordre");
-        }
-      }
-
-      refetchRef.current();
-    })
-    // An unexpected throw must not leave the queue rejected for later drops.
-    .catch(() => {});
-  }
-
-  // `sources` est une vraie dépendance et non une lecture par ref : le registre
-  // arrive d'une requête, donc après le premier rendu des cartes. Passer par une
-  // ref laisserait les pastilles sur leur étiquette de repli jusqu'au prochain
-  // rafraîchissement du tableau.
-  const cardTemplate = useCallback(
-    (lead: any): React.ReactElement => (
-      <CardClickShell onClick={onCardClickRef.current ? () => onCardClickRef.current!(lead) : undefined}>
-        <LeadCardInfo
-          lead={lead}
-          actions={cardActionsRef.current(lead)}
-          selection={renderSelection(lead)}
-          sources={sourcesRef.current}
-          cardFields={cardFieldsRef.current}
-        />
-      </CardClickShell>
-    ),
-    // `cardFields` doit être une vraie dépendance : sans elle, le gabarit garde
-    // celui qu'il avait au premier rendu, et étoiler un champ ne changerait rien
-    // aux cartes tant qu'on n'a pas rechargé la page.
-    [renderSelection, sources, cardFields],
-  );
-
-  const columnHeaderTemplate = useCallback(
-    (props: any): React.ReactElement => {
-      const config = statusConfigs.find((s: any) => s.key === props.keyField);
-      return (
-        <KanbanColumnHeader
-          label={props.headerText}
-          color={config?.color ?? '#6366f1'}
-          count={props.count ?? 0}
-          extra={columnExtraRef.current?.(props.keyField)}
-          selection={renderColumnSelection(props.keyField)}
-        />
-      );
-    },
-    [statusConfigs, renderColumnSelection],
-  );
-
-  if (statusConfigs.length === 0) {
-    return <div className='text-muted text-sm py-8 text-center'>Chargement des statuts…</div>;
-  }
-
-  return (
-    <div ref={rootRef}>
-      {searchBarSlot}
-
-      {/* Mobile accordion */}
-      <div className='sm:hidden space-y-2'>
-        {statusConfigs.map((col: any) => {
-          const colLeads = leads.filter((l: any) => l.status === col.key);
-          const isOpen = openSections.has(col.key);
-          return (
-            <div key={col.key} className='rounded-xl border border-line overflow-hidden'>
-              <div
-                className='w-full flex items-center gap-2 px-3 py-2.5 cursor-pointer select-none'
-                onClick={() => toggleSection(col.key)}
-                role='button'
-                tabIndex={0}
-                onKeyDown={e => (e.key === 'Enter' || e.key === ' ') && toggleSection(col.key)}
-              >
-                {renderColumnSelection(col.key)}
-                <div
-                  className='w-3 h-3 rounded-full shrink-0'
-                  style={{ backgroundColor: col.color ?? '#6366f1' }}
-                />
-                <span className='font-semibold text-sm flex-1 text-left'>{col.label}</span>
-                <span className='text-xs text-muted bg-canvas px-1.5 py-0.5 rounded-full'>
-                  {colLeads.length}
-                </span>
-                {mobileColumnExtra?.(col)}
-                <LuChevronDown
-                  size={14}
-                  className={`text-muted transition-transform shrink-0 ${isOpen ? 'rotate-180' : ''}`}
-                />
-              </div>
-              {isOpen && (
-                <div className='divide-y divide-line border-t border-line'>
-                  {colLeads.length === 0 ? (
-                    <div className='text-xs text-muted text-center py-4 italic'>
-                      Aucun prospect
-                    </div>
-                  ) : (
-                    colLeads.map((lead: any) => (
-                      <div
-                        key={lead.id}
-                        className={
-                          selectedLeadId === lead.id || selectedIds?.has(lead.id)
-                            ? 'bg-accent-50'
-                            : undefined
-                        }
-                      >
-                        <CardClickShell
-                          onClick={onCardClick ? () => onCardClick(lead) : undefined}
-                        >
-                          <LeadCardInfo
-                            lead={lead}
-                            actions={cardActions(lead)}
-                            selection={renderSelection(lead)}
-                            sources={sources}
-                            cardFields={cardFields}
-                          />
-                        </CardClickShell>
-                      </div>
-                    ))
-                  )}
-                </div>
-              )}
-            </div>
-          );
-        })}
-      </div>
-
-      {/* Desktop kanban */}
-      <div ref={boardRef} className='hidden sm:block overflow-x-auto -mx-4 px-4'>
-        <div ref={trackRef} style={pinnedWidth ? { minWidth: pinnedWidth } : undefined}>
-          <KanbanComponent
-            keyField='status'
-            dataSource={kanbanData}
-            // Syncfusion's own card selection is switched off entirely, which is
-            // what keeps a drag to a single card. On dragStart it drags *every*
-            // card carrying `e-selection` in the row (all columns included), and
-            // its layout re-applies that class on each re-render from a list of
-            // remembered ids — with the board refetching as often as it does, a
-            // stale id there was enough to pick up a second card. `None` means
-            // the class is never added, so there is nothing to drag along.
-            // Selecting cards is done with our own checkboxes anyway.
-            cardSettings={{
-              headerField: 'id',
-              template: cardTemplate,
-              showHeader: false,
-              selectionType: 'None',
-            }}
-            drag={handleDrag}
-            dragStop={handleDragStop}
-            cssClass={cssClass}
-          >
-            <ColumnsDirective>
-              {statusConfigs.map((col: any) => (
-                <ColumnDirective
-                  key={col.key}
-                  headerText={col.label}
-                  keyField={col.key}
-                  template={columnHeaderTemplate}
-                />
-              ))}
-            </ColumnsDirective>
-          </KanbanComponent>
-        </div>
       </div>
     </div>
   );

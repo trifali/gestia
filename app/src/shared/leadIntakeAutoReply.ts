@@ -4,7 +4,8 @@
 // avant le lendemain matin. Un SMS qui le dit tout de suite — « merci, on vous
 // rappelle demain dès 9 h » — vaut mieux que douze heures de silence. En pleine
 // journée, le même SMS annoncerait un rappel « demain » à quelqu'un qu'on va
-// appeler dans dix minutes : d'où trois messages, un par tranche de la journée.
+// appeler dans dix minutes : d'où un message par plage horaire, plages que
+// l'entreprise découpe à sa guise.
 //
 // Réglé par source, comme les alertes d'arrivée : un formulaire de site et un
 // tableur de rappels ne méritent pas le même mot d'accueil, et la seconde n'en
@@ -15,34 +16,44 @@
 
 // ─── Forme enregistrée ────────────────────────────────────────────────────────
 
-export type AutoReplyWindowKey = 'morning' | 'day' | 'evening';
-
-export type AutoReplyWindow = {
+/**
+ * Une plage horaire et ce qu'on y répond.
+ *
+ * Les bornes sont en minutes depuis minuit, heure de Montréal. `end` est exclu ;
+ * `end <= start` veut dire que la plage passe minuit (19 h → 8 h), et `end ===
+ * start` qu'elle couvre la journée entière.
+ *
+ * Plusieurs messages par plage : l'un d'eux, tiré au hasard, part à chaque
+ * prospect. Deux personnes du même quartier qui comparent leurs SMS ne lisent
+ * pas mot pour mot le même texte de robot.
+ */
+export type AutoReplyRule = {
+  id: string;
+  start: number;
+  end: number;
   enabled: boolean;
-  text: string;
+  texts: string[];
 };
 
 /**
  * Ce que porte `LeadInboundWebhook.autoReply`.
  *
- * Trois tranches bornées par deux heures : avant `dayStartHour`, de
- * `dayStartHour` à `dayEndHour` exclu, puis à partir de `dayEndHour`. Les bornes
- * sont réglables parce que « la journée » n'a pas la même fin pour tout le
- * monde — 17 h pour un bureau, 20 h pour un commerce.
+ * Une liste de plages plutôt que les trois tranches fixes de la version 1 : un
+ * commerce ouvert le soir, une équipe qui répond pendant le dîner ou un message
+ * distinct pour la nuit ne rentraient pas dans « avant / pendant / après ».
+ * Quand deux plages se recouvrent, la première de la liste l'emporte.
  *
  * `{}` en base = jamais réglé : `normalizeAutoReply` en fait une configuration
- * entière, tout éteint.
+ * entière, tout éteint. Une forme version 1 est convertie à la lecture.
  */
 export type IntakeAutoReply = {
-  version: 1;
-  dayStartHour: number;
-  dayEndHour: number;
-  morning: AutoReplyWindow;
-  day: AutoReplyWindow;
-  evening: AutoReplyWindow;
+  version: 2;
+  rules: AutoReplyRule[];
 };
 
-export const AUTO_REPLY_WINDOW_KEYS: readonly AutoReplyWindowKey[] = ['morning', 'day', 'evening'];
+export const AUTO_REPLY_MAX_RULES = 12;
+export const AUTO_REPLY_MAX_TEXTS_PER_RULE = 5;
+export const MINUTES_PER_DAY = 24 * 60;
 
 /**
  * Le fuseau dans lequel « 9 h » et « 19 h » se lisent.
@@ -114,7 +125,7 @@ export const DEFAULT_DAY_END_HOUR = 19;
  * par un nom ordinaire. Voir `smsSegments` : un seul caractère hors alphabet
  * ferait tomber la limite de 160 à 70.
  */
-export const DEFAULT_AUTO_REPLY_TEXTS: Readonly<Record<AutoReplyWindowKey, string>> = {
+export const DEFAULT_AUTO_REPLY_TEXTS = {
   morning:
     'Bonjour {{lead.name}}, merci pour votre demande. '
     + '{{company.name}} vous rappelle ce matin, dès l\'ouverture.',
@@ -124,16 +135,23 @@ export const DEFAULT_AUTO_REPLY_TEXTS: Readonly<Record<AutoReplyWindowKey, strin
   evening:
     'Bonjour {{lead.name}}, merci pour votre demande. '
     + '{{company.name}} vous rappelle demain matin, dès l\'ouverture. Bonne soirée !',
-};
+} as const;
 
-export const EMPTY_AUTO_REPLY: IntakeAutoReply = {
-  version: 1,
-  dayStartHour: DEFAULT_DAY_START_HOUR,
-  dayEndHour: DEFAULT_DAY_END_HOUR,
-  morning: { enabled: false, text: DEFAULT_AUTO_REPLY_TEXTS.morning },
-  day: { enabled: false, text: DEFAULT_AUTO_REPLY_TEXTS.day },
-  evening: { enabled: false, text: DEFAULT_AUTO_REPLY_TEXTS.evening },
-};
+/** Le texte proposé pour une plage ajoutée à la main. */
+export const DEFAULT_NEW_RULE_TEXT = DEFAULT_AUTO_REPLY_TEXTS.day;
+
+/** Les trois plages proposées d'office : la nuit et le matin, la journée, la soirée. */
+function defaultRules(): AutoReplyRule[] {
+  const start = DEFAULT_DAY_START_HOUR * 60;
+  const end = DEFAULT_DAY_END_HOUR * 60;
+  return [
+    { id: 'morning', start: 0, end: start, enabled: false, texts: [DEFAULT_AUTO_REPLY_TEXTS.morning] },
+    { id: 'day', start, end, enabled: false, texts: [DEFAULT_AUTO_REPLY_TEXTS.day] },
+    { id: 'evening', start: end, end: MINUTES_PER_DAY, enabled: false, texts: [DEFAULT_AUTO_REPLY_TEXTS.evening] },
+  ];
+}
+
+export const EMPTY_AUTO_REPLY: IntakeAutoReply = { version: 2, rules: defaultRules() };
 
 // ─── Variables ────────────────────────────────────────────────────────────────
 
@@ -164,90 +182,170 @@ export function renderAutoReply(
 
 // ─── Lecture tolérante ────────────────────────────────────────────────────────
 
-function clampHour(value: unknown, fallback: number, min: number, max: number): number {
-  const n = typeof value === 'number' && Number.isInteger(value) ? value : fallback;
+function clampInt(value: unknown, fallback: number, min: number, max: number): number {
+  const n = typeof value === 'number' && Number.isFinite(value) ? Math.round(value) : fallback;
   return Math.min(max, Math.max(min, n));
 }
 
+function readTexts(raw: unknown, fallback: string[]): string[] {
+  if (!Array.isArray(raw)) return fallback;
+  const texts = raw
+    .filter((t): t is string => typeof t === 'string')
+    .map(t => t.slice(0, AUTO_REPLY_MAX_CHARS))
+    .slice(0, AUTO_REPLY_MAX_TEXTS_PER_RULE);
+  return texts.length ? texts : [''];
+}
+
+function readRule(raw: unknown, index: number): AutoReplyRule | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const r = raw as Record<string, unknown>;
+  const texts = readTexts(r.texts, ['']);
+  const start = clampInt(r.start, 0, 0, MINUTES_PER_DAY - 1);
+  const end = clampInt(r.end, MINUTES_PER_DAY, 0, MINUTES_PER_DAY);
+  return {
+    id: typeof r.id === 'string' && r.id.trim() ? r.id.slice(0, 40) : `rule_${index}`,
+    start,
+    end,
+    // Une plage « activée » sans aucun texte est rendue éteinte : il n'y a rien à
+    // envoyer, autant que l'écran le montre.
+    enabled: r.enabled === true && texts.some(t => t.trim().length > 0),
+    texts,
+  };
+}
+
 /**
- * Une tranche jamais enregistrée reçoit le message proposé ; une tranche
- * enregistrée garde son texte, même vide — effacer un message est un choix.
+ * La forme version 1 — trois tranches bornées par deux heures — traduite en
+ * trois plages. Rien ne change pour le prospect : chaque heure tombe dans la
+ * plage qui reprend sa tranche, avec le même texte et le même interrupteur.
  */
-function readWindow(raw: unknown, fallbackText: string): AutoReplyWindow {
-  if (!raw || typeof raw !== 'object') return { enabled: false, text: fallbackText };
-  const w = raw as Record<string, unknown>;
-  const text = typeof w.text === 'string' ? w.text.slice(0, AUTO_REPLY_MAX_CHARS) : fallbackText;
-  return { enabled: w.enabled === true && text.trim().length > 0, text };
+function fromVersion1(r: Record<string, unknown>): AutoReplyRule[] {
+  const startHour = clampInt(r.dayStartHour, DEFAULT_DAY_START_HOUR, 0, 23);
+  const endHour = clampInt(r.dayEndHour, DEFAULT_DAY_END_HOUR, startHour + 1, 24);
+  const windows: [string, unknown, number, number, string][] = [
+    ['morning', r.morning, 0, startHour * 60, DEFAULT_AUTO_REPLY_TEXTS.morning],
+    ['day', r.day, startHour * 60, endHour * 60, DEFAULT_AUTO_REPLY_TEXTS.day],
+    ['evening', r.evening, endHour * 60, MINUTES_PER_DAY, DEFAULT_AUTO_REPLY_TEXTS.evening],
+  ];
+  return windows
+    // Une tranche vide (journée qui commence à minuit) n'a aucune heure à couvrir.
+    .filter(([, , start, end]) => end > start)
+    .map(([id, raw, start, end, fallback]) => {
+      const w = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
+      const text = typeof w.text === 'string' ? w.text.slice(0, AUTO_REPLY_MAX_CHARS) : fallback;
+      return { id, start, end, enabled: w.enabled === true && text.trim().length > 0, texts: [text] };
+    });
 }
 
 /**
  * Lit ce qui est en base et renvoie toujours une configuration complète.
  *
  * Tolérante parce qu'elle lit une colonne JSON : `{}` d'une source jamais réglée,
- * ou une forme d'une version antérieure. Une tranche « activée » sans texte est
- * rendue éteinte — il n'y a rien à envoyer, autant que l'écran le montre.
+ * la forme à trois tranches de la version 1, ou la liste de plages actuelle.
  */
 export function normalizeAutoReply(raw: unknown): IntakeAutoReply {
   const r = (raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {}) as Record<string, unknown>;
-  const dayStartHour = clampHour(r.dayStartHour, DEFAULT_DAY_START_HOUR, 0, 23);
-  const dayEndHour = clampHour(r.dayEndHour, DEFAULT_DAY_END_HOUR, dayStartHour + 1, 24);
-  return {
-    version: 1,
-    dayStartHour,
-    dayEndHour,
-    morning: readWindow(r.morning, DEFAULT_AUTO_REPLY_TEXTS.morning),
-    day: readWindow(r.day, DEFAULT_AUTO_REPLY_TEXTS.day),
-    evening: readWindow(r.evening, DEFAULT_AUTO_REPLY_TEXTS.evening),
-  };
+  if (Array.isArray(r.rules)) {
+    const rules = r.rules
+      .slice(0, AUTO_REPLY_MAX_RULES)
+      .map((rule, i) => readRule(rule, i))
+      .filter((rule): rule is AutoReplyRule => rule !== null);
+    return { version: 2, rules };
+  }
+  if ('morning' in r || 'day' in r || 'evening' in r || 'dayStartHour' in r) {
+    return { version: 2, rules: fromVersion1(r) };
+  }
+  return { version: 2, rules: defaultRules() };
 }
 
-/** Au moins une tranche prête à partir. */
+/** Les textes d'une plage qui peuvent réellement partir. */
+export function usableTexts(rule: AutoReplyRule): string[] {
+  return rule.texts.filter(t => t.trim().length > 0);
+}
+
+/** Au moins une plage prête à partir. */
 export function isAutoReplyActive(cfg: IntakeAutoReply): boolean {
-  return AUTO_REPLY_WINDOW_KEYS.some(k => cfg[k].enabled && cfg[k].text.trim().length > 0);
+  return cfg.rules.some(r => r.enabled && usableTexts(r).length > 0);
 }
 
-// ─── Choix de la tranche ──────────────────────────────────────────────────────
+// ─── Choix de la plage ────────────────────────────────────────────────────────
 
-/** L'heure (0–23) qu'il est à `date` dans le fuseau de l'entreprise. */
-export function localHour(date: Date, timeZone: string = AUTO_REPLY_TIMEZONE): number {
-  const part = new Intl.DateTimeFormat('en-US', { timeZone, hour: 'numeric', hourCycle: 'h23' })
-    .formatToParts(date)
-    .find(p => p.type === 'hour');
-  const hour = part ? parseInt(part.value, 10) : NaN;
+/** L'heure (0–23) et la minute qu'il est à `date` dans le fuseau de l'entreprise. */
+export function localMinutes(date: Date, timeZone: string = AUTO_REPLY_TIMEZONE): number {
+  const parts = new Intl.DateTimeFormat('en-US', { timeZone, hour: 'numeric', minute: 'numeric', hourCycle: 'h23' })
+    .formatToParts(date);
+  const hour = parseInt(parts.find(p => p.type === 'hour')?.value ?? '', 10);
+  const minute = parseInt(parts.find(p => p.type === 'minute')?.value ?? '', 10);
+  if (!Number.isFinite(hour) || !Number.isFinite(minute)) return date.getUTCHours() * 60 + date.getUTCMinutes();
   // `hourCycle: 'h23'` est ignoré par quelques moteurs anciens, qui rendent 24.
-  return Number.isFinite(hour) ? hour % 24 : date.getUTCHours();
+  return (hour % 24) * 60 + minute;
 }
 
-export function autoReplyWindowForHour(cfg: IntakeAutoReply, hour: number): AutoReplyWindowKey {
-  if (hour < cfg.dayStartHour) return 'morning';
-  if (hour < cfg.dayEndHour) return 'day';
-  return 'evening';
+/** Vrai si `minute` (0–1439) tombe dans la plage. */
+export function ruleCovers(rule: Pick<AutoReplyRule, 'start' | 'end'>, minute: number): boolean {
+  const end = rule.end % MINUTES_PER_DAY;
+  if (rule.start === end) return true; // la journée entière
+  if (rule.start < end) return minute >= rule.start && minute < end;
+  return minute >= rule.start || minute < end; // passe minuit
 }
 
-export function autoReplyWindowAt(cfg: IntakeAutoReply, date: Date = new Date()): AutoReplyWindowKey {
-  return autoReplyWindowForHour(cfg, localHour(date));
+/** La première plage active qui couvre cette minute, ou `null` : rien ne part. */
+export function autoReplyRuleForMinute(cfg: IntakeAutoReply, minute: number): AutoReplyRule | null {
+  return cfg.rules.find(r => r.enabled && usableTexts(r).length > 0 && ruleCovers(r, minute)) ?? null;
+}
+
+export function autoReplyRuleAt(cfg: IntakeAutoReply, date: Date = new Date()): AutoReplyRule | null {
+  return autoReplyRuleForMinute(cfg, localMinutes(date));
+}
+
+/** Un des messages de la plage, au hasard. `random` est injectable pour les essais. */
+export function pickAutoReplyText(rule: AutoReplyRule, random: () => number = Math.random): string {
+  const texts = usableTexts(rule);
+  if (texts.length === 0) return '';
+  return texts[Math.min(texts.length - 1, Math.floor(random() * texts.length))];
+}
+
+/**
+ * Les minutes de la journée où aucune plage active ne répond, regroupées en
+ * intervalles `[start, end)`. Sert à l'écran : « aucun SMS de 3 h à 6 h ».
+ */
+export function uncoveredRanges(cfg: IntakeAutoReply): { start: number; end: number }[] {
+  const active = cfg.rules.filter(r => r.enabled && usableTexts(r).length > 0);
+  const out: { start: number; end: number }[] = [];
+  let open: number | null = null;
+  for (let m = 0; m <= MINUTES_PER_DAY; m++) {
+    const covered = m < MINUTES_PER_DAY && active.some(r => ruleCovers(r, m));
+    if (!covered && m < MINUTES_PER_DAY && open === null) open = m;
+    if ((covered || m === MINUTES_PER_DAY) && open !== null) {
+      out.push({ start: open, end: m });
+      open = null;
+    }
+  }
+  return out;
+}
+
+/** Vrai si deux plages ont au moins une minute en commun. */
+export function rulesOverlap(a: AutoReplyRule, b: AutoReplyRule): boolean {
+  for (let m = 0; m < MINUTES_PER_DAY; m += 5) {
+    if (ruleCovers(a, m) && ruleCovers(b, m)) return true;
+  }
+  return false;
 }
 
 // ─── Libellés ─────────────────────────────────────────────────────────────────
 
-export function formatHour(hour: number): string {
-  return `${hour} h`;
+/** « 9 h », « 17 h 30 », « minuit ». */
+export function formatMinutes(minutes: number): string {
+  const m = ((minutes % MINUTES_PER_DAY) + MINUTES_PER_DAY) % MINUTES_PER_DAY;
+  const h = Math.floor(m / 60);
+  const mm = m % 60;
+  if (h === 0 && mm === 0) return 'minuit';
+  return mm ? `${h} h ${String(mm).padStart(2, '0')}` : `${h} h`;
 }
 
-/** « Avant 9 h » · « Entre 9 h et 19 h » · « Après 19 h ». */
-export function autoReplyWindowLabel(cfg: IntakeAutoReply, key: AutoReplyWindowKey): string {
-  switch (key) {
-    case 'morning': return `Avant ${formatHour(cfg.dayStartHour)}`;
-    case 'day': return `Entre ${formatHour(cfg.dayStartHour)} et ${formatHour(cfg.dayEndHour)}`;
-    case 'evening': return `À partir de ${formatHour(cfg.dayEndHour)}`;
-  }
-}
-
-/** Ce que la tranche veut dire pour celui qui écrit le message. */
-export function autoReplyWindowHint(key: AutoReplyWindowKey): string {
-  switch (key) {
-    case 'morning': return 'Le prospect écrit avant l\'ouverture : on le rappellera dans la matinée.';
-    case 'day': return 'Heures d\'ouverture : quelqu\'un va le rappeler rapidement.';
-    case 'evening': return 'Après la fermeture : le rappel attendra le lendemain.';
-  }
+/** « De 9 h à 17 h » · « De 19 h à 8 h (nuit) » · « Toute la journée ». */
+export function autoReplyRuleLabel(rule: Pick<AutoReplyRule, 'start' | 'end'>): string {
+  const end = rule.end % MINUTES_PER_DAY;
+  if (rule.start === end) return 'Toute la journée';
+  const label = `De ${formatMinutes(rule.start)} à ${formatMinutes(rule.end)}`;
+  return rule.start > end && end !== 0 ? `${label} (passe minuit)` : label;
 }

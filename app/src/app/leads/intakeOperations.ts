@@ -12,12 +12,14 @@ import { HttpError, config } from 'wasp/server';
 import { randomBytes } from 'crypto';
 import { z } from 'zod';
 import { requireAdmin } from '../../server/tenant';
+import { formatPhoneDisplay, toE164 } from '../../shared/phone';
 import { resolveIntakeStatus } from './operations';
 import { insertMappedLead, registerLeadSources } from '../../server/leadIntake/persist';
 import {
   applyMapping,
   flattenPaths,
   INTAKE_ALERT_DELAY_CHOICES,
+  INTAKE_ALERT_MAX_PHONES,
   isMappingConfigured,
   isUsableLead,
   LEAD_INTAKE_PATH,
@@ -37,6 +39,10 @@ import {
   AUTO_REPLY_MAX_CHARS,
   isAutoReplyActive,
   normalizeAutoReply,
+  autoReplyRuleLabel,
+  AUTO_REPLY_MAX_RULES,
+  AUTO_REPLY_MAX_TEXTS_PER_RULE,
+  MINUTES_PER_DAY,
   type IntakeAutoReply,
 } from '../../shared/leadIntakeAutoReply';
 
@@ -160,6 +166,9 @@ export type LeadIntakeConfig = {
    */
   alertEmail: string | null;
   alertPhone: string | null;
+  /** Téléphones prévenus en plus de celui de l'entreprise, en E.164. */
+  alertPhones: string[];
+  /** Telnyx est configuré : Gestia peut émettre le SMS, reste à savoir vers qui. */
   canAlertBySms: boolean;
   /** Réponse automatique au prospect, toujours sous forme complète (voir shared/leadIntakeAutoReply). */
   autoReply: IntakeAutoReply;
@@ -205,9 +214,10 @@ export const getLeadIntakeConfig = async (
     alertDelayMinutes: webhook.alertDelayMinutes,
     alertEmail: company?.email?.trim() || null,
     alertPhone: company?.phone?.trim() || null,
+    alertPhones: webhook.alertPhones ?? [],
     // Le SMS demande en plus un numéro et une clé Telnyx : c'est Gestia qui
     // l'émet, pas le serveur de courriel de l'entreprise.
-    canAlertBySms: !!(company?.telnyxPhoneNumber && company?.telnyxApiKey && company?.phone?.trim()),
+    canAlertBySms: !!(company?.telnyxPhoneNumber && company?.telnyxApiKey),
     autoReply: normalizeAutoReply(webhook.autoReply),
     canAutoReply: !!(company?.telnyxPhoneNumber && company?.telnyxApiKey),
   };
@@ -515,12 +525,15 @@ export const updateLeadIntakeWebhook = async (
     notifyByEmail,
     notifyBySms,
     alertDelayMinutes,
+    alertPhones,
   }: {
     searchId: string;
     isActive?: boolean;
     notifyByEmail?: boolean;
     notifyBySms?: boolean;
     alertDelayMinutes?: number;
+    /** La liste complète des téléphones supplémentaires, qui remplace l'ancienne. */
+    alertPhones?: string[];
   },
   context: any,
 ): Promise<{
@@ -528,10 +541,11 @@ export const updateLeadIntakeWebhook = async (
   notifyByEmail: boolean;
   notifyBySms: boolean;
   alertDelayMinutes: number;
+  alertPhones: string[];
 }> => {
   const { companyId, webhook } = await requireIntake(context, searchId, { admin: true });
 
-  const data: Record<string, boolean | number> = {};
+  const data: Record<string, boolean | number | string[]> = {};
   if (isActive !== undefined) data.isActive = !!isActive;
   if (notifyByEmail !== undefined) data.notifyByEmail = !!notifyByEmail;
   if (notifyBySms !== undefined) data.notifyBySms = !!notifyBySms;
@@ -546,64 +560,94 @@ export const updateLeadIntakeWebhook = async (
     data.alertDelayMinutes = alertDelayMinutes;
   }
 
+  const touchesSms = data.notifyBySms !== undefined || alertPhones !== undefined;
+  const company = data.notifyByEmail || touchesSms
+    ? await context.entities.Company.findUnique({
+        where: { id: companyId },
+        select: { email: true, phone: true, telnyxPhoneNumber: true, telnyxApiKey: true },
+      })
+    : null;
+
+  // Normalisés en E.164 ici, et nulle part ailleurs : la liste est relue telle
+  // quelle par l'envoi. Un doublon ou le téléphone d'entreprise lui-même est
+  // écarté — il recevrait l'alerte deux fois, donc deux segments facturés.
+  if (alertPhones !== undefined) {
+    if (!Array.isArray(alertPhones)) throw new HttpError(400, 'Liste de téléphones invalide.');
+    const companyPhone = toE164(company?.phone ?? '');
+    const telnyx = toE164(company?.telnyxPhoneNumber ?? '');
+    const phones: string[] = [];
+    for (const raw of alertPhones) {
+      const e164 = toE164(String(raw ?? ''));
+      if (!e164) throw new HttpError(400, `Numéro invalide : ${String(raw ?? '').slice(0, 40)}`);
+      if (e164 === telnyx) {
+        throw new HttpError(400, `${formatPhoneDisplay(e164)} est le numéro d'envoi Telnyx : il ne peut pas se prévenir lui-même.`);
+      }
+      if (e164 === companyPhone || phones.includes(e164)) continue;
+      phones.push(e164);
+    }
+    if (phones.length > INTAKE_ALERT_MAX_PHONES) {
+      throw new HttpError(400, `${INTAKE_ALERT_MAX_PHONES} téléphones supplémentaires au plus.`);
+    }
+    data.alertPhones = phones;
+  }
+
   // Refuser d'allumer un canal sans destination : sinon l'interrupteur affiche
   // « activé » alors que la tâche n'aura personne à prévenir, et l'utilisateur
-  // n'apprendra son erreur qu'en constatant l'absence d'alerte.
-  if (data.notifyByEmail || data.notifyBySms) {
-    const company = await context.entities.Company.findUnique({
-      where: { id: companyId },
-      select: { email: true, phone: true, telnyxPhoneNumber: true, telnyxApiKey: true },
-    });
-    if (data.notifyByEmail && !company?.email?.trim()) {
-      throw new HttpError(400, "Ajoutez d'abord un courriel d'entreprise dans Paramètres › Entreprise.");
+  // n'apprendra son erreur qu'en constatant l'absence d'alerte. Même chose pour
+  // une liste vidée sous une alerte SMS allumée.
+  if (data.notifyByEmail && !company?.email?.trim()) {
+    throw new HttpError(400, "Ajoutez d'abord un courriel d'entreprise dans Paramètres › Entreprise.");
+  }
+  const smsOn = (data.notifyBySms as boolean | undefined) ?? webhook.notifyBySms;
+  if (touchesSms && smsOn) {
+    if (!company?.telnyxPhoneNumber || !company?.telnyxApiKey) {
+      throw new HttpError(400, "Configurez d'abord l'envoi de SMS dans Paramètres › Intégrations.");
     }
-    if (data.notifyBySms) {
-      if (!company?.phone?.trim()) {
-        throw new HttpError(400, "Ajoutez d'abord un téléphone d'entreprise dans Paramètres › Entreprise.");
-      }
-      if (!company?.telnyxPhoneNumber || !company?.telnyxApiKey) {
-        throw new HttpError(400, "Configurez d'abord l'envoi de SMS dans Paramètres › Intégrations.");
-      }
+    const phones = (data.alertPhones as string[] | undefined) ?? webhook.alertPhones ?? [];
+    if (!toE164(company?.phone ?? '') && phones.length === 0) {
+      throw new HttpError(
+        400,
+        data.notifyBySms
+          ? "Ajoutez d'abord un téléphone à prévenir, ici ou dans Paramètres › Entreprise."
+          : "Gardez au moins un téléphone, ou désactivez l'alerte par SMS.",
+      );
     }
   }
 
   const updated = await context.entities.LeadInboundWebhook.update({
     where: { id: webhook.id },
     data,
-    select: { isActive: true, notifyByEmail: true, notifyBySms: true, alertDelayMinutes: true },
+    select: { isActive: true, notifyByEmail: true, notifyBySms: true, alertDelayMinutes: true, alertPhones: true },
   });
   return updated;
 };
 
 // ─── Réponse automatique au prospect ──────────────────────────────────────────
 
-const autoReplyWindowSchema = z.object({
+const autoReplyRuleSchema = z.object({
+  id: z.string().min(1).max(40),
+  start: z.number().int().min(0).max(MINUTES_PER_DAY - 1),
+  end: z.number().int().min(0).max(MINUTES_PER_DAY),
   enabled: z.boolean(),
-  text: z.string().max(AUTO_REPLY_MAX_CHARS, `Message trop long (${AUTO_REPLY_MAX_CHARS} caractères au plus).`),
+  texts: z
+    .array(z.string().max(AUTO_REPLY_MAX_CHARS, `Message trop long (${AUTO_REPLY_MAX_CHARS} caractères au plus).`))
+    .min(1)
+    .max(AUTO_REPLY_MAX_TEXTS_PER_RULE, `${AUTO_REPLY_MAX_TEXTS_PER_RULE} messages au plus par plage.`),
 });
 
-const autoReplySchema = z
-  .object({
-    version: z.literal(1),
-    dayStartHour: z.number().int().min(0).max(23),
-    dayEndHour: z.number().int().min(1).max(24),
-    morning: autoReplyWindowSchema,
-    day: autoReplyWindowSchema,
-    evening: autoReplyWindowSchema,
-  })
-  .refine(c => c.dayEndHour > c.dayStartHour, {
-    message: "La fin de journée doit être après son début.",
-    path: ['dayEndHour'],
-  });
+const autoReplySchema = z.object({
+  version: z.literal(2),
+  rules: z.array(autoReplyRuleSchema).max(AUTO_REPLY_MAX_RULES, `${AUTO_REPLY_MAX_RULES} plages au plus.`),
+});
 
 /**
- * Enregistre les trois messages d'accueil et leurs bornes, d'un bloc.
+ * Enregistre les plages horaires et leurs messages d'accueil, d'un bloc.
  *
  * D'un bloc et non champ par champ comme `updateLeadIntakeWebhook` : les textes se
- * rédigent, se relisent, puis s'enregistrent — on ne veut pas qu'une tranche parte
+ * rédigent, se relisent, puis s'enregistrent — on ne veut pas qu'une plage parte
  * avec un message à moitié écrit parce que la case a été cochée avant la fin.
  *
- * Une tranche activée sans texte est refusée : l'écran afficherait « activé » et
+ * Une plage activée sans texte est refusée : l'écran afficherait « activé » et
  * rien ne partirait. Allumer quoi que ce soit exige Telnyx, pour la même raison
  * que les alertes SMS.
  */
@@ -620,10 +664,9 @@ export const saveLeadIntakeAutoReply = async (
     throw new HttpError(400, `Réglage invalide${where} : ${issue?.message}`);
   }
 
-  const labels = { morning: 'Avant l\'ouverture', day: 'Journée', evening: 'Soirée' } as const;
-  for (const key of ['morning', 'day', 'evening'] as const) {
-    if (parsed.data[key].enabled && !parsed.data[key].text.trim()) {
-      throw new HttpError(400, `Écrivez le message « ${labels[key]} » avant de l'activer.`);
+  for (const rule of parsed.data.rules) {
+    if (rule.enabled && !rule.texts.some(t => t.trim())) {
+      throw new HttpError(400, `Écrivez le message « ${autoReplyRuleLabel(rule)} » avant de l'activer.`);
     }
   }
 

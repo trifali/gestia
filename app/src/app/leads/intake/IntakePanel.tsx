@@ -96,11 +96,10 @@ export function IntakePanel({
     return () => clearTimeout(stop);
   }, [listening]);
 
-  // Une fois la source configurée, on ouvre sur le journal : à ce stade la
-  // question n'est plus « comment brancher » mais « qu'est-ce qui arrive ».
-  useEffect(() => {
-    if (cfg?.configured) setTab('log');
-  }, [cfg?.configured]);
+  // Toujours ouvert sur le premier onglet, Connexion : c'est là que vivent les
+  // réglages qu'on revient changer (alertes, réponse automatique). Le journal
+  // reste à un clic ; l'assistant y bascule de lui-même après l'enregistrement
+  // d'une correspondance (voir `handleSaved`).
 
   // Rien reçu et rien de configuré : on se met à l'écoute d'emblée, c'est
   // l'unique raison d'être de cet écran à ce moment-là.
@@ -241,6 +240,7 @@ export function IntakePanel({
           alertDelayMinutes={cfg.alertDelayMinutes}
           alertEmail={cfg.alertEmail}
           alertPhone={cfg.alertPhone}
+          alertPhones={cfg.alertPhones}
           canAlertBySms={cfg.canAlertBySms}
           onAlertsChanged={refetchConfig}
           autoReply={cfg.autoReply}

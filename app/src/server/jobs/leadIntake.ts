@@ -92,6 +92,7 @@ export const notifyInboundLeads = async (_args: unknown, context: any) => {
       notifiedAt: true,
       notifyByEmail: true,
       notifyBySms: true,
+      alertPhones: true,
       alertDelayMinutes: true,
       lastReceivedAt: true,
       search: { select: { id: true, title: true } },

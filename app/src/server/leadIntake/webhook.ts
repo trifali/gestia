@@ -160,6 +160,7 @@ export const leadIntakeReceive = async (req: Request, res: Response, context: an
       // l'arrivée » soit servie sans attendre le passage de `notifyInboundLeads`.
       notifyByEmail: true,
       notifyBySms: true,
+      alertPhones: true,
       alertDelayMinutes: true,
       // Réponse automatique au prospect : lue ici parce qu'elle part à la
       // réception, et nulle part ailleurs.

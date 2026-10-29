@@ -41,7 +41,6 @@ import {
   LuClock,
   LuTriangleAlert,
   LuLoader,
-  LuCheck,
   LuNotebook,
   LuMessageSquare,
   LuInfo,
@@ -53,6 +52,8 @@ import {
   formatMontrealTime,
   leadExtras,
   LeadValueText,
+  LeadAvatar,
+  leadStateChips,
   leadSourceColor,
   extraFieldId,
   isExtraFieldKey,
@@ -78,11 +79,11 @@ function InfoRow({
   copyText?: string;
 }) {
   return (
-    <div className='flex items-start gap-2.5 py-2'>
+    <div className='flex items-start gap-2.5 py-2.5'>
       <span className='text-muted mt-0.5 shrink-0'>{icon}</span>
       <div className='min-w-0 flex-1'>
-        <div className='text-[11px] uppercase tracking-wide text-muted'>{label}</div>
-        <div className='text-sm break-words'>{children}</div>
+        <div className='text-[11px] font-semibold uppercase tracking-wide text-muted'>{label}</div>
+        <div className='text-[13px] leading-5 text-ink break-words'>{children}</div>
       </div>
       {copyText && <CopyBtn text={copyText} />}
     </div>
@@ -219,6 +220,8 @@ export function LeadDetailPanel({
     statusConfigs.find(s => s.key === lead.status) ??
     ({ label: lead.status, color: '#9ca3af', key: lead.status } as LeadStatusConfig);
   const alreadyClient = existingClientNames.has(lead.name.toLowerCase());
+  // Les notes ont leur propre section juste en dessous : pas d'étiquette en double.
+  const stateChips = leadStateChips(lead, { smsCanSend, isClient: alreadyClient, notes: false });
 
   async function handleStatus(key: string) {
     if (key === lead!.status) return;
@@ -458,25 +461,28 @@ export function LeadDetailPanel({
       >
         {/* Header */}
         <div className='sticky top-0 z-10 shrink-0 bg-white px-5 py-4 border-b border-line'>
-          <div className='flex items-start gap-2'>
-            <div className='min-w-0 flex-1'>
-              <h2 className='font-semibold text-base leading-tight break-words'>{lead.name}</h2>
+          {/* Même tête que la carte du tableau : avatar, nom, étiquettes d'état. */}
+          <div className='flex items-start gap-3'>
+            <LeadAvatar name={lead.name} size={44} />
+            <div className='min-w-0 flex-1 pt-0.5'>
+              <h2 className='text-[17px] font-semibold leading-snug text-ink break-words'>{lead.name}</h2>
               {lead.category && (
-                <p className='text-xs text-muted capitalize mt-0.5'>{lead.category}</p>
+                <p className='text-[13px] text-muted capitalize'>{lead.category}</p>
               )}
+              {stateChips.length > 0 && <div className='mt-1.5 flex flex-wrap gap-1.5'>{stateChips}</div>}
             </div>
             <button
               onClick={handleClose}
-              className='text-muted hover:text-ink shrink-0'
+              className='-mr-1.5 -mt-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-muted transition-colors hover:bg-canvas-200 hover:text-ink'
               aria-label='Fermer'
             >
               <LuX size={18} />
             </button>
           </div>
 
-          {/* Status picker */}
-          <div className='mt-3'>
-            <div className='text-[11px] uppercase tracking-wide text-muted mb-1.5'>Statut</div>
+          {/* Status picker — les pastilles du sélecteur de colonnes du tableau. */}
+          <div className='mt-4'>
+            <div className='text-[11px] font-semibold uppercase tracking-wide text-muted mb-1.5'>Statut</div>
             <div className='flex flex-wrap gap-1.5'>
               {statusConfigs
                 .filter(s => s.key !== 'unknown' || s.key === lead.status)
@@ -487,18 +493,18 @@ export function LeadDetailPanel({
                       key={s.key}
                       onClick={() => handleStatus(s.key)}
                       disabled={savingStatus !== null}
-                      className='text-xs font-medium px-2.5 py-1 rounded-full border transition-colors flex items-center gap-1 disabled:opacity-60'
-                      style={
+                      aria-pressed={active}
+                      className={`flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[13px] transition-colors disabled:opacity-60 ${
                         active
-                          ? { backgroundColor: s.color, borderColor: s.color, color: '#fff' }
-                          : { backgroundColor: s.color + '14', borderColor: s.color + '44', color: s.color }
-                      }
+                          ? 'border-ink bg-ink text-white'
+                          : 'border-line bg-white text-ink-700 hover:border-ink/30'
+                      }`}
                     >
                       {savingStatus === s.key ? (
                         <LuLoader size={10} className='animate-spin' />
-                      ) : active ? (
-                        <LuCheck size={10} />
-                      ) : null}
+                      ) : (
+                        <span className='h-2 w-2 shrink-0 rounded-full' style={{ backgroundColor: s.color }} />
+                      )}
                       {s.label}
                     </button>
                   );
@@ -508,14 +514,14 @@ export function LeadDetailPanel({
 
           {/* Provenance */}
           <div className='mt-3'>
-            <div className='text-[11px] uppercase tracking-wide text-muted mb-1.5'>Provenance</div>
+            <div className='text-[11px] font-semibold uppercase tracking-wide text-muted mb-1.5'>Provenance</div>
             <div className='flex items-center gap-2'>
               <span
                 className='w-2 h-2 rounded-full shrink-0'
                 style={{ backgroundColor: leadSourceColor(l.source as string, sources) }}
               />
               <select
-                className='input py-1 text-xs w-auto'
+                className='input h-9 w-auto py-0 pr-8 text-[13px]'
                 value={(l.source as string) ?? 'google_maps'}
                 onChange={e => handleSource(e.target.value)}
                 disabled={savingSource}
@@ -544,7 +550,7 @@ export function LeadDetailPanel({
           {/* Contact info */}
           <section>
             <div className='flex items-center justify-between mb-1'>
-              <h3 className='text-sm font-semibold'>Informations</h3>
+              <h3 className='text-[15px] font-semibold text-ink'>Informations</h3>
               {!editing && (
                 <button
                   className='text-xs text-accent-700 hover:underline flex items-center gap-1'
@@ -622,11 +628,11 @@ export function LeadDetailPanel({
 
           {/* Notes */}
           <section>
-            <h3 className='text-sm font-semibold mb-2 flex items-center gap-1.5'>
-              <LuNotebook size={13} className='text-muted' />
+            <h3 className='text-[15px] font-semibold text-ink mb-3 flex items-center gap-1.5'>
+              <LuNotebook size={14} className='text-muted' />
               Notes
               {(notes as any[]).length > 0 && (
-                <span className='text-xs text-muted font-normal'>({(notes as any[]).length})</span>
+                <span className='rounded-full bg-canvas-200 px-2 py-0.5 text-xs font-medium text-ink-700'>{(notes as any[]).length}</span>
               )}
             </h3>
             <NoteThread
