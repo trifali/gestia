@@ -99,6 +99,7 @@ export function NoteThread({
   deletingId,
   autoFocus = true,
   scrollable = true,
+  readOnly = false,
 }: {
   notes: NoteItem[];
   text: string;
@@ -111,6 +112,8 @@ export function NoteThread({
   autoFocus?: boolean;
   /** Disable the timeline's own scroll area when the container already scrolls. */
   scrollable?: boolean;
+  /** Lecture seule : ni composeur ni suppression (lien de partage sans ce droit). */
+  readOnly?: boolean;
 }) {
   const timelineRef = useRef<HTMLDivElement>(null);
   const prevCount = useRef<number | null>(null);
@@ -133,7 +136,7 @@ export function NoteThread({
   return (
     <div className='flex flex-col gap-4'>
       {/* Composer — en haut, juste au-dessus de la note qu'il va créer. */}
-      <form onSubmit={onSubmit} className='flex gap-2'>
+      {!readOnly && <form onSubmit={onSubmit} className='flex gap-2'>
         <textarea
           className='input resize-none flex-1 text-[13px]'
           rows={2}
@@ -156,7 +159,7 @@ export function NoteThread({
         >
           {saving ? <LuLoader size={14} className='animate-spin' /> : <LuSend size={14} />}
         </button>
-      </form>
+      </form>}
 
       {/* Timeline */}
       <div
@@ -179,7 +182,7 @@ export function NoteThread({
                   <div className='flex items-start justify-between gap-2'>
                     <p className='text-xs text-muted'>{formatMontrealTime(n.createdAt)}</p>
                     {/* Toujours visible sur écran tactile : il n'y a pas de survol. */}
-                    <button
+                    {!readOnly && <button
                       className='-mr-1 -mt-0.5 flex h-6 w-6 items-center justify-center rounded-full text-muted transition-opacity hover:bg-red-50 hover:text-red-500 sm:opacity-0 sm:group-hover:opacity-100 focus:opacity-100'
                       onClick={() => onDelete(n.id)}
                       disabled={deletingId === n.id}
@@ -191,7 +194,7 @@ export function NoteThread({
                       ) : (
                         <LuTrash2 size={12} />
                       )}
-                    </button>
+                    </button>}
                   </div>
                   <p className='mt-1 text-[13px] leading-5 text-ink whitespace-pre-wrap break-words'>{n.text}</p>
                 </div>

@@ -354,6 +354,7 @@ const SortableCard = memo(function SortableCard({
   selected,
   checked,
   selectionMode,
+  canMove,
   sources,
   cardFields,
   cardBadges,
@@ -363,6 +364,7 @@ const SortableCard = memo(function SortableCard({
   selected: boolean;
   checked: boolean;
   selectionMode: boolean;
+  canMove: boolean;
   sources?: readonly LeadSourceOption[] | null;
   cardFields?: readonly CardFieldConfig[] | null;
   cardBadges?: (lead: any) => ReactNode;
@@ -371,7 +373,7 @@ const SortableCard = memo(function SortableCard({
   const { setNodeRef, attributes, listeners, transform, transition, isDragging } = useSortable({
     id: lead.id,
     data: { type: 'card' },
-    disabled: selectionMode,
+    disabled: selectionMode || !canMove,
   });
 
   function activate() {
@@ -413,7 +415,7 @@ const SortableCard = memo(function SortableCard({
         }
       }}
       className={`relative select-none outline-none focus-visible:ring-2 focus-visible:ring-accent-500/60 ${
-        selectionMode ? 'cursor-pointer' : 'cursor-grab active:cursor-grabbing'
+        selectionMode || !canMove ? 'cursor-pointer' : 'cursor-grab active:cursor-grabbing'
       } ${cardSurface({ selected, checked })} ${isDragging ? 'opacity-40' : ''}`}
     >
       <LeadCardInfo
@@ -479,6 +481,7 @@ function KanbanColumn({
   selectedLeadId,
   selectedIds,
   selectionMode,
+  canMove,
   onSelectMany,
   sources,
   cardFields,
@@ -494,6 +497,7 @@ function KanbanColumn({
   selectedLeadId?: string | null;
   selectedIds?: Set<string>;
   selectionMode: boolean;
+  canMove: boolean;
   onSelectMany?: (ids: string[], selected: boolean) => void;
   sources?: readonly LeadSourceOption[] | null;
   cardFields?: readonly CardFieldConfig[] | null;
@@ -557,6 +561,7 @@ function KanbanColumn({
                   selected={selectedLeadId === id}
                   checked={!!selectedIds?.has(id)}
                   selectionMode={selectionMode}
+                  canMove={canMove}
                   sources={sources}
                   cardFields={cardFields}
                   cardBadges={cardBadges}
@@ -568,7 +573,7 @@ function KanbanColumn({
               <div className='flex flex-1 flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed border-line px-4 py-10 text-center'>
                 <LuInbox size={28} className='text-muted/60' />
                 <p className='text-sm font-medium text-ink-700'>Aucun prospect</p>
-                <p className='text-xs text-muted'>Glissez une carte ici</p>
+                {canMove && <p className='text-xs text-muted'>Glissez une carte ici</p>}
                 {emptyAction?.(config.key)}
               </div>
             )}
@@ -633,6 +638,7 @@ export function LeadKanbanBoard({
   onCardClick,
   selectedLeadId,
   selectionMode = false,
+  canMove = true,
   selectedIds,
   onToggleSelect,
   onSelectMany,
@@ -668,6 +674,8 @@ export function LeadKanbanBoard({
   selectedLeadId?: string | null;
   /** En mode sélection, un clic coche la carte et le glisser est désactivé. */
   selectionMode?: boolean;
+  /** Faux : les cartes ne se glissent pas et le menu n'offre pas « Déplacer vers ». */
+  canMove?: boolean;
   selectedIds?: Set<string>;
   onToggleSelect?: (leadId: string) => void;
   onSelectMany?: (leadIds: string[], selected: boolean) => void;
@@ -700,8 +708,8 @@ export function LeadKanbanBoard({
   const pendingWrites = useRef(0);
   const writeQueue = useRef<Promise<void>>(Promise.resolve());
 
-  const refs = useRef({ updateStatus, reorder, refetch, onCardClick, onToggleSelect, cardMenu, statusConfigs });
-  refs.current = { updateStatus, reorder, refetch, onCardClick, onToggleSelect, cardMenu, statusConfigs };
+  const refs = useRef({ updateStatus, reorder, refetch, onCardClick, onToggleSelect, cardMenu, statusConfigs, canMove });
+  refs.current = { updateStatus, reorder, refetch, onCardClick, onToggleSelect, cardMenu, statusConfigs, canMove };
 
   /** Rend la main aux données du serveur quand plus rien n'est en vol. */
   function settle() {
@@ -756,8 +764,10 @@ export function LeadKanbanBoard({
     menu: lead => {
       const current = findColumn(liveColumns.current, lead.id) ?? lead.status;
       const targets = refs.current.statusConfigs.filter(s => s.key !== current && s.key !== UNKNOWN_STATUS_KEY);
+      const items = refs.current.cardMenu(lead);
+      if (!refs.current.canMove) return [{ items }];
       return [
-        { items: refs.current.cardMenu(lead) },
+        { items },
         {
           title: 'Déplacer vers',
           items: targets.map(s => ({
@@ -1041,6 +1051,7 @@ export function LeadKanbanBoard({
               selectedLeadId={selectedLeadId}
               selectedIds={selectedIds}
               selectionMode={selectionMode}
+              canMove={canMove}
               onSelectMany={onSelectMany}
               sources={sources}
               cardFields={cardFields}

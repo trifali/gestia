@@ -863,6 +863,10 @@ model LeadSearchShareToken {
   isRevoked  Boolean   @default(false)
   lastUsedAt DateTime?
 
+  // Ce que le lien permet de faire (voir shared/leadShare). `{}` = lien créé
+  // avant ce réglage : il garde les droits qu'il avait alors.
+  permissions Json @default("{}")
+
   @@index([companyId])
 }
 

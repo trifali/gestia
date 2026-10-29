@@ -32,6 +32,7 @@ import {
   LuX,
 } from 'react-icons/lu';
 import { suggestFieldCleanup } from 'wasp/client/operations';
+import { useViaLink } from '../boardOps';
 import {
   blankTransform,
   describeTransform,
@@ -671,6 +672,8 @@ function AiRegex({
 }) {
   const [instruction, setInstruction] = useState('');
   const [busy, setBusy] = useState(false);
+  // L'assistant est facturé à l'entreprise : jamais depuis un lien de partage.
+  const viaLink = useViaLink();
 
   async function run() {
     if (busy) return;
@@ -696,7 +699,7 @@ function AiRegex({
     }
   }
 
-  if (disabled) return null;
+  if (disabled || viaLink) return null;
 
   return (
     <div className='flex gap-1.5'>

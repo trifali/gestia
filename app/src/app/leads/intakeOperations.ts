@@ -13,7 +13,7 @@ import { randomBytes } from 'crypto';
 import { z } from 'zod';
 import { requireAdmin } from '../../server/tenant';
 import { formatPhoneDisplay, toE164 } from '../../shared/phone';
-import { resolveIntakeStatus } from './operations';
+import { resolveIntakeStatus, viaShareLink } from './operations';
 import { insertMappedLead, registerLeadSources } from '../../server/leadIntake/persist';
 import {
   applyMapping,
@@ -802,3 +802,20 @@ export const replayIntakeEvent = async (
 
   return { created: created.length, warnings };
 };
+
+// ─── Depuis un lien de partage ────────────────────────────────────────────────
+//
+// Toutes ces opérations rapportent elles-mêmes leurs arguments à la source du
+// tableau (`requireIntake`) : remplacer le `searchId` par celui du lien suffit à
+// les tenir dans ce tableau. Voir `viaShareLink`.
+
+export const getLeadIntakeConfigByToken = viaShareLink('source', getLeadIntakeConfig);
+export const getLatestIntakeSampleByToken = viaShareLink('source', getLatestIntakeSample);
+export const getLeadIntakeEventsByToken = viaShareLink('source', getLeadIntakeEvents);
+export const replayIntakeEventByToken = viaShareLink('source', replayIntakeEvent);
+export const revealLeadIntakeSecretByToken = viaShareLink('source', revealLeadIntakeSecret);
+export const rotateLeadIntakeSecretByToken = viaShareLink('source', rotateLeadIntakeSecret);
+export const simulateLeadIntakeCallByToken = viaShareLink('source', simulateLeadIntakeCall);
+export const saveLeadIntakeMappingByToken = viaShareLink('source', saveLeadIntakeMapping);
+export const saveLeadIntakeAutoReplyByToken = viaShareLink('source', saveLeadIntakeAutoReply);
+export const updateLeadIntakeWebhookByToken = viaShareLink('source', updateLeadIntakeWebhook);

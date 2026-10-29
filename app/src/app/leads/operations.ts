@@ -12,6 +12,13 @@ import {
   slugifyLeadSource,
 } from '../../shared/leadSources';
 import { normalizeLeadExtras } from '../../shared/leadIntake';
+import {
+  coerceSharePermissions,
+  FULL_SHARE_PERMISSIONS,
+  normalizeSharePermissions,
+  type LeadSharePermissionKey,
+  type LeadSharePermissions,
+} from '../../shared/leadShare';
 import { DEFAULT_CARD_FIELDS, hasDetailToggle, isLockedCardField } from '../../shared/leadCardFields';
 import { randomBytes } from 'crypto';
 import { sendEmailWithAttachment, companySmtp } from '../../server/mail';
@@ -626,8 +633,19 @@ export const updateLeadSearch = async (
 export const exportLeads: ExportLeads<{ searchId: string }, { csv: string }> = async (
   { searchId },
   context,
-) => {
-  const companyId = ensureCompany(context.user);
+) => leadsCsv(context.entities, ensureCompany(context.user), searchId, { withNotes: true });
+
+/**
+ * Le CSV d'un tableau. `withNotes: false` vide la colonne « Notes » : un lien qui
+ * ne peut pas lire les notes ne doit pas les retrouver dans l'export.
+ */
+async function leadsCsv(
+  entities: any,
+  companyId: string,
+  searchId: string,
+  { withNotes }: { withNotes: boolean },
+): Promise<{ csv: string }> {
+  const context = { entities };
   const search = await context.entities.LeadSearch.findUnique({
     where: { id: searchId },
     include: {
@@ -653,14 +671,14 @@ export const exportLeads: ExportLeads<{ searchId: string }, { csv: string }> = a
     l.reviewCount?.toString() ?? '',
     l.status,
     (l as any).source ? leadSourceLabel((l as any).source, sourceConfigs) : '',
-    l.notes ?? '',
+    withNotes ? l.notes ?? '' : '',
     l.mapsUrl ?? '',
   ]);
 
   const escape = (v: string) => `"${v.replace(/"/g, '""')}"`;
   const csv = [headers, ...rows].map(row => row.map(escape).join(',')).join('\n');
   return { csv };
-};
+}
 
 // ─── Default statuses ─────────────────────────────────────────────────────────
 
@@ -2126,26 +2144,29 @@ export async function insertLeadOnTop(
 
 // ─── createLead (manual entry) ────────────────────────────────────────────────
 
-export const createLead = async (
-  args: {
-    searchId: string;
-    name: string;
-    phone?: string;
-    email?: string;
-    website?: string;
-    address?: string;
-    category?: string;
-    status?: string;
-    source?: string;
-    /** Les informations propres au tableau (budget, créneau…), comme dans `updateLead`. */
-    extras?: { key?: string; label?: string; value?: string }[];
-  },
-  context: any,
-): Promise<any> => {
+type ManualLeadInput = {
+  searchId: string;
+  name: string;
+  phone?: string;
+  email?: string;
+  website?: string;
+  address?: string;
+  category?: string;
+  status?: string;
+  source?: string;
+  /** Les informations propres au tableau (budget, créneau…), comme dans `updateLead`. */
+  extras?: { key?: string; label?: string; value?: string }[];
+};
+
+export const createLead = async (args: ManualLeadInput, context: any): Promise<any> => {
   const companyId = ensureCompany(context.user);
   const search = await context.entities.LeadSearch.findUnique({ where: { id: args.searchId } });
   if (!search || search.companyId !== companyId) throw new HttpError(404);
+  return insertManualLead(context.entities, companyId, args);
+};
 
+/** La saisie à la main, partagée par l'application et le lien de partage. */
+async function insertManualLead(entities: any, companyId: string, args: ManualLeadInput): Promise<any> {
   const name = args.name?.trim();
   if (!name) throw new HttpError(400, "Le nom de l'entreprise est requis");
 
@@ -2155,7 +2176,7 @@ export const createLead = async (
     return t ? t : null;
   };
 
-  const row = await insertLeadOnTop(context.entities, {
+  const row = await insertLeadOnTop(entities, {
     searchId: args.searchId,
     status,
     data: {
@@ -2166,14 +2187,14 @@ export const createLead = async (
       address: clean(args.address),
       category: clean(args.category),
       source: args.source?.trim()
-        ? await requireKnownSource(context.entities, companyId, args.source)
+        ? await requireKnownSource(entities, companyId, args.source)
         : 'manual',
       extras: normalizeLeadExtras(args.extras ?? []),
     },
   });
-  await syncTotalFound(context.entities, args.searchId);
+  await syncTotalFound(entities, args.searchId);
   return row;
-};
+}
 
 // ─── totalFound ───────────────────────────────────────────────────────────────
 
@@ -2245,6 +2266,13 @@ function generateShareToken(): string {
   return randomBytes(24).toString('hex');
 }
 
+/**
+ * Le lien, ses droits, et la preuve qu'il est encore valide.
+ *
+ * Chaque opération `…ByToken` passe par ici puis par `requireSharePermission` :
+ * l'écran du portail cache ce que le lien ne permet pas, mais c'est ce contrôle
+ * qui l'interdit — le portail est public, ses appels peuvent être forgés.
+ */
 async function validateShareToken(token: string, entities: any) {
   const shareToken = await (entities as any).LeadSearchShareToken.findUnique({ where: { token } });
   if (!shareToken || shareToken.isRevoked) throw new HttpError(403, 'Lien invalide ou révoqué');
@@ -2253,18 +2281,73 @@ async function validateShareToken(token: string, entities: any) {
     where: { id: shareToken.id },
     data: { lastUsedAt: new Date() },
   });
-  return shareToken;
+  return { ...shareToken, perms: normalizeSharePermissions(shareToken.permissions) };
+}
+
+const SHARE_PERMISSION_REFUSALS: Record<LeadSharePermissionKey, string> = {
+  move: 'Ce lien ne permet pas de déplacer les cartes.',
+  edit: 'Ce lien ne permet pas de modifier les prospects.',
+  notes: 'Ce lien ne permet pas de voir les notes.',
+  writeNotes: "Ce lien ne permet pas d'écrire ni de supprimer des notes.",
+  add: "Ce lien ne permet pas d'ajouter des prospects.",
+  delete: 'Ce lien ne permet pas de supprimer des prospects.',
+  statuses: 'Ce lien ne permet pas de modifier les statuts.',
+  cardFields: 'Ce lien ne permet pas de modifier les cartes.',
+  templates: 'Ce lien ne permet pas de gérer les modèles.',
+  export: "Ce lien ne permet pas d'exporter les prospects.",
+  source: 'Ce lien ne permet pas de régler la source de prospects.',
+  criteria: 'Ce lien ne permet pas de lancer de recherche.',
+};
+
+/** Accordé si le lien a l'un des droits donnés ; le message est celui du premier. */
+function requireSharePermission(
+  perms: LeadSharePermissions,
+  key: LeadSharePermissionKey | LeadSharePermissionKey[],
+): void {
+  const keys = Array.isArray(key) ? key : [key];
+  if (!keys.some(k => perms[k])) throw new HttpError(403, SHARE_PERMISSION_REFUSALS[keys[0]]);
+}
+
+/** Le prospect, à condition qu'il soit sur le tableau du lien. */
+async function leadOfShare(entities: any, searchId: string, leadId: string) {
+  const lead = await entities.Lead.findUnique({
+    where: { id: leadId },
+    include: { search: { select: { id: true, companyId: true } } },
+  });
+  if (!lead || lead.search.id !== searchId) throw new HttpError(403);
+  return lead;
+}
+
+/** Les droits reçus du formulaire, réduits aux seules clés connues. */
+function parseSharePermissions(raw: unknown): LeadSharePermissions | undefined {
+  if (raw === undefined) return undefined;
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new HttpError(400, 'Droits invalides');
+  return coerceSharePermissions(raw as Record<string, unknown>);
+}
+
+/** Ce que l'écran de partage relit : le lien et ses droits, toujours complets. */
+function shareTokenView(row: any) {
+  return row ? { ...row, permissions: normalizeSharePermissions(row.permissions) } : row;
 }
 
 // ─── createLeadShareToken (auth) ──────────────────────────────────────────────
 
+/**
+ * Crée le lien, ou le régénère.
+ *
+ * Régénérer sans préciser de droits garde ceux de l'ancien lien : on change
+ * d'adresse parce qu'elle a fuité, pas pour rendre à l'employé ce qu'on lui
+ * avait retiré.
+ */
 export const createLeadShareToken = async (
-  { searchId, label }: { searchId: string; label?: string },
+  { searchId, label, permissions }: { searchId: string; label?: string; permissions?: Partial<LeadSharePermissions> },
   context: any,
 ) => {
   const companyId = ensureCompany(context.user);
   const search = await context.entities.LeadSearch.findUnique({ where: { id: searchId } });
   if (!search || search.companyId !== companyId) throw new HttpError(404);
+
+  const chosen = parseSharePermissions(permissions);
 
   // Upsert: if a token already exists for this search, regenerate it by deleting and creating
   const existing = await (context.entities as any).LeadSearchShareToken.findUnique({ where: { searchId } });
@@ -2272,14 +2355,35 @@ export const createLeadShareToken = async (
     await (context.entities as any).LeadSearchShareToken.delete({ where: { id: existing.id } });
   }
 
-  return (context.entities as any).LeadSearchShareToken.create({
+  const created = await (context.entities as any).LeadSearchShareToken.create({
     data: {
       companyId,
       searchId,
       token: generateShareToken(),
       label: label?.trim() || null,
+      permissions: chosen ?? normalizeSharePermissions(existing?.permissions ?? FULL_SHARE_PERMISSIONS),
     },
   });
+  return shareTokenView(created);
+};
+
+// ─── updateLeadShareToken (auth) ──────────────────────────────────────────────
+
+/** Change les droits d'un lien déjà envoyé, sans changer son adresse. */
+export const updateLeadShareToken = async (
+  { searchId, permissions }: { searchId: string; permissions: Partial<LeadSharePermissions> },
+  context: any,
+) => {
+  const companyId = ensureCompany(context.user);
+  const shareToken = await (context.entities as any).LeadSearchShareToken.findUnique({ where: { searchId } });
+  if (!shareToken || shareToken.companyId !== companyId) throw new HttpError(404);
+  const chosen = parseSharePermissions(permissions);
+  if (!chosen) throw new HttpError(400, 'Droits manquants');
+  const updated = await (context.entities as any).LeadSearchShareToken.update({
+    where: { id: shareToken.id },
+    data: { permissions: chosen },
+  });
+  return shareTokenView(updated);
 };
 
 // ─── revokeLeadShareToken (auth) ──────────────────────────────────────────────
@@ -2291,10 +2395,11 @@ export const revokeLeadShareToken = async (
   const companyId = ensureCompany(context.user);
   const shareToken = await (context.entities as any).LeadSearchShareToken.findUnique({ where: { searchId } });
   if (!shareToken || shareToken.companyId !== companyId) throw new HttpError(404);
-  return (context.entities as any).LeadSearchShareToken.update({
+  const updated = await (context.entities as any).LeadSearchShareToken.update({
     where: { id: shareToken.id },
     data: { isRevoked: true },
   });
+  return shareTokenView(updated);
 };
 
 // ─── getLeadSearchByToken (public – no auth) ──────────────────────────────────
@@ -2304,6 +2409,7 @@ export const getLeadSearchByToken = async (
   context: any,
 ) => {
   const shareToken = await validateShareToken(token, context.entities);
+  const { perms } = shareToken;
   const search = await context.entities.LeadSearch.findUnique({
     where: { id: shareToken.searchId },
     include: { leads: { orderBy: [{ order: 'asc' }, { createdAt: 'asc' }] } },
@@ -2318,9 +2424,10 @@ export const getLeadSearchByToken = async (
     search.id,
   );
 
-  // Attach note counts
+  // Le nombre de notes trahirait leur existence à un lien qui ne doit pas les
+  // voir : il n'est compté que pour qui peut les lire.
   const identifiers = (search as any).leads.map((l: any) => l.placeId ?? l.id);
-  const noteCounts = identifiers.length
+  const noteCounts = perms.notes && identifiers.length
     ? await (context.entities as any).LeadNote.groupBy({
         by: ['identifier'],
         where: { companyId: search.companyId, identifier: { in: identifiers } },
@@ -2350,41 +2457,107 @@ export const getLeadSearchByToken = async (
       id: search.id,
       title: search.title,
       description: (search as any).description,
+      purpose: (search as any).purpose ?? null,
+      // La nature du tableau décide des réglages offerts : « Source » pour un
+      // webhook, « Critères » pour une recherche Google.
+      kind: (search as any).kind ?? null,
       filters: (search as any).filters,
     },
     leads: leadsWithFlags,
     statusConfigs,
     sourceConfigs,
     cardFields,
+    permissions: perms,
   };
 };
 
 // ─── updateLeadByToken (public – no auth) ────────────────────────────────────
 
+/**
+ * Le statut relève du droit « déplacer », tout le reste du droit « modifier » :
+ * on peut confier le suivi d'un tableau sans confier ses coordonnées.
+ */
 export const updateLeadByToken = async (
-  { token, leadId, ...rest }: { token: string; leadId: string; status?: string; name?: string; phone?: string; email?: string; website?: string; address?: string; category?: string },
+  { token, leadId, ...rest }: {
+    token: string;
+    leadId: string;
+    status?: string;
+    name?: string;
+    phone?: string;
+    email?: string;
+    website?: string;
+    address?: string;
+    category?: string;
+    source?: string;
+    extras?: { key?: string; label?: string; value?: string }[];
+  },
   context: any,
 ) => {
   const shareToken = await validateShareToken(token, context.entities);
-  const lead = await context.entities.Lead.findUnique({
-    where: { id: leadId },
-    include: { search: { select: { id: true } } },
-  });
-  if (!lead || lead.search.id !== shareToken.searchId) throw new HttpError(403);
+  const lead = await leadOfShare(context.entities, shareToken.searchId, leadId);
 
   const updateData: any = {};
   if (rest.status !== undefined) {
+    requireSharePermission(shareToken.perms, 'move');
     updateData.status = rest.status;
     updateData.statusUpdatedAt = new Date();
   }
-  if (rest.name !== undefined) updateData.name = rest.name;
+  const editsInfo = (['name', 'phone', 'email', 'website', 'address', 'category', 'source', 'extras'] as const)
+    .some(k => rest[k] !== undefined);
+  if (editsInfo) requireSharePermission(shareToken.perms, 'edit');
+  if (rest.name !== undefined) {
+    const name = rest.name.trim();
+    if (!name) throw new HttpError(400, 'Le nom est requis');
+    updateData.name = name;
+  }
   if (rest.phone !== undefined) updateData.phone = rest.phone || null;
   if (rest.email !== undefined) updateData.email = rest.email || null;
   if (rest.website !== undefined) updateData.website = rest.website || null;
   if (rest.address !== undefined) updateData.address = rest.address || null;
   if (rest.category !== undefined) updateData.category = rest.category || null;
+  if (rest.source !== undefined) {
+    updateData.source = await requireKnownSource(context.entities, lead.search.companyId, rest.source);
+  }
+  if (rest.extras !== undefined) updateData.extras = normalizeLeadExtras(rest.extras);
 
   return context.entities.Lead.update({ where: { id: leadId }, data: updateData });
+};
+
+// ─── createLeadByToken (public – no auth) ────────────────────────────────────
+
+export const createLeadByToken = async (
+  { token, ...args }: { token: string } & Omit<ManualLeadInput, 'searchId'>,
+  context: any,
+) => {
+  const shareToken = await validateShareToken(token, context.entities);
+  requireSharePermission(shareToken.perms, 'add');
+  // La colonne d'arrivée est un déplacement comme un autre : sans ce droit, le
+  // prospect atterrit dans la première colonne, celle de tout nouveau venu.
+  const status = shareToken.perms.move ? args.status : undefined;
+  return insertManualLead(context.entities, shareToken.companyId, {
+    ...args,
+    status,
+    searchId: shareToken.searchId,
+  });
+};
+
+// ─── markLeadViewedByToken (public – no auth) ────────────────────────────────
+
+/**
+ * Ouvrir la fiche depuis le lien vaut « vu », comme dans l'application : c'est
+ * ce qui annule l'alerte d'arrivée. Aucun droit requis — lire la fiche est ce
+ * que tout lien permet.
+ */
+export const markLeadViewedByToken = async (
+  { token, leadId }: { token: string; leadId: string },
+  context: any,
+): Promise<{ ok: true; marked: boolean }> => {
+  const shareToken = await validateShareToken(token, context.entities);
+  const { count } = await (context.entities as any).Lead.updateMany({
+    where: { id: leadId, viewedAt: null, searchId: shareToken.searchId },
+    data: { viewedAt: new Date() },
+  });
+  return { ok: true, marked: count > 0 };
 };
 
 // ─── reorderLeadsByToken (public – no auth) ──────────────────────────────────
@@ -2394,6 +2567,7 @@ export const reorderLeadsByToken = async (
   context: any,
 ): Promise<{ ok: true }> => {
   const shareToken = await validateShareToken(token, context.entities);
+  requireSharePermission(shareToken.perms, 'move');
   await applyLeadOrder(context.entities, shareToken.searchId, status, orderedIds);
   return { ok: true };
 };
@@ -2405,11 +2579,8 @@ export const deleteLeadByToken = async (
   context: any,
 ) => {
   const shareToken = await validateShareToken(token, context.entities);
-  const lead = await context.entities.Lead.findUnique({
-    where: { id: leadId },
-    include: { search: { select: { id: true } } },
-  });
-  if (!lead || lead.search.id !== shareToken.searchId) throw new HttpError(403);
+  requireSharePermission(shareToken.perms, 'delete');
+  const lead = await leadOfShare(context.entities, shareToken.searchId, leadId);
   await context.entities.Lead.delete({ where: { id: leadId } });
   await syncTotalFound(context.entities, lead.searchId);
   return { deleted: true };
@@ -2422,11 +2593,8 @@ export const addLeadNoteByToken = async (
   context: any,
 ) => {
   const shareToken = await validateShareToken(token, context.entities);
-  const lead = await context.entities.Lead.findUnique({
-    where: { id: leadId },
-    include: { search: { select: { id: true, companyId: true } } },
-  });
-  if (!lead || lead.search.id !== shareToken.searchId) throw new HttpError(403);
+  requireSharePermission(shareToken.perms, 'writeNotes');
+  const lead = await leadOfShare(context.entities, shareToken.searchId, leadId);
   if (!text?.trim()) throw new HttpError(400, 'Le texte est requis');
 
   const identifier = lead.placeId ?? lead.id;
@@ -2446,11 +2614,8 @@ export const getLeadNotesByToken = async (
   context: any,
 ) => {
   const shareToken = await validateShareToken(token, context.entities);
-  const lead = await context.entities.Lead.findUnique({
-    where: { id: leadId },
-    include: { search: { select: { id: true, companyId: true } } },
-  });
-  if (!lead || lead.search.id !== shareToken.searchId) throw new HttpError(403);
+  requireSharePermission(shareToken.perms, 'notes');
+  const lead = await leadOfShare(context.entities, shareToken.searchId, leadId);
 
   const identifier = lead.placeId ?? lead.id;
   return (context.entities as any).LeadNote.findMany({
@@ -2461,16 +2626,26 @@ export const getLeadNotesByToken = async (
 
 // ─── deleteLeadNoteByToken (public – no auth) ─────────────────────────────────
 
+/**
+ * La note doit appartenir à un prospect du tableau partagé, pas seulement à
+ * l'entreprise : sinon un lien vers un tableau pourrait effacer, par son
+ * identifiant, une note laissée sur n'importe quel autre.
+ */
 export const deleteLeadNoteByToken = async (
   { token, noteId }: { token: string; noteId: string },
   context: any,
 ) => {
   const shareToken = await validateShareToken(token, context.entities);
+  requireSharePermission(shareToken.perms, 'writeNotes');
   const note = await (context.entities as any).LeadNote.findUnique({ where: { id: noteId } });
-  if (!note) throw new HttpError(404);
-  // Verify the note belongs to the correct search by checking companyId matches token's search
-  const search = await context.entities.LeadSearch.findUnique({ where: { id: shareToken.searchId } });
-  if (!search || search.companyId !== note.companyId) throw new HttpError(403);
+  if (!note || note.companyId !== shareToken.companyId) throw new HttpError(404);
+  const onBoard = await context.entities.Lead.count({
+    where: {
+      searchId: shareToken.searchId,
+      OR: [{ placeId: note.identifier }, { id: note.identifier }],
+    },
+  });
+  if (!onBoard) throw new HttpError(403);
   await (context.entities as any).LeadNote.delete({ where: { id: noteId } });
   return { deleted: true };
 };
@@ -2484,5 +2659,209 @@ export const getLeadShareToken = async (
   const companyId = ensureCompany(context.user);
   const search = await context.entities.LeadSearch.findUnique({ where: { id: searchId } });
   if (!search || search.companyId !== companyId) throw new HttpError(404);
-  return (context.entities as any).LeadSearchShareToken.findUnique({ where: { searchId } });
+  return shareTokenView(await (context.entities as any).LeadSearchShareToken.findUnique({ where: { searchId } }));
 };
+
+// ─── Réglages du tableau par lien (public – no auth) ──────────────────────────
+//
+// Chaque opération ci-dessous vérifie le lien et son droit, ramène la portée au
+// seul tableau partagé, puis confie le travail à l'opération de l'application :
+// une seule implémentation des règles (statut réservé, colonne orpheline, jeu de
+// champs complet…), et le lien ne peut jamais viser la portée entreprise ni un
+// autre tableau — c'est tout l'enjeu, les opérations de l'application acceptant
+// l'une et l'autre.
+
+/**
+ * Le contexte prêté à l'opération de l'application : l'entreprise du lien, avec
+ * le rôle administrateur que ces réglages exigent dans l'application. Sans
+ * identifiant d'utilisateur — aucune des opérations déléguées n'en lit un.
+ *
+ * Ce rôle ne sort jamais d'une opération déjà ramenée au tableau du lien et
+ * gardée par son droit : c'est le propriétaire qui l'a accordé en cochant la case.
+ */
+function shareActor(shareToken: { companyId: string }, entities: any) {
+  return { user: { companyId: shareToken.companyId, role: 'admin' }, entities };
+}
+
+/**
+ * La version « lien » d'une opération de l'application qui porte sur un tableau.
+ *
+ * Vérifie le lien et son droit, remplace le `searchId` reçu par celui du lien —
+ * c'est ce qui empêche de viser un autre tableau —, puis exécute l'opération de
+ * l'application. À réserver aux opérations dont tout le reste des arguments est
+ * déjà rapporté au tableau par l'opération elle-même (journal d'une source, par
+ * exemple) ; celles qui prennent l'identifiant d'une ligne ont leur version
+ * écrite à la main, avec la vérification qui va avec.
+ */
+export function viaShareLink<R>(
+  permission: LeadSharePermissionKey | LeadSharePermissionKey[] | null,
+  impl: (args: any, context: any) => Promise<R>,
+) {
+  return async ({ token, searchId: _ignored, ...args }: { token: string; searchId?: string; [k: string]: unknown }, context: any): Promise<R> => {
+    const shareToken = await validateShareToken(token, context.entities);
+    if (permission) requireSharePermission(shareToken.perms, permission);
+    return impl({ ...args, searchId: shareToken.searchId }, shareActor(shareToken, context.entities));
+  };
+}
+
+/** Une ligne de statut, à condition qu'elle appartienne aux statuts propres du tableau. */
+async function boardStatusRow(entities: any, searchId: string, id: string) {
+  const row = await entities.LeadStatusConfig.findUnique({ where: { id } });
+  // Un statut d'entreprise s'applique à tous les tableaux qui le suivent : le
+  // modifier depuis un lien changerait des colonnes que ce lien ne montre pas.
+  if (!row || row.searchId !== searchId) throw new HttpError(403, 'Ce statut ne fait pas partie de ce tableau.');
+  return row;
+}
+
+async function requireBoardOwnStatuses(entities: any, shareToken: any) {
+  const own = await entities.LeadStatusConfig.count({
+    where: { companyId: shareToken.companyId, searchId: shareToken.searchId },
+  });
+  if (!own) throw new HttpError(400, "Ce tableau suit les statuts de l'entreprise : personnalisez-les d'abord.");
+}
+
+export const overrideBoardStatusesByToken = async ({ token }: { token: string }, context: any) => {
+  const shareToken = await validateShareToken(token, context.entities);
+  requireSharePermission(shareToken.perms, 'statuses');
+  return overrideBoardStatuses({ searchId: shareToken.searchId }, shareActor(shareToken, context.entities));
+};
+
+export const resetBoardStatusesByToken = async ({ token }: { token: string }, context: any) => {
+  const shareToken = await validateShareToken(token, context.entities);
+  requireSharePermission(shareToken.perms, 'statuses');
+  return resetBoardStatuses({ searchId: shareToken.searchId }, shareActor(shareToken, context.entities));
+};
+
+export const createLeadStatusConfigByToken = async (
+  { token, key, label, color, order }: { token: string; key: string; label: string; color: string; order: number },
+  context: any,
+) => {
+  const shareToken = await validateShareToken(token, context.entities);
+  requireSharePermission(shareToken.perms, 'statuses');
+  // Ajouter une seule colonne à un tableau qui suit l'entreprise lui donnerait
+  // un jeu propre réduit à cette colonne : tous ses prospects tomberaient dans
+  // « Statut inconnu ». L'écran demande donc de personnaliser d'abord.
+  await requireBoardOwnStatuses(context.entities, shareToken);
+  return (createLeadStatusConfig as any)(
+    { key, label, color, order, searchId: shareToken.searchId },
+    shareActor(shareToken, context.entities),
+  );
+};
+
+export const updateLeadStatusConfigByToken = async (
+  { token, id, label, color, order }: { token: string; id: string; label?: string; color?: string; order?: number },
+  context: any,
+) => {
+  const shareToken = await validateShareToken(token, context.entities);
+  requireSharePermission(shareToken.perms, 'statuses');
+  await boardStatusRow(context.entities, shareToken.searchId, id);
+  return (updateLeadStatusConfig as any)({ id, label, color, order }, shareActor(shareToken, context.entities));
+};
+
+export const deleteLeadStatusConfigByToken = async ({ token, id }: { token: string; id: string }, context: any) => {
+  const shareToken = await validateShareToken(token, context.entities);
+  requireSharePermission(shareToken.perms, 'statuses');
+  await boardStatusRow(context.entities, shareToken.searchId, id);
+  return (deleteLeadStatusConfig as any)({ id }, shareActor(shareToken, context.entities));
+};
+
+export const reorderLeadStatusConfigsByToken = async (
+  { token, items }: { token: string; items: { id: string; order: number }[] },
+  context: any,
+) => {
+  const shareToken = await validateShareToken(token, context.entities);
+  requireSharePermission(shareToken.perms, 'statuses');
+  for (const item of items ?? []) await boardStatusRow(context.entities, shareToken.searchId, item.id);
+  return reorderLeadStatusConfigs({ items }, shareActor(shareToken, context.entities));
+};
+
+export const saveLeadCardFieldsByToken = async (
+  { token, fields }: { token: string; fields: { key: string; label: string; onCard: boolean; onDetail?: boolean }[] },
+  context: any,
+) => {
+  const shareToken = await validateShareToken(token, context.entities);
+  // La correspondance d'une source déclare aussi les champs des cartes.
+  requireSharePermission(shareToken.perms, ['cardFields', 'source']);
+  return saveLeadCardFields({ searchId: shareToken.searchId, fields }, shareActor(shareToken, context.entities));
+};
+
+export const resetLeadCardFieldsByToken = async ({ token }: { token: string }, context: any) => {
+  const shareToken = await validateShareToken(token, context.entities);
+  requireSharePermission(shareToken.perms, 'cardFields');
+  return resetLeadCardFields({ searchId: shareToken.searchId }, shareActor(shareToken, context.entities));
+};
+
+/** Un modèle, à condition qu'il soit de ce tableau. */
+async function boardTemplate(entities: any, searchId: string, id: string) {
+  const row = await entities.ProspectTemplate.findUnique({ where: { id } });
+  if (!row || row.searchId !== searchId) throw new HttpError(403, 'Ce modèle ne fait pas partie de ce tableau.');
+  return row;
+}
+
+export const getProspectTemplatesByToken = async ({ token }: { token: string }, context: any) => {
+  const shareToken = await validateShareToken(token, context.entities);
+  requireSharePermission(shareToken.perms, 'templates');
+  return getProspectTemplates({ searchId: shareToken.searchId }, shareActor(shareToken, context.entities));
+};
+
+export const upsertProspectTemplateByToken = async (
+  { token, ...args }: {
+    token: string;
+    id?: string | null;
+    channel?: string;
+    name: string;
+    subject?: string;
+    body: string;
+    defaultStatus?: string | null;
+  },
+  context: any,
+) => {
+  const shareToken = await validateShareToken(token, context.entities);
+  requireSharePermission(shareToken.perms, 'templates');
+  if (args.id) await boardTemplate(context.entities, shareToken.searchId, args.id);
+  return upsertProspectTemplate({ ...args, searchId: shareToken.searchId }, shareActor(shareToken, context.entities));
+};
+
+export const deleteProspectTemplateByToken = async ({ token, id }: { token: string; id: string }, context: any) => {
+  const shareToken = await validateShareToken(token, context.entities);
+  requireSharePermission(shareToken.perms, 'templates');
+  await boardTemplate(context.entities, shareToken.searchId, id);
+  return deleteProspectTemplate({ id }, shareActor(shareToken, context.entities));
+};
+
+/**
+ * Ce que l'aperçu d'un modèle affiche : nom, courriel et signature de
+ * l'entreprise, adresse d'expédition. Une sélection, jamais la fiche entreprise
+ * entière — elle porte des identifiants SMTP et Telnyx.
+ */
+export const getTemplateContextByToken = async ({ token }: { token: string }, context: any) => {
+  const shareToken = await validateShareToken(token, context.entities);
+  requireSharePermission(shareToken.perms, 'templates');
+  const company = await context.entities.Company.findUnique({
+    where: { id: shareToken.companyId },
+    select: {
+      name: true, email: true, brandEmailSignature: true, copySentEmailsToCompany: true,
+      smtpHost: true, smtpPort: true, smtpUsername: true, smtpPassword: true,
+      smtpFromName: true, smtpFromEmail: true,
+    },
+  });
+  const smtp = companySmtp(company);
+  return {
+    company: company ? { name: company.name, email: company.email, brandEmailSignature: company.brandEmailSignature } : null,
+    sender: { fromEmail: smtp?.fromEmail ?? '', fromName: smtp?.fromName ?? '' },
+    copyToCompany: smtp?.copyTo ?? null,
+  };
+};
+
+export const exportLeadsByToken = async ({ token }: { token: string }, context: any) => {
+  const shareToken = await validateShareToken(token, context.entities);
+  requireSharePermission(shareToken.perms, 'export');
+  return leadsCsv(context.entities, shareToken.companyId, shareToken.searchId, { withNotes: shareToken.perms.notes });
+};
+
+// Lectures dont le portail a besoin hors de sa charge initiale (la source les
+// relit après avoir déclaré un champ) : rien de plus que ce que le lien montre déjà.
+export const getLeadCardFieldsByToken = viaShareLink(null, getLeadCardFields);
+export const getLeadSourceConfigsByToken = viaShareLink(null, getLeadSourceConfigs);
+
+export const fetchMoreLeadsByToken = viaShareLink('criteria', fetchMoreLeads);

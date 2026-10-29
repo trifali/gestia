@@ -949,6 +949,18 @@ action createLeadShareToken {
   fn: import { createLeadShareToken } from "@src/app/leads/operations",
   entities: [User, LeadSearch, LeadSearchShareToken]
 }
+action updateLeadShareToken {
+  fn: import { updateLeadShareToken } from "@src/app/leads/operations",
+  entities: [User, LeadSearch, LeadSearchShareToken]
+}
+action createLeadByToken {
+  fn: import { createLeadByToken } from "@src/app/leads/operations",
+  entities: [Lead, LeadSearch, LeadSearchShareToken, LeadSourceConfig]
+}
+action markLeadViewedByToken {
+  fn: import { markLeadViewedByToken } from "@src/app/leads/operations",
+  entities: [Lead, LeadSearch, LeadSearchShareToken]
+}
 action revokeLeadShareToken {
   fn: import { revokeLeadShareToken } from "@src/app/leads/operations",
   entities: [User, LeadSearch, LeadSearchShareToken]
@@ -959,7 +971,7 @@ query getLeadSearchByToken {
 }
 action updateLeadByToken {
   fn: import { updateLeadByToken } from "@src/app/leads/operations",
-  entities: [Lead, LeadSearch, LeadSearchShareToken]
+  entities: [Lead, LeadSearch, LeadSearchShareToken, LeadSourceConfig]
 }
 action reorderLeadsByToken {
   fn: import { reorderLeadsByToken } from "@src/app/leads/operations",
@@ -979,7 +991,111 @@ query getLeadNotesByToken {
 }
 action deleteLeadNoteByToken {
   fn: import { deleteLeadNoteByToken } from "@src/app/leads/operations",
-  entities: [LeadNote, LeadSearch, LeadSearchShareToken]
+  entities: [Lead, LeadNote, LeadSearch, LeadSearchShareToken]
+}
+action overrideBoardStatusesByToken {
+  fn: import { overrideBoardStatusesByToken } from "@src/app/leads/operations",
+  entities: [LeadSearch, LeadSearchShareToken, LeadStatusConfig]
+}
+action resetBoardStatusesByToken {
+  fn: import { resetBoardStatusesByToken } from "@src/app/leads/operations",
+  entities: [LeadSearch, LeadSearchShareToken, LeadStatusConfig, Lead]
+}
+action createLeadStatusConfigByToken {
+  fn: import { createLeadStatusConfigByToken } from "@src/app/leads/operations",
+  entities: [LeadSearch, LeadSearchShareToken, LeadStatusConfig]
+}
+action updateLeadStatusConfigByToken {
+  fn: import { updateLeadStatusConfigByToken } from "@src/app/leads/operations",
+  entities: [LeadSearch, LeadSearchShareToken, LeadStatusConfig]
+}
+action deleteLeadStatusConfigByToken {
+  fn: import { deleteLeadStatusConfigByToken } from "@src/app/leads/operations",
+  entities: [LeadSearch, LeadSearchShareToken, LeadStatusConfig, Lead]
+}
+action reorderLeadStatusConfigsByToken {
+  fn: import { reorderLeadStatusConfigsByToken } from "@src/app/leads/operations",
+  entities: [LeadSearch, LeadSearchShareToken, LeadStatusConfig]
+}
+action saveLeadCardFieldsByToken {
+  fn: import { saveLeadCardFieldsByToken } from "@src/app/leads/operations",
+  entities: [LeadSearch, LeadSearchShareToken, LeadCardFieldConfig]
+}
+action resetLeadCardFieldsByToken {
+  fn: import { resetLeadCardFieldsByToken } from "@src/app/leads/operations",
+  entities: [LeadSearch, LeadSearchShareToken, LeadCardFieldConfig]
+}
+query getProspectTemplatesByToken {
+  fn: import { getProspectTemplatesByToken } from "@src/app/leads/operations",
+  entities: [LeadSearch, LeadSearchShareToken, ProspectTemplate]
+}
+action upsertProspectTemplateByToken {
+  fn: import { upsertProspectTemplateByToken } from "@src/app/leads/operations",
+  entities: [LeadSearch, LeadSearchShareToken, ProspectTemplate]
+}
+action deleteProspectTemplateByToken {
+  fn: import { deleteProspectTemplateByToken } from "@src/app/leads/operations",
+  entities: [LeadSearch, LeadSearchShareToken, ProspectTemplate]
+}
+query getTemplateContextByToken {
+  fn: import { getTemplateContextByToken } from "@src/app/leads/operations",
+  entities: [LeadSearch, LeadSearchShareToken, Company]
+}
+query getLeadIntakeConfigByToken {
+  fn: import { getLeadIntakeConfigByToken } from "@src/app/leads/intakeOperations",
+  entities: [Company, LeadSearch, LeadInboundWebhook, LeadInboundEvent, LeadSearchShareToken]
+}
+query getLatestIntakeSampleByToken {
+  fn: import { getLatestIntakeSampleByToken } from "@src/app/leads/intakeOperations",
+  entities: [LeadSearch, LeadInboundWebhook, LeadInboundEvent, LeadSearchShareToken]
+}
+query getLeadIntakeEventsByToken {
+  fn: import { getLeadIntakeEventsByToken } from "@src/app/leads/intakeOperations",
+  entities: [LeadSearch, Lead, LeadInboundWebhook, LeadInboundEvent, LeadSearchShareToken]
+}
+action replayIntakeEventByToken {
+  fn: import { replayIntakeEventByToken } from "@src/app/leads/intakeOperations",
+  entities: [LeadSearch, Lead, LeadNote, LeadStatusConfig, LeadSourceConfig, LeadInboundWebhook, LeadInboundEvent, LeadSearchShareToken]
+}
+query revealLeadIntakeSecretByToken {
+  fn: import { revealLeadIntakeSecretByToken } from "@src/app/leads/intakeOperations",
+  entities: [LeadSearch, LeadInboundWebhook, LeadSearchShareToken]
+}
+action rotateLeadIntakeSecretByToken {
+  fn: import { rotateLeadIntakeSecretByToken } from "@src/app/leads/intakeOperations",
+  entities: [LeadSearch, LeadInboundWebhook, LeadSearchShareToken]
+}
+action simulateLeadIntakeCallByToken {
+  fn: import { simulateLeadIntakeCallByToken } from "@src/app/leads/intakeOperations",
+  entities: [LeadSearch, LeadInboundWebhook, LeadInboundEvent, LeadSearchShareToken]
+}
+action saveLeadIntakeMappingByToken {
+  fn: import { saveLeadIntakeMappingByToken } from "@src/app/leads/intakeOperations",
+  entities: [LeadSearch, LeadInboundWebhook, LeadSearchShareToken]
+}
+action saveLeadIntakeAutoReplyByToken {
+  fn: import { saveLeadIntakeAutoReplyByToken } from "@src/app/leads/intakeOperations",
+  entities: [Company, LeadSearch, LeadInboundWebhook, LeadSearchShareToken]
+}
+action updateLeadIntakeWebhookByToken {
+  fn: import { updateLeadIntakeWebhookByToken } from "@src/app/leads/intakeOperations",
+  entities: [Company, LeadSearch, LeadInboundWebhook, LeadSearchShareToken]
+}
+query getLeadCardFieldsByToken {
+  fn: import { getLeadCardFieldsByToken } from "@src/app/leads/operations",
+  entities: [LeadCardFieldConfig, LeadSearch, LeadSearchShareToken]
+}
+query getLeadSourceConfigsByToken {
+  fn: import { getLeadSourceConfigsByToken } from "@src/app/leads/operations",
+  entities: [LeadSourceConfig, Lead, LeadSearch, LeadSearchShareToken]
+}
+action fetchMoreLeadsByToken {
+  fn: import { fetchMoreLeadsByToken } from "@src/app/leads/operations",
+  entities: [LeadSearch, Lead, LeadSearchShareToken]
+}
+action exportLeadsByToken {
+  fn: import { exportLeadsByToken } from "@src/app/leads/operations",
+  entities: [LeadSearch, LeadSearchShareToken, Lead, LeadSourceConfig]
 }
 
 query getPriceItems {

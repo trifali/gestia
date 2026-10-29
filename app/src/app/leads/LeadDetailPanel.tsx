@@ -93,32 +93,64 @@ function InfoRow({
 
 // ─── Panel ────────────────────────────────────────────────────────────────────
 
-export function LeadDetailPanel({
+/** Ce que la fiche laisse faire. L'application permet tout ; un lien de partage, ce qu'il a reçu. */
+export type LeadDetailAccess = {
+  status: boolean;
+  edit: boolean;
+  notes: boolean;
+  writeNotes: boolean;
+};
+
+export const FULL_DETAIL_ACCESS: LeadDetailAccess = { status: true, edit: true, notes: true, writeNotes: true };
+
+/**
+ * La fiche elle-même, sans aucun accès aux données : tout arrive en props et
+ * tout repart par des rappels.
+ *
+ * Deux enveloppes la nourrissent — `LeadDetailPanel` dans l'application et le
+ * portail d'un lien de partage — pour que l'employé qui reçoit le lien voie
+ * exactement la fiche que voit l'équipe, et non une copie qui divergerait.
+ */
+export function LeadDetailView({
   lead: incomingLead,
   statusConfigs,
-  existingClientNames,
+  sources,
+  cardFields: allCardFields,
+  notes,
+  access,
+  stateChips: chipsFor,
   onClose,
-  onRefetch,
-  onEmail,
-  onSms,
-  onConvert,
-  onDelete,
+  onStatus,
+  onSource,
+  onSaveInfo,
+  onAddNote,
+  onDeleteNote,
+  footer,
+  clearChatBubble = true,
 }: {
   lead: Lead | null;
   statusConfigs: LeadStatusConfig[];
-  existingClientNames: Set<string>;
+  sources: LeadSourceOption[];
+  cardFields: CardFieldConfig[];
+  notes: any[];
+  access: LeadDetailAccess;
+  /** Étiquettes d'état sous le nom (SMS, client…). */
+  stateChips?: (lead: Lead) => React.ReactNode[];
   onClose: () => void;
-  onRefetch: () => void;
-  onEmail: (lead: Lead) => void;
-  onSms: (lead: Lead) => void;
-  onConvert: (lead: Lead) => void;
-  onDelete: (lead: Lead) => void;
+  /** Lèvent en cas d'échec : la fiche affiche l'erreur et garde la saisie. */
+  onStatus: (lead: Lead, key: string) => Promise<unknown>;
+  onSource: (lead: Lead, source: string) => Promise<unknown>;
+  onSaveInfo: (lead: Lead, values: LeadFormValues, extras: LeadExtra[]) => Promise<unknown>;
+  onAddNote: (lead: Lead, text: string) => Promise<unknown>;
+  onDeleteNote: (id: string) => Promise<unknown>;
+  /** Les actions du pied de la fiche. */
+  footer: (lead: Lead) => React.ReactNode;
+  /** Garde de la place sous le pied pour la bulle de messagerie de l'application. */
+  clearChatBubble?: boolean;
 }) {
   const [editing, setEditing] = useState(false);
   const [savingStatus, setSavingStatus] = useState<string | null>(null);
   const [savingSource, setSavingSource] = useState(false);
-  const { data: sourceConfigs = [] } = useQuery(getLeadSourceConfigs);
-  const sources = sourceConfigs as LeadSourceOption[];
   const [noteText, setNoteText] = useState('');
   const [savingNote, setSavingNote] = useState(false);
   const [deletingNoteId, setDeletingNoteId] = useState<string | null>(null);
@@ -129,27 +161,9 @@ export function LeadDetailPanel({
   // Les champs libres déclarés pour le tableau de ce prospect. La fiche ne les
   // invente pas : elle remplit ce que « Cartes » (ou la correspondance) a déclaré,
   // sinon une information saisie ici ne pourrait jamais être étoilée.
-  const boardId = (lead as any)?.searchId ?? null;
-  const { data: cardFieldRows } = useQuery(
-    getLeadCardFields,
-    { searchId: boardId },
-    { enabled: !!boardId } as any,
-  );
-  const allCardFields: CardFieldConfig[] = (cardFieldRows as CardFieldConfig[]) ?? [];
   const declaredExtras: CardFieldConfig[] = allCardFields.filter(f => isExtraFieldKey(f.key));
 
   const leadId = lead?.id ?? null;
-  const identifier = (lead as any)?.placeId ?? leadId;
-  const { data: notes = [], refetch: refetchNotes } = useQuery(
-    getLeadNotes,
-    { identifier },
-    { enabled: !!identifier } as any,
-  );
-
-  // Must stay above the `if (!lead) return null` below: hooks cannot be called
-  // conditionally, and this component renders with lead === null while closed.
-  const { canSend: smsCanSend, reason: smsReason } = useSmsCapability();
-  const { canSend: emailCanSend, reason: emailReason } = useEmailCapability();
 
   // Keep the rendered lead in sync with fresh data from the board.
   useEffect(() => {
@@ -175,24 +189,6 @@ export function LeadDetailPanel({
     setNoteText('');
   }, [leadId]);
 
-  // Ouvrir la fiche vaut « vu », et c'est ce qui annule l'alerte d'arrivée
-  // (voir jobs/leadIntake) : changer le statut ne suffisait pas, on peut très
-  // bien traiter un prospect sans le sortir de sa colonne.
-  //
-  // Piloté par `incomingLead?.id` et non par `leadId` : ce dernier reste garni
-  // pendant les 200 ms de fermeture, et rejouerait l'appel à chaque sortie.
-  //
-  // Le tableau n'est rechargé que si l'ouverture était la première : c'est
-  // exactement quand la pastille « jamais ouvert » doit disparaître de la carte.
-  // Les consultations suivantes n'écrivent rien et ne rechargent rien.
-  const openedId = incomingLead?.id ?? null;
-  useEffect(() => {
-    if (!openedId) return;
-    (markLeadViewed as any)({ leadId: openedId })
-      .then((res: any) => { if (res?.marked) onRefetch(); })
-      .catch(() => undefined);
-  }, [openedId]);
-
   // Escape closes the panel.
   useEffect(() => {
     if (!lead) return;
@@ -203,15 +199,7 @@ export function LeadDetailPanel({
     return () => document.removeEventListener('keydown', onKey);
   }, [lead, onClose]);
 
-  const notesDirty = useRef(false);
-
-  function handleClose() {
-    if (notesDirty.current) {
-      notesDirty.current = false;
-      onRefetch();
-    }
-    onClose();
-  }
+  const handleClose = onClose;
 
   if (!lead) return null;
 
@@ -219,18 +207,15 @@ export function LeadDetailPanel({
   const current =
     statusConfigs.find(s => s.key === lead.status) ??
     ({ label: lead.status, color: '#9ca3af', key: lead.status } as LeadStatusConfig);
-  const alreadyClient = existingClientNames.has(lead.name.toLowerCase());
-  // Les notes ont leur propre section juste en dessous : pas d'étiquette en double.
-  const stateChips = leadStateChips(lead, { smsCanSend, isClient: alreadyClient, notes: false });
+  const stateChips = chipsFor?.(lead) ?? [];
 
   async function handleStatus(key: string) {
     if (key === lead!.status) return;
     setSavingStatus(key);
     try {
-      await updateLead({ id: lead!.id, status: key });
-      onRefetch();
-    } catch {
-      toast.error('Erreur lors de la mise à jour du statut');
+      await onStatus(lead!, key);
+    } catch (e: any) {
+      toast.error(e?.message || 'Erreur lors de la mise à jour du statut');
     } finally {
       setSavingStatus(null);
     }
@@ -240,10 +225,9 @@ export function LeadDetailPanel({
     if (source === (lead as any)!.source) return;
     setSavingSource(true);
     try {
-      await updateLead({ id: lead!.id, source } as any);
-      onRefetch();
-    } catch {
-      toast.error('Erreur lors de la mise à jour de la provenance');
+      await onSource(lead!, source);
+    } catch (e: any) {
+      toast.error(e?.message || 'Erreur lors de la mise à jour de la provenance');
     } finally {
       setSavingSource(false);
     }
@@ -389,21 +373,11 @@ export function LeadDetailPanel({
   }
 
   async function handleSaveInfo(values: LeadFormValues) {
-    await updateLead({
-      id: lead!.id,
-      name: values.name || undefined,
-      phone: values.phone || undefined,
-      email: values.email || undefined,
-      website: values.website || undefined,
-      address: values.address || undefined,
-      category: values.category || undefined,
-      // Les lignes vides ne sont pas enregistrées : un champ déclaré mais non
-      // rempli pour ce prospect n'est pas une valeur vide, c'est une absence.
-      extras: extrasDraft.filter(e => e.value.trim().length > 0),
-    } as any);
+    // Les lignes vides ne sont pas enregistrées : un champ déclaré mais non
+    // rempli pour ce prospect n'est pas une valeur vide, c'est une absence.
+    await onSaveInfo(lead!, values, extrasDraft.filter(e => e.value.trim().length > 0));
     toast.success('Prospect mis à jour');
     setEditing(false);
-    onRefetch();
   }
 
   async function handleAddNote(e: React.FormEvent) {
@@ -411,10 +385,8 @@ export function LeadDetailPanel({
     if (!noteText.trim()) return;
     setSavingNote(true);
     try {
-      await addLeadNote({ leadId: lead!.id, text: noteText });
+      await onAddNote(lead!, noteText);
       setNoteText('');
-      notesDirty.current = true;
-      refetchNotes();
     } catch {
       toast.error('Erreur lors de l\'ajout');
     } finally {
@@ -425,9 +397,7 @@ export function LeadDetailPanel({
   async function handleDeleteNote(id: string) {
     setDeletingNoteId(id);
     try {
-      await deleteLeadNote({ id });
-      notesDirty.current = true;
-      refetchNotes();
+      await onDeleteNote(id);
     } catch {
       toast.error('Erreur lors de la suppression');
     } finally {
@@ -453,7 +423,7 @@ export function LeadDetailPanel({
       <aside
         // pb-20 : la bulle de messagerie flotte au-dessus de ce coin, rien
         // d'utile ne doit finir sous un disque de 56 px.
-        className={`fixed inset-y-0 right-0 z-[35] w-full sm:w-[380px] lg:w-[420px] pb-20 bg-white border-l border-line shadow-xl flex flex-col overflow-y-auto overscroll-contain transition-transform duration-200 ${
+        className={`fixed inset-y-0 right-0 z-[35] w-full sm:w-[380px] lg:w-[420px] ${clearChatBubble ? 'pb-20' : ''} bg-white border-l border-line shadow-xl flex flex-col overflow-y-auto overscroll-contain transition-transform duration-200 ${
           shown ? 'translate-x-0' : 'translate-x-full'
         }`}
         role='dialog'
@@ -486,15 +456,17 @@ export function LeadDetailPanel({
             <div className='flex flex-wrap gap-1.5'>
               {statusConfigs
                 .filter(s => s.key !== 'unknown' || s.key === lead.status)
+                // Sans le droit de déplacer, seule la colonne actuelle s'affiche.
+                .filter(s => access.status || s.key === current.key)
                 .map(s => {
                   const active = s.key === current.key;
                   return (
                     <button
                       key={s.key}
                       onClick={() => handleStatus(s.key)}
-                      disabled={savingStatus !== null}
+                      disabled={savingStatus !== null || !access.status}
                       aria-pressed={active}
-                      className={`flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[13px] transition-colors disabled:opacity-60 ${
+                      className={`flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[13px] transition-colors ${access.status ? 'disabled:opacity-60' : ''} ${
                         active
                           ? 'border-ink bg-ink text-white'
                           : 'border-line bg-white text-ink-700 hover:border-ink/30'
@@ -520,17 +492,23 @@ export function LeadDetailPanel({
                 className='w-2 h-2 rounded-full shrink-0'
                 style={{ backgroundColor: leadSourceColor(l.source as string, sources) }}
               />
-              <select
-                className='input h-9 w-auto py-0 pr-8 text-[13px]'
-                value={(l.source as string) ?? 'google_maps'}
-                onChange={e => handleSource(e.target.value)}
-                disabled={savingSource}
-                title="D'où vient ce prospect"
-              >
-                {sources.map(s => (
-                  <option key={s.key} value={s.key}>{s.label}</option>
-                ))}
-              </select>
+              {access.edit ? (
+                <select
+                  className='input h-9 w-auto py-0 pr-8 text-[13px]'
+                  value={(l.source as string) ?? 'google_maps'}
+                  onChange={e => handleSource(e.target.value)}
+                  disabled={savingSource}
+                  title="D'où vient ce prospect"
+                >
+                  {sources.map(s => (
+                    <option key={s.key} value={s.key}>{s.label}</option>
+                  ))}
+                </select>
+              ) : (
+                <span className='text-[13px] text-ink'>
+                  {sources.find(s => s.key === ((l.source as string) ?? 'google_maps'))?.label ?? l.source ?? '—'}
+                </span>
+              )}
               {savingSource && <LuLoader size={12} className='animate-spin text-muted' />}
             </div>
           </div>
@@ -551,7 +529,7 @@ export function LeadDetailPanel({
           <section>
             <div className='flex items-center justify-between mb-1'>
               <h3 className='text-[15px] font-semibold text-ink'>Informations</h3>
-              {!editing && (
+              {!editing && access.edit && (
                 <button
                   className='text-xs text-accent-700 hover:underline flex items-center gap-1'
                   onClick={() => {
@@ -627,7 +605,7 @@ export function LeadDetailPanel({
           </section>
 
           {/* Notes */}
-          <section>
+          {access.notes && <section>
             <h3 className='text-[15px] font-semibold text-ink mb-3 flex items-center gap-1.5'>
               <LuNotebook size={14} className='text-muted' />
               Notes
@@ -645,91 +623,260 @@ export function LeadDetailPanel({
               deletingId={deletingNoteId}
               autoFocus={false}
               scrollable={false}
+              readOnly={!access.writeNotes}
             />
-          </section>
+          </section>}
         </div>
 
         {/* Footer actions */}
         <div className='sticky bottom-0 z-10 shrink-0 px-5 py-3 border-t border-line bg-canvas-100 flex items-center gap-2'>
-          {/* Like the SMS button: the label stays put and the state shows in the
-              colour — green once sent, amber while a draft is waiting. */}
-          <button
-            className={`gap-1.5 text-sm flex-1 justify-center ${
-              !emailCanSend
-                ? 'btn-secondary'
-                : l.hasEmailSent
-                  ? 'btn-secondary text-success'
-                  : l.hasEmailDraft
-                    ? 'btn-secondary text-amber-600'
-                    : 'btn-primary'
-            }`}
-            onClick={() => onEmail(lead)}
-            disabled={!lead.email || !emailCanSend}
-            title={
-              !emailCanSend
-                ? (emailReason ?? '')
-                : !lead.email
-                  ? 'Aucun courriel pour ce prospect'
-                  : l.hasEmailSent
-                    ? 'Déjà contacté — écrire un nouveau courriel'
-                    : l.hasEmailDraft
-                      ? 'Brouillon en cours — cliquer pour reprendre'
-                      : 'Envoyer un courriel'
-            }
-          >
-            <LuSend size={14} />
-            Courriel
-          </button>
-          <button
-            className={`btn-secondary gap-1.5 text-sm relative ${l.hasSmsSent && smsCanSend ? 'text-success' : ''}`}
-            onClick={() => onSms(lead)}
-            disabled={!lead.phone || !smsCanSend}
-            title={
-              !smsCanSend
-                ? (smsReason ?? '')
-                : !lead.phone
-                  ? 'Aucun téléphone pour ce prospect'
-                  : l.smsUnreadCount
-                    ? `${l.smsUnreadCount} réponse(s) non lue(s)`
-                    : 'Envoyer un SMS'
-            }
-          >
-            <LuMessageSquare size={14} />
-            SMS
-            {smsCanSend && l.smsUnreadCount > 0 && (
-              <span className='ml-0.5 min-w-[16px] h-4 px-1 rounded-full bg-accent-500 text-white text-[10px] font-semibold flex items-center justify-center'>
-                {l.smsUnreadCount}
-              </span>
-            )}
-          </button>
-          {lead.status === 'qualifie' &&
-            (alreadyClient ? (
-              <span
-                className='btn-secondary gap-1.5 text-sm opacity-60 cursor-default'
-                title='Déjà ajouté comme client'
-              >
-                <LuUserCheck size={14} />
-                Client
-              </span>
-            ) : (
-              <button
-                className='btn-secondary gap-1.5 text-sm'
-                onClick={() => onConvert(lead)}
-                title='Créer un client depuis ce prospect'
-              >
-                <LuUserPlus size={14} />
-                Client
-              </button>
-            ))}
-          <button
-            className='btn-danger gap-1.5 text-sm'
-            onClick={() => onDelete(lead)}
-            title='Supprimer ce prospect'
-          >
-            <LuTrash2 size={14} />
-          </button>
+          {footer(lead)}
         </div>
       </aside>
+    </>
+  );
+}
+
+// ─── Dans l'application ───────────────────────────────────────────────────────
+
+export function LeadDetailPanel({
+  lead: incomingLead,
+  statusConfigs,
+  existingClientNames,
+  onClose,
+  onRefetch,
+  onEmail,
+  onSms,
+  onConvert,
+  onDelete,
+}: {
+  lead: Lead | null;
+  statusConfigs: LeadStatusConfig[];
+  existingClientNames: Set<string>;
+  onClose: () => void;
+  onRefetch: () => void;
+  onEmail: (lead: Lead) => void;
+  onSms: (lead: Lead) => void;
+  onConvert: (lead: Lead) => void;
+  onDelete: (lead: Lead) => void;
+}) {
+  const { data: sourceConfigs = [] } = useQuery(getLeadSourceConfigs);
+
+  // Le dernier prospect ouvert, gardé pendant que la fiche se referme : ses notes
+  // et ses champs restent à l'écran le temps de l'animation.
+  const lastLead = useRef<Lead | null>(incomingLead);
+  if (incomingLead) lastLead.current = incomingLead;
+  const lead = lastLead.current;
+
+  const boardId = (lead as any)?.searchId ?? null;
+  const { data: cardFieldRows } = useQuery(
+    getLeadCardFields,
+    { searchId: boardId },
+    { enabled: !!boardId } as any,
+  );
+
+  const identifier = (lead as any)?.placeId ?? lead?.id ?? null;
+  const { data: notes = [], refetch: refetchNotes } = useQuery(
+    getLeadNotes,
+    { identifier },
+    { enabled: !!identifier } as any,
+  );
+
+  const { canSend: smsCanSend, reason: smsReason } = useSmsCapability();
+  const { canSend: emailCanSend, reason: emailReason } = useEmailCapability();
+
+  // Ouvrir la fiche vaut « vu », et c'est ce qui annule l'alerte d'arrivée
+  // (voir jobs/leadIntake) : changer le statut ne suffisait pas, on peut très
+  // bien traiter un prospect sans le sortir de sa colonne.
+  //
+  // Piloté par `incomingLead?.id` et non par le prospect retenu : ce dernier
+  // reste garni pendant les 200 ms de fermeture, et rejouerait l'appel à chaque
+  // sortie.
+  //
+  // Le tableau n'est rechargé que si l'ouverture était la première : c'est
+  // exactement quand la pastille « jamais ouvert » doit disparaître de la carte.
+  // Les consultations suivantes n'écrivent rien et ne rechargent rien.
+  const openedId = incomingLead?.id ?? null;
+  useEffect(() => {
+    if (!openedId) return;
+    (markLeadViewed as any)({ leadId: openedId })
+      .then((res: any) => { if (res?.marked) onRefetch(); })
+      .catch(() => undefined);
+  }, [openedId]);
+
+  const notesDirty = useRef(false);
+
+  function handleClose() {
+    if (notesDirty.current) {
+      notesDirty.current = false;
+      onRefetch();
+    }
+    onClose();
+  }
+
+  return (
+    <LeadDetailView
+      lead={incomingLead}
+      statusConfigs={statusConfigs}
+      sources={sourceConfigs as LeadSourceOption[]}
+      cardFields={(cardFieldRows as CardFieldConfig[]) ?? []}
+      notes={notes as any[]}
+      access={FULL_DETAIL_ACCESS}
+      // Les notes ont leur propre section dans la fiche : pas d'étiquette en double.
+      stateChips={l => leadStateChips(l, { smsCanSend, isClient: existingClientNames.has(l.name.toLowerCase()), notes: false })}
+      onClose={handleClose}
+      onStatus={async (l, key) => {
+        await updateLead({ id: l.id, status: key });
+        onRefetch();
+      }}
+      onSource={async (l, source) => {
+        await updateLead({ id: l.id, source } as any);
+        onRefetch();
+      }}
+      onSaveInfo={async (l, values, extras) => {
+        await updateLead({
+          id: l.id,
+          name: values.name || undefined,
+          phone: values.phone || undefined,
+          email: values.email || undefined,
+          website: values.website || undefined,
+          address: values.address || undefined,
+          category: values.category || undefined,
+          extras,
+        } as any);
+        onRefetch();
+      }}
+      onAddNote={async (l, text) => {
+        await addLeadNote({ leadId: l.id, text });
+        notesDirty.current = true;
+        refetchNotes();
+      }}
+      onDeleteNote={async id => {
+        await deleteLeadNote({ id });
+        notesDirty.current = true;
+        refetchNotes();
+      }}
+      footer={l => (
+        <AppFooter
+          lead={l}
+          alreadyClient={existingClientNames.has(l.name.toLowerCase())}
+          smsCanSend={smsCanSend}
+          smsReason={smsReason}
+          emailCanSend={emailCanSend}
+          emailReason={emailReason}
+          onEmail={onEmail}
+          onSms={onSms}
+          onConvert={onConvert}
+          onDelete={onDelete}
+        />
+      )}
+    />
+  );
+}
+
+function AppFooter({
+  lead,
+  alreadyClient,
+  smsCanSend,
+  smsReason,
+  emailCanSend,
+  emailReason,
+  onEmail,
+  onSms,
+  onConvert,
+  onDelete,
+}: {
+  lead: Lead;
+  alreadyClient: boolean;
+  smsCanSend: boolean;
+  smsReason: string | null | undefined;
+  emailCanSend: boolean;
+  emailReason: string | null | undefined;
+  onEmail: (lead: Lead) => void;
+  onSms: (lead: Lead) => void;
+  onConvert: (lead: Lead) => void;
+  onDelete: (lead: Lead) => void;
+}) {
+  const l = lead as any;
+  return (
+    <>
+      {/* Like the SMS button: the label stays put and the state shows in the
+          colour — green once sent, amber while a draft is waiting. */}
+      <button
+        className={`gap-1.5 text-sm flex-1 justify-center ${
+          !emailCanSend
+            ? 'btn-secondary'
+            : l.hasEmailSent
+              ? 'btn-secondary text-success'
+              : l.hasEmailDraft
+                ? 'btn-secondary text-amber-600'
+                : 'btn-primary'
+        }`}
+        onClick={() => onEmail(lead)}
+        disabled={!lead.email || !emailCanSend}
+        title={
+          !emailCanSend
+            ? (emailReason ?? '')
+            : !lead.email
+              ? 'Aucun courriel pour ce prospect'
+              : l.hasEmailSent
+                ? 'Déjà contacté — écrire un nouveau courriel'
+                : l.hasEmailDraft
+                  ? 'Brouillon en cours — cliquer pour reprendre'
+                  : 'Envoyer un courriel'
+        }
+      >
+        <LuSend size={14} />
+        Courriel
+      </button>
+      <button
+        className={`btn-secondary gap-1.5 text-sm relative ${l.hasSmsSent && smsCanSend ? 'text-success' : ''}`}
+        onClick={() => onSms(lead)}
+        disabled={!lead.phone || !smsCanSend}
+        title={
+          !smsCanSend
+            ? (smsReason ?? '')
+            : !lead.phone
+              ? 'Aucun téléphone pour ce prospect'
+              : l.smsUnreadCount
+                ? `${l.smsUnreadCount} réponse(s) non lue(s)`
+                : 'Envoyer un SMS'
+        }
+      >
+        <LuMessageSquare size={14} />
+        SMS
+        {smsCanSend && l.smsUnreadCount > 0 && (
+          <span className='ml-0.5 min-w-[16px] h-4 px-1 rounded-full bg-accent-500 text-white text-[10px] font-semibold flex items-center justify-center'>
+            {l.smsUnreadCount}
+          </span>
+        )}
+      </button>
+      {lead.status === 'qualifie' &&
+        (alreadyClient ? (
+          <span
+            className='btn-secondary gap-1.5 text-sm opacity-60 cursor-default'
+            title='Déjà ajouté comme client'
+          >
+            <LuUserCheck size={14} />
+            Client
+          </span>
+        ) : (
+          <button
+            className='btn-secondary gap-1.5 text-sm'
+            onClick={() => onConvert(lead)}
+            title='Créer un client depuis ce prospect'
+          >
+            <LuUserPlus size={14} />
+            Client
+          </button>
+        ))}
+      <button
+        className='btn-danger gap-1.5 text-sm'
+        onClick={() => onDelete(lead)}
+        title='Supprimer ce prospect'
+      >
+        <LuTrash2 size={14} />
+      </button>
     </>
   );
 }

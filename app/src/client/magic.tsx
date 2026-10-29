@@ -8,6 +8,7 @@ import {
 import { LuSparkles, LuLoader } from 'react-icons/lu';
 import toast from 'react-hot-toast';
 import { magicCorrect } from 'wasp/client/operations';
+import { useViaLink } from './shareLink';
 
 /**
  * Drop-in replacements for native <input> and <textarea> that surface a small
@@ -114,8 +115,10 @@ export const MagicInput = forwardRef<HTMLInputElement, MagicInputProps>(
     const innerRef = useRef<HTMLInputElement | null>(null);
     const [busy, setBusy] = useState(false);
 
+    // Ni sur un lien de partage : la correction est facturée à l'entreprise.
+    const viaLink = useViaLink();
     const enabled =
-      (magic ?? isTextType(type)) && !rest.disabled && !rest.readOnly;
+      (magic ?? isTextType(type)) && !rest.disabled && !rest.readOnly && !viaLink;
 
     const setRef = (el: HTMLInputElement | null) => {
       innerRef.current = el;
@@ -161,7 +164,8 @@ export const MagicTextarea = forwardRef<HTMLTextAreaElement, MagicTextareaProps>
     const innerRef = useRef<HTMLTextAreaElement | null>(null);
     const [busy, setBusy] = useState(false);
 
-    const enabled = magic && !rest.disabled && !rest.readOnly;
+    const viaLink = useViaLink();
+    const enabled = magic && !rest.disabled && !rest.readOnly && !viaLink;
 
     const setRef = (el: HTMLTextAreaElement | null) => {
       innerRef.current = el;
