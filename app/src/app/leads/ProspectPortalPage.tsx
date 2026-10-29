@@ -48,6 +48,8 @@ import {
   LuDownload,
   LuLoader,
   LuEye,
+  LuListChecks,
+  LuArrowRightLeft,
 } from 'react-icons/lu';
 import { Modal } from '../../client/ui';
 import {
@@ -62,6 +64,9 @@ import {
 import { LeadKanbanBoard, KanbanMenu, type KanbanMenuItem } from './LeadKanbanBoard';
 import {
   boardKind,
+  BulkFailureList,
+  BulkNoteModal,
+  runBulk,
   FetchMoreLeadsModal,
   ManageCardFieldsModal,
   ManageStatusesModal,
@@ -73,6 +78,7 @@ import { ShareTokenProvider, useBoardOps, downloadCsv } from './boardOps';
 import { LeadDetailView } from './LeadDetailPanel';
 import { AddLeadModal } from './AddLeadModal';
 import { normalizeSharePermissions, type LeadSharePermissions } from '../../shared/leadShare';
+import { UNKNOWN_STATUS_KEY } from '../../shared/leadStatus';
 
 // ─── Shell ────────────────────────────────────────────────────────────────────
 
@@ -259,6 +265,35 @@ function PortalBoard({ token }: { token: string }) {
   const [exporting, setExporting] = useState(false);
   const ops = useBoardOps();
 
+  // ── Sélection multiple ──────────────────────────────────────────────────────
+  // Les mêmes actions groupées que dans l'application, moins celles qu'un lien
+  // n'offre jamais (courriel, SMS) et celles que ce lien n'a pas reçues.
+  const [selectionMode, setSelectionMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [bulkNote, setBulkNote] = useState(false);
+  const [bulkDelete, setBulkDelete] = useState<any[] | null>(null);
+  const [bulkDeleting, setBulkDeleting] = useState(false);
+  const [bulkFailures, setBulkFailures] = useState<{ lead: any; error: string }[] | null>(null);
+  const [moveOverride, setMoveOverride] = useState<{ ids: Set<string>; status: string } | null>(null);
+  function exitSelection() {
+    setSelectionMode(false);
+    setSelectedIds(new Set());
+  }
+  function toggleSelect(id: string) {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  }
+  function selectMany(ids: string[], selected: boolean) {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      ids.forEach(id => { if (selected) next.add(id); else next.delete(id); });
+      return next;
+    });
+  }
+
   // La fiche ouverte vit dans l'adresse, comme dans l'application : elle survit
   // au rechargement et se transmet avec le lien.
   const detailLeadId = searchParams.get('lead');
@@ -309,6 +344,14 @@ function PortalBoard({ token }: { token: string }) {
       : leadsBeforeSource,
     [leadsBeforeSource, sourceFilter],
   );
+
+  // Un déplacement groupé s'affiche tout de suite, cartes en tête de leur
+  // nouvelle colonne, le temps que les écritures soient faites et relues.
+  const displayLeads = useMemo(() => {
+    if (!moveOverride) return filteredLeads;
+    const moved = filteredLeads.filter(l => moveOverride.ids.has(l.id)).map(l => ({ ...l, status: moveOverride.status }));
+    return [...moved, ...filteredLeads.filter(l => !moveOverride.ids.has(l.id))];
+  }, [filteredLeads, moveOverride]);
 
   const sourceOptions = useMemo(() => {
     const counts = new Map<string, number>();
@@ -413,6 +456,53 @@ function PortalBoard({ token }: { token: string }) {
     ...(perms.export ? [{ key: 'export', label: 'Exporter en CSV', short: 'Exporter', title: 'Exporter les prospects en CSV', icon: exporting ? <LuLoader size={15} className='animate-spin' /> : <LuDownload size={15} />, onSelect: () => handleExport(), disabled: exporting }] : []),
   ];
 
+  // Seules les cartes à l'écran comptent : une carte masquée par la recherche
+  // n'est jamais emportée par une action groupée.
+  const selectedVisible = filteredLeads.filter(l => selectedIds.has(l.id));
+  const canBulk = perms.move || perms.writeNotes || perms.delete;
+
+  async function bulkMove(ids: string[], status: string) {
+    if (ids.length === 0) return;
+    const idSet = new Set(ids);
+    const label = (statusConfigs as any[]).find(c => c.key === status)?.label ?? status;
+    setMoveOverride({ ids: idSet, status });
+    const toastId = toast.loading(`Déplacement vers « ${label} »…`);
+    const movers = rawLeads.filter(l => idSet.has(l.id) && l.status !== status);
+    const failures = await runBulk(movers, lead => updateStatus(lead.id, status), { concurrency: 4 });
+    const failedIds = new Set(failures.map(f => f.lead.id));
+    try {
+      const existing = rawLeads.filter(l => l.status === status && !idSet.has(l.id)).map(l => l.id);
+      await reorder(status, [...ids.filter(id => !failedIds.has(id)), ...existing]);
+    } catch {
+      // L'ordre n'est qu'un confort : les cartes sont dans la bonne colonne.
+    }
+    try { await refetch(); } catch { /* le prochain rafraîchissement rattrapera */ }
+    setMoveOverride(null);
+    if (failures.length === 0) {
+      toast.success(`${ids.length} prospect${ids.length > 1 ? 's' : ''} déplacé${ids.length > 1 ? 's' : ''} vers « ${label} »`, { id: toastId });
+    } else {
+      toast.error(`${failures.length} déplacement(s) en échec`, { id: toastId });
+    }
+  }
+
+  async function handleBulkDelete() {
+    const targets = bulkDelete ?? [];
+    if (targets.length === 0) return;
+    setBulkDeleting(true);
+    const failures = await runBulk(targets, lead => (deleteLeadByToken as any)({ token, leadId: lead.id }), { concurrency: 4 });
+    setBulkDeleting(false);
+    const deleted = targets.filter(l => !failures.some(f => f.lead.id === l.id)).map(l => l.id);
+    if (detailLeadId && deleted.includes(detailLeadId)) setDetailLeadId(null);
+    setSelectedIds(prev => new Set([...prev].filter(id => !deleted.includes(id))));
+    refetch();
+    if (failures.length === 0) {
+      setBulkDelete(null);
+      toast.success(`${deleted.length} prospect(s) supprimé(s)`);
+    } else {
+      setBulkFailures(failures);
+    }
+  }
+
   function cardMenu(lead: any): KanbanMenuItem[] {
     const items: KanbanMenuItem[] = [
       { key: 'open', label: 'Ouvrir la fiche', icon: <LuPanelRightOpen size={15} />, onSelect: () => setDetailLeadId(lead.id) },
@@ -470,12 +560,26 @@ function PortalBoard({ token }: { token: string }) {
           </select>
         )}
 
-        {perms.add && (
+        {(canBulk || perms.add) && (
           <div className='ml-auto flex items-center gap-2'>
-            <button type='button' className='btn-accent h-10 px-3' onClick={() => setShowAddLead(true)} title='Ajouter un prospect'>
-              <LuPlus size={16} />
-              <span className='hidden sm:inline'>Ajouter</span>
-            </button>
+            {canBulk && (
+              <button
+                type='button'
+                className={`h-10 px-3 ${selectionMode ? 'btn-primary' : 'btn-secondary'}`}
+                onClick={() => (selectionMode ? exitSelection() : setSelectionMode(true))}
+                aria-pressed={selectionMode}
+                title='Sélectionner plusieurs prospects'
+              >
+                <LuListChecks size={16} />
+                <span className='hidden md:inline'>Sélection multiple</span>
+              </button>
+            )}
+            {perms.add && (
+              <button type='button' className='btn-accent h-10 px-3' onClick={() => setShowAddLead(true)} title='Ajouter un prospect'>
+                <LuPlus size={16} />
+                <span className='hidden sm:inline'>Ajouter</span>
+              </button>
+            )}
           </div>
         )}
       </div>
@@ -492,6 +596,73 @@ function PortalBoard({ token }: { token: string }) {
           >
             Réinitialiser
           </button>
+        </div>
+      )}
+
+      {selectionMode && (
+        <div className='space-y-2.5 rounded-xl border border-accent-100 bg-accent-50 px-3 py-2.5'>
+          <div className='flex flex-wrap items-center gap-x-3 gap-y-1'>
+            <span className='text-sm font-medium'>
+              {selectedVisible.length > 0
+                ? `${selectedVisible.length} sélectionné${selectedVisible.length > 1 ? 's' : ''}`
+                : 'Touchez les cartes à sélectionner'}
+            </span>
+            {selectedVisible.length < filteredLeads.length && (
+              <button type='button' className='text-sm text-muted underline hover:text-ink' onClick={() => selectMany(filteredLeads.map(l => l.id), true)}>
+                Tout sélectionner ({filteredLeads.length})
+              </button>
+            )}
+            {selectedVisible.length > 0 && (
+              <button type='button' className='text-sm text-muted underline hover:text-ink' onClick={() => setSelectedIds(new Set())}>
+                Désélectionner
+              </button>
+            )}
+            <button type='button' className='btn-secondary ml-auto h-8 px-3 text-sm' onClick={exitSelection}>
+              Terminer
+            </button>
+          </div>
+          <div className='flex flex-wrap items-center gap-2'>
+            {perms.move && (
+              <KanbanMenu
+                label='Déplacer la sélection'
+                sheetTitle={`Déplacer ${selectedVisible.length} prospect(s)`}
+                disabled={selectedVisible.length === 0}
+                trigger={<><LuArrowRightLeft size={14} />Déplacer</>}
+                triggerClassName='btn-secondary h-9 px-3 text-sm'
+                sections={() => [{
+                  title: 'Déplacer vers',
+                  items: (statusConfigs as any[]).filter(c => c.key !== UNKNOWN_STATUS_KEY).map(c => ({
+                    key: c.key,
+                    label: c.label,
+                    icon: <span className='h-2.5 w-2.5 rounded-full' style={{ backgroundColor: c.color ?? '#6366f1' }} />,
+                    onSelect: () => bulkMove(selectedVisible.map(l => l.id), c.key),
+                  })),
+                }]}
+              />
+            )}
+            {perms.writeNotes && (
+              <button
+                type='button'
+                className='btn-secondary h-9 px-3 text-sm'
+                disabled={selectedVisible.length === 0}
+                onClick={() => setBulkNote(true)}
+              >
+                <LuNotebook size={14} />
+                Note
+              </button>
+            )}
+            {perms.delete && (
+              <button
+                type='button'
+                className='btn-danger h-9 px-3 text-sm'
+                onClick={() => { setBulkFailures(null); setBulkDelete(selectedVisible); }}
+                disabled={selectedVisible.length === 0}
+              >
+                <LuTrash2 size={14} />
+                Supprimer
+              </button>
+            )}
+          </div>
         </div>
       )}
     </div>
@@ -523,6 +694,47 @@ function PortalBoard({ token }: { token: string }) {
           onConfirm={handleDeleteLead}
           deleting={deleting}
         />
+      </Modal>
+
+      <Modal open={bulkNote} title='Ajouter une note à la sélection' onClose={() => setBulkNote(false)}>
+        {bulkNote && (
+          <BulkNoteModal
+            leads={selectedVisible}
+            addNote={(lead, text) => (addLeadNoteByToken as any)({ token, leadId: lead.id, text })}
+            onClose={() => setBulkNote(false)}
+            onDone={refetch}
+          />
+        )}
+      </Modal>
+
+      <Modal
+        open={bulkDelete !== null}
+        title={`Supprimer ${bulkDelete?.length ?? 0} prospect(s)`}
+        onClose={() => setBulkDelete(null)}
+      >
+        <div className='space-y-4'>
+          <p className='text-sm text-muted'>
+            Êtes-vous sûr de vouloir supprimer {bulkDelete?.length ?? 0} prospect(s) ? Cette action est irréversible.
+          </p>
+          <div className='rounded-xl border border-line bg-canvas p-3.5 text-sm max-h-48 overflow-y-auto space-y-1'>
+            {(bulkDelete ?? []).slice(0, 20).map(l => (
+              <div key={l.id} className='font-medium'>{l.name}</div>
+            ))}
+            {(bulkDelete?.length ?? 0) > 20 && (
+              <div className='text-muted'>et {(bulkDelete?.length ?? 0) - 20} autre(s)…</div>
+            )}
+          </div>
+          {bulkFailures && <BulkFailureList failures={bulkFailures} />}
+          <div className='flex justify-end gap-2'>
+            <button className='btn-secondary' onClick={() => setBulkDelete(null)} disabled={bulkDeleting}>
+              Annuler
+            </button>
+            <button className='btn-danger gap-1.5' onClick={handleBulkDelete} disabled={bulkDeleting}>
+              {bulkDeleting ? <LuLoader size={14} className='animate-spin' /> : <LuTrash2 size={14} />}
+              {bulkDeleting ? 'Suppression…' : 'Supprimer'}
+            </button>
+          </div>
+        </div>
       </Modal>
 
       <Modal open={showAddLead} title='Ajouter un prospect' onClose={() => setShowAddLead(false)}>
@@ -660,7 +872,7 @@ function PortalBoard({ token }: { token: string }) {
         </div>
 
         <LeadKanbanBoard
-          leads={filteredLeads}
+          leads={displayLeads}
           statusConfigs={statusConfigs}
           sources={sourceConfigs}
           cardFields={cardFields}
@@ -670,6 +882,10 @@ function PortalBoard({ token }: { token: string }) {
           canMove={perms.move}
           onCardClick={lead => setDetailLeadId(lead.id)}
           selectedLeadId={detailLeadId}
+          selectionMode={selectionMode}
+          selectedIds={selectedIds}
+          onToggleSelect={toggleSelect}
+          onSelectMany={selectMany}
           cardMenu={cardMenu}
           cardBadges={lead => perms.notes && lead.noteCount > 0 ? (
             <LeadChip icon={<LuNotebook size={11} />}>

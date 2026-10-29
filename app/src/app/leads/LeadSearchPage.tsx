@@ -3034,7 +3034,7 @@ type BulkFailure = { lead: Lead; error: string };
  * au lieu de s'arrêter au premier : sur vingt envois, un numéro invalide ne doit
  * pas priver les dix-neuf autres de leur message.
  */
-async function runBulk(
+export async function runBulk(
   leads: Lead[],
   fn: (lead: Lead) => Promise<unknown>,
   { concurrency = 1, onProgress }: { concurrency?: number; onProgress?: (done: number) => void } = {},
@@ -3057,7 +3057,7 @@ async function runBulk(
   return failures;
 }
 
-function BulkFailureList({ failures }: { failures: BulkFailure[] }) {
+export function BulkFailureList({ failures }: { failures: BulkFailure[] }) {
   if (failures.length === 0) return null;
   return (
     <div className='rounded-xl border border-red-200 bg-red-50 p-3 text-[13px] text-red-700 space-y-1 max-h-40 overflow-y-auto'>
@@ -3346,7 +3346,18 @@ function BulkMessageModal({
 }
 
 /** La même note posée sur plusieurs prospects — « Appelé, pas de réponse ». */
-function BulkNoteModal({ leads, onClose, onDone }: { leads: Lead[]; onClose: () => void; onDone: () => void }) {
+export function BulkNoteModal({
+  leads,
+  onClose,
+  onDone,
+  addNote = (lead, text) => (addLeadNote as any)({ leadId: lead.id, text }),
+}: {
+  leads: Lead[];
+  onClose: () => void;
+  onDone: () => void;
+  /** L'appel serveur : `addLeadNote` par défaut, sa jumelle sur un lien de partage. */
+  addNote?: (lead: Lead, text: string) => Promise<unknown>;
+}) {
   const [text, setText] = useState('');
   const [saving, setSaving] = useState(false);
   const [failures, setFailures] = useState<BulkFailure[] | null>(null);
@@ -3354,7 +3365,7 @@ function BulkNoteModal({ leads, onClose, onDone }: { leads: Lead[]; onClose: () 
   async function save() {
     if (!text.trim()) return;
     setSaving(true);
-    const failed = await runBulk(leads, lead => (addLeadNote as any)({ leadId: lead.id, text }), { concurrency: 4 });
+    const failed = await runBulk(leads, lead => addNote(lead, text), { concurrency: 4 });
     setSaving(false);
     onDone();
     if (failed.length === 0) {
