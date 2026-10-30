@@ -726,6 +726,10 @@ action addLeadNote {
   fn: import { addLeadNote } from "@src/app/leads/operations",
   entities: [User, LeadNote, Lead]
 }
+action addLeadVoiceNote {
+  fn: import { addLeadVoiceNote } from "@src/app/leads/operations",
+  entities: [User, LeadNote, Lead]
+}
 action deleteLeadNote {
   fn: import { deleteLeadNote } from "@src/app/leads/operations",
   entities: [User, LeadNote]
@@ -983,6 +987,10 @@ action deleteLeadByToken {
 }
 action addLeadNoteByToken {
   fn: import { addLeadNoteByToken } from "@src/app/leads/operations",
+  entities: [Lead, LeadSearch, LeadSearchShareToken, LeadNote]
+}
+action addLeadVoiceNoteByToken {
+  fn: import { addLeadVoiceNoteByToken } from "@src/app/leads/operations",
   entities: [Lead, LeadSearch, LeadSearchShareToken, LeadNote]
 }
 query getLeadNotesByToken {

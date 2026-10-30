@@ -25,6 +25,7 @@ import {
   markLeadViewedByToken,
   // @ts-ignore
   addLeadNoteByToken,
+  addLeadVoiceNoteByToken,
   // @ts-ignore
   getLeadNotesByToken,
   // @ts-ignore
@@ -206,6 +207,11 @@ function PortalDetailPanel({
       }}
       onAddNote={async (l, text) => {
         await (addLeadNoteByToken as any)({ token, leadId: l.id, text });
+        notesDirty.current = true;
+        refetchNotes();
+      }}
+      onAddVoiceNote={async (l, payload) => {
+        await (addLeadVoiceNoteByToken as any)({ token, leadId: l.id, ...payload });
         notesDirty.current = true;
         refetchNotes();
       }}

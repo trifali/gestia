@@ -39,6 +39,7 @@ import {
   buildThreadHeaders,
 } from '../../shared/mailThread';
 import { sendSms, toE164, resolveSmsCredentials, isDirectIdentifier } from '../../server/sms';
+import { createVoiceNote, removeVoiceNoteAudio, withAudioUrls, type VoiceNoteInput } from '../../server/voiceNotes';
 import type {
   GetLeadSearches,
   GetLeadSearchDetail,
@@ -1165,10 +1166,11 @@ export const getLeadNotes = async (
   context: any,
 ): Promise<any[]> => {
   const companyId = ensureCompany(context.user);
-  return (context.entities as any).LeadNote.findMany({
+  const notes = await (context.entities as any).LeadNote.findMany({
     where: { companyId, identifier },
     orderBy: { createdAt: 'asc' },
   });
+  return withAudioUrls(notes);
 };
 
 export const addLeadNote = async (
@@ -1187,6 +1189,19 @@ export const addLeadNote = async (
   });
 };
 
+export const addLeadVoiceNote = async (
+  { leadId, ...input }: VoiceNoteInput & { leadId: string },
+  context: any,
+): Promise<any> => {
+  const companyId = ensureCompany(context.user);
+  const lead = await context.entities.Lead.findUnique({
+    where: { id: leadId },
+    include: { search: { select: { companyId: true } } },
+  });
+  if (!lead || (lead as any).search.companyId !== companyId) throw new HttpError(404);
+  return createVoiceNote(context.entities, { companyId, identifier: lead.placeId ?? lead.id }, input);
+};
+
 export const deleteLeadNote = async (
   { id }: { id: string },
   context: any,
@@ -1195,6 +1210,7 @@ export const deleteLeadNote = async (
   const note = await (context.entities as any).LeadNote.findUnique({ where: { id } });
   if (!note || note.companyId !== companyId) throw new HttpError(404);
   await (context.entities as any).LeadNote.delete({ where: { id } });
+  await removeVoiceNoteAudio(note);
   return { id };
 };
 
@@ -2417,6 +2433,20 @@ export const addLeadNoteByToken = async (
   });
 };
 
+export const addLeadVoiceNoteByToken = async (
+  { token, leadId, ...input }: VoiceNoteInput & { token: string; leadId: string },
+  context: any,
+) => {
+  const shareToken = await validateShareToken(token, context.entities);
+  requireSharePermission(shareToken.perms, 'writeNotes');
+  const lead = await leadOfShare(context.entities, shareToken.searchId, leadId);
+  return createVoiceNote(
+    context.entities,
+    { companyId: lead.search.companyId, identifier: lead.placeId ?? lead.id },
+    input,
+  );
+};
+
 // ─── getLeadNotesByToken (public – no auth) ───────────────────────────────────
 
 export const getLeadNotesByToken = async (
@@ -2428,10 +2458,11 @@ export const getLeadNotesByToken = async (
   const lead = await leadOfShare(context.entities, shareToken.searchId, leadId);
 
   const identifier = lead.placeId ?? lead.id;
-  return (context.entities as any).LeadNote.findMany({
+  const notes = await (context.entities as any).LeadNote.findMany({
     where: { companyId: lead.search.companyId, identifier },
     orderBy: { createdAt: 'asc' },
   });
+  return withAudioUrls(notes);
 };
 
 // ─── deleteLeadNoteByToken (public – no auth) ─────────────────────────────────
@@ -2457,6 +2488,7 @@ export const deleteLeadNoteByToken = async (
   });
   if (!onBoard) throw new HttpError(403);
   await (context.entities as any).LeadNote.delete({ where: { id: noteId } });
+  await removeVoiceNoteAudio(note);
   return { deleted: true };
 };
 
@@ -2759,8 +2791,9 @@ export const getPastNotesByToken = async ({ token, identifier }: { token: string
   const history = await prospectHistory(context.entities, shareToken.companyId, leads, labels.get);
   const known = [...history.values()].flat().some(h => h.identifier === identifier);
   if (!known) throw new HttpError(403);
-  return context.entities.LeadNote.findMany({
+  const notes = await context.entities.LeadNote.findMany({
     where: { companyId: shareToken.companyId, identifier },
     orderBy: { createdAt: 'asc' },
   });
+  return withAudioUrls(notes);
 };

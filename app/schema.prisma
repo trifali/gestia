@@ -786,7 +786,15 @@ model LeadNote {
   companyId String
 
   identifier String // placeId when available, else lead.id
-  text       String
+  text       String // empty for a voice note
+
+  // Note vocale : le fichier vit dans MinIO (voir server/voiceNotes). La durée et
+  // la forme d'onde sont calculées à l'enregistrement, dans le navigateur, pour
+  // que le lecteur s'affiche sans télécharger ni décoder le fichier.
+  audioKey      String?
+  audioMime     String?
+  audioDuration Float? // seconds
+  audioPeaks    Json? // number[] in [0, 1]
 
   @@index([companyId, identifier])
 }

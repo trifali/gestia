@@ -33,7 +33,9 @@ import {
 
 import { formatMontrealTime } from '../../client/format';
 import { PhoneInput } from '../../client/ui';
+import { MicButton, VoiceNotePlayer, VoiceRecorder, canRecordVoice, type VoiceNotePayload } from './VoiceNote';
 export { formatMontrealTime };
+export type { VoiceNotePayload };
 
 // ─── Lead provenance ──────────────────────────────────────────────────────────
 // Where a prospect came from. `google_maps` is the default for everything the
@@ -88,7 +90,15 @@ export type { LeadSourceKey, LeadSourceOption } from '../../shared/leadSources';
 // ─── Note thread (timeline + composer) ───────────────────────────────────────
 // Used in NoteModal for both the authenticated page and the public portal.
 
-type NoteItem = { id: string; text: string; createdAt: Date | string };
+type NoteItem = {
+  id: string;
+  text: string;
+  createdAt: Date | string;
+  audioKey?: string | null;
+  audioUrl?: string | null;
+  audioDuration?: number | null;
+  audioPeaks?: unknown;
+};
 
 export function NoteThread({
   notes,
@@ -101,6 +111,7 @@ export function NoteThread({
   autoFocus = true,
   scrollable = true,
   readOnly = false,
+  onVoice,
 }: {
   notes: NoteItem[];
   text: string;
@@ -115,9 +126,14 @@ export function NoteThread({
   scrollable?: boolean;
   /** Lecture seule : ni composeur ni suppression (lien de partage sans ce droit). */
   readOnly?: boolean;
+  /** Enregistre une note vocale — absent : pas de bouton micro. Lève en cas d'échec. */
+  onVoice?: (payload: VoiceNotePayload) => Promise<unknown>;
 }) {
   const timelineRef = useRef<HTMLDivElement>(null);
   const prevCount = useRef<number | null>(null);
+  const [recording, setRecording] = useState(false);
+  // Évalué une fois : le navigateur ne gagne pas de micro en cours de route.
+  const [voiceSupported] = useState(() => canRecordVoice());
 
   // La plus récente d'abord : c'est elle qu'on vient lire. Le serveur les rend
   // dans l'ordre chronologique, le tri se fait donc ici.
@@ -137,7 +153,10 @@ export function NoteThread({
   return (
     <div className='flex flex-col gap-4'>
       {/* Composer — en haut, juste au-dessus de la note qu'il va créer. */}
-      {!readOnly && <form onSubmit={onSubmit} className='flex gap-2'>
+      {!readOnly && recording && onVoice && (
+        <VoiceRecorder onSend={onVoice} onClose={() => setRecording(false)} />
+      )}
+      {!readOnly && !recording && <form onSubmit={onSubmit} className='flex gap-2'>
         <textarea
           className='input resize-none flex-1 text-[13px]'
           rows={2}
@@ -152,6 +171,7 @@ export function NoteThread({
           }}
           autoFocus={autoFocus}
         />
+        {onVoice && voiceSupported && <MicButton onClick={() => setRecording(true)} disabled={saving} />}
         <button
           type='submit'
           className='btn-primary self-end gap-1.5'
@@ -188,7 +208,7 @@ export function NoteThread({
                       onClick={() => onDelete(n.id)}
                       disabled={deletingId === n.id}
                       title='Supprimer'
-                      aria-label='Supprimer la note'
+                      aria-label={n.audioUrl ? 'Supprimer la note vocale' : 'Supprimer la note'}
                     >
                       {deletingId === n.id ? (
                         <LuLoader size={12} className='animate-spin' />
@@ -197,7 +217,21 @@ export function NoteThread({
                       )}
                     </button>}
                   </div>
-                  <p className='mt-1 text-[13px] leading-5 text-ink whitespace-pre-wrap break-words'>{n.text}</p>
+                  {n.audioUrl && (
+                    <div className='mt-1.5'>
+                      <VoiceNotePlayer
+                        url={n.audioUrl}
+                        duration={n.audioDuration ?? 0}
+                        peaks={Array.isArray(n.audioPeaks) ? (n.audioPeaks as number[]) : null}
+                      />
+                    </div>
+                  )}
+                  {n.audioKey && !n.audioUrl && (
+                    <p className='mt-1 text-[13px] italic text-muted'>Note vocale indisponible</p>
+                  )}
+                  {n.text && (
+                    <p className='mt-1 text-[13px] leading-5 text-ink whitespace-pre-wrap break-words'>{n.text}</p>
+                  )}
                 </div>
               </div>
             </div>
