@@ -23,6 +23,7 @@ import {
   LuNotebook,
   LuUserCheck,
   LuCheck,
+  LuHistory,
 } from 'react-icons/lu';
 
 // ─── Helpers partagés avec le shell ───────────────────────────────────────────
@@ -537,7 +538,49 @@ export function leadStateChips(
   if (isClient && lead.status === 'qualifie') {
     chips.push(<LeadChip key='client' tone='success' icon={<LuUserCheck size={11} />}>Client</LeadChip>);
   }
+  const past = leadHistory(lead);
+  if (past.length > 0) {
+    const contacted = past.some(historyContacted);
+    chips.push(
+      <LeadChip
+        key='history'
+        tone='warning'
+        icon={<LuHistory size={11} />}
+        title={past.map(h => `${h.boardTitle || 'Tableau supprimé'} — ${h.statusLabel ?? h.status}${h.kind === 'archived' ? ' (retiré)' : ''}`).join('\n')}
+      >
+        {contacted ? 'Déjà contacté' : 'Déjà prospecté'}
+      </LeadChip>,
+    );
+  }
   return chips;
+}
+
+// ─── Historique d'un prospect ─────────────────────────────────────────────────
+
+/** Une trace d'une même entreprise sur un autre tableau, ou dans l'archive (voir server/prospectArchive). */
+export type LeadHistoryEntry = {
+  kind: 'board' | 'archived';
+  searchId: string | null;
+  boardTitle: string;
+  status: string;
+  statusLabel: string | null;
+  addedAt: string | Date;
+  archivedAt: string | Date | null;
+  reason: string | null;
+  identifier: string;
+  matchedBy: 'google' | 'phone' | 'email';
+  emails: number;
+  smsSent: number;
+  smsReplies: number;
+  notes: number;
+};
+
+export function leadHistory(lead: any): LeadHistoryEntry[] {
+  return Array.isArray(lead?.history) ? lead.history : [];
+}
+
+export function historyContacted(h: Pick<LeadHistoryEntry, 'emails' | 'smsSent'>): boolean {
+  return h.emails > 0 || h.smsSent > 0;
 }
 
 /**
@@ -811,7 +854,9 @@ export function LeadDeleteConfirmModal({
   return (
     <div className='space-y-4'>
       <p className='text-sm text-muted'>
-        Êtes-vous sûr de vouloir supprimer ce prospect ? Cette action est irréversible.
+        La carte quitte le tableau, mais le prospect reste dans l'historique : s'il réapparaît
+        dans une prochaine recherche ou un formulaire, vous verrez qu'il a déjà été prospecté,
+        sur quel tableau, avec ses notes, courriels et SMS.
       </p>
       <div className='rounded-xl border border-line bg-canvas p-3.5 text-sm font-medium'>
         {lead.name}

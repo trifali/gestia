@@ -618,11 +618,11 @@ query getLeadSearches {
 }
 query getLeadSearchDetail {
   fn: import { getLeadSearchDetail } from "@src/app/leads/operations",
-  entities: [User, LeadSearch, Lead, LeadNote, LeadEmailLog, LeadEmailDraft, LeadSmsLog, LeadInboundWebhook]
+  entities: [User, LeadSearch, Lead, LeadNote, LeadEmailLog, LeadEmailDraft, LeadSmsLog, LeadInboundWebhook, ProspectArchive, LeadStatusConfig]
 }
 action searchLeads {
   fn: import { searchLeads } from "@src/app/leads/operations",
-  entities: [User, LeadSearch, Lead, ProspectStatus]
+  entities: [User, LeadSearch, Lead, ProspectStatus, ProspectArchive]
 }
 action updateLead {
   fn: import { updateLead } from "@src/app/leads/operations",
@@ -634,7 +634,7 @@ action reorderLeads {
 }
 action deleteLeadSearch {
   fn: import { deleteLeadSearch } from "@src/app/leads/operations",
-  entities: [User, LeadSearch]
+  entities: [User, LeadSearch, ProspectArchive, LeadStatusConfig, Lead]
 }
 action updateLeadSearch {
   fn: import { updateLeadSearch } from "@src/app/leads/operations",
@@ -869,7 +869,7 @@ query getEmailCapability {
 }
 action fetchMoreLeads {
   fn: import { fetchMoreLeads } from "@src/app/leads/operations",
-  entities: [User, LeadSearch, Lead]
+  entities: [User, LeadSearch, Lead, ProspectArchive]
 }
 action createLead {
   fn: import { createLead } from "@src/app/leads/operations",
@@ -877,11 +877,11 @@ action createLead {
 }
 action deleteLead {
   fn: import { deleteLead } from "@src/app/leads/operations",
-  entities: [User, LeadSearch, Lead]
+  entities: [User, LeadSearch, Lead, ProspectArchive, LeadStatusConfig]
 }
 action deleteLeads {
   fn: import { deleteLeads } from "@src/app/leads/operations",
-  entities: [User, LeadSearch, Lead]
+  entities: [User, LeadSearch, Lead, ProspectArchive, LeadStatusConfig]
 }
 // Ouvrir une fiche vaut « vu » : c'est ce qui annule l'alerte d'arrivée.
 action markLeadViewed {
@@ -967,7 +967,7 @@ action revokeLeadShareToken {
 }
 query getLeadSearchByToken {
   fn: import { getLeadSearchByToken } from "@src/app/leads/operations",
-  entities: [LeadSearch, Lead, LeadSearchShareToken, LeadStatusConfig, LeadSourceConfig, LeadNote, LeadCardFieldConfig]
+  entities: [LeadSearch, Lead, LeadSearchShareToken, LeadStatusConfig, LeadSourceConfig, LeadNote, LeadCardFieldConfig, LeadEmailLog, LeadEmailDraft, LeadSmsLog, ProspectArchive]
 }
 action updateLeadByToken {
   fn: import { updateLeadByToken } from "@src/app/leads/operations",
@@ -979,7 +979,7 @@ action reorderLeadsByToken {
 }
 action deleteLeadByToken {
   fn: import { deleteLeadByToken } from "@src/app/leads/operations",
-  entities: [Lead, LeadSearch, LeadSearchShareToken]
+  entities: [Lead, LeadSearch, LeadSearchShareToken, ProspectArchive, LeadStatusConfig]
 }
 action addLeadNoteByToken {
   fn: import { addLeadNoteByToken } from "@src/app/leads/operations",
@@ -1091,7 +1091,47 @@ query getLeadSourceConfigsByToken {
 }
 action fetchMoreLeadsByToken {
   fn: import { fetchMoreLeadsByToken } from "@src/app/leads/operations",
-  entities: [LeadSearch, Lead, LeadSearchShareToken]
+  entities: [LeadSearch, Lead, LeadSearchShareToken, ProspectArchive]
+}
+query getLeadEmailLogsByToken {
+  fn: import { getLeadEmailLogsByToken } from "@src/app/leads/operations",
+  entities: [LeadEmailLog, Lead, LeadSearch, LeadSearchShareToken]
+}
+query getLeadEmailDraftByToken {
+  fn: import { getLeadEmailDraftByToken } from "@src/app/leads/operations",
+  entities: [LeadEmailDraft, Lead, LeadSearch, LeadSearchShareToken]
+}
+action saveLeadEmailDraftByToken {
+  fn: import { saveLeadEmailDraftByToken } from "@src/app/leads/operations",
+  entities: [LeadEmailDraft, Lead, LeadSearch, LeadSearchShareToken]
+}
+action sendProspectEmailByToken {
+  fn: import { sendProspectEmailByToken } from "@src/app/leads/operations",
+  entities: [Company, LeadEmailLog, LeadEmailDraft, Lead, LeadSearch, LeadSearchShareToken]
+}
+query getLeadSmsLogsByToken {
+  fn: import { getLeadSmsLogsByToken } from "@src/app/leads/operations",
+  entities: [LeadSmsLog, Lead, LeadSearch, LeadSearchShareToken]
+}
+action markLeadSmsReadByToken {
+  fn: import { markLeadSmsReadByToken } from "@src/app/leads/operations",
+  entities: [LeadSmsLog, Lead, LeadSearch, LeadSearchShareToken]
+}
+action sendProspectSmsByToken {
+  fn: import { sendProspectSmsByToken } from "@src/app/leads/operations",
+  entities: [Company, Lead, LeadSmsLog, LeadSearch, LeadSearchShareToken]
+}
+query getEmailCapabilityByToken {
+  fn: import { getEmailCapabilityByToken } from "@src/app/leads/operations",
+  entities: [Company, Lead, LeadSearch, LeadSearchShareToken]
+}
+query getSmsCapabilityByToken {
+  fn: import { getSmsCapabilityByToken } from "@src/app/leads/operations",
+  entities: [Company, Lead, LeadSearch, LeadSearchShareToken]
+}
+query getPastNotesByToken {
+  fn: import { getPastNotesByToken } from "@src/app/leads/operations",
+  entities: [Lead, LeadSearch, LeadSearchShareToken, LeadNote, LeadEmailLog, LeadSmsLog, ProspectArchive, LeadStatusConfig]
 }
 action exportLeadsByToken {
   fn: import { exportLeadsByToken } from "@src/app/leads/operations",

@@ -21,6 +21,12 @@ export type LeadSharePermissions = {
   add: boolean;
   /** Supprimer des prospects. */
   delete: boolean;
+  /** Écrire aux prospects par courriel, au nom de l'entreprise, et voir les envois. */
+  email: boolean;
+  /** Écrire aux prospects par SMS, au nom de l'entreprise, et voir la conversation. */
+  sms: boolean;
+  /** Voir où une entreprise est déjà passée : autres tableaux et prospects supprimés. */
+  history: boolean;
   /** Ajouter, renommer, réordonner et supprimer les colonnes de ce tableau. */
   statuses: boolean;
   /** Choisir les champs affichés sur les cartes et dans la fiche. */
@@ -31,7 +37,7 @@ export type LeadSharePermissions = {
   export: boolean;
   /** La source d'un tableau alimenté par webhook : adresse, correspondance, journal, alertes, réponse automatique. */
   source: boolean;
-  /** Les critères d'un tableau Google Maps, et « Chercher plus ». */
+  /** Redéfinir les critères d'un tableau Google Maps et y lancer de nouvelles recherches. */
   criteria: boolean;
 };
 
@@ -57,13 +63,16 @@ export const LEAD_SHARE_PERMISSION_OPTIONS: {
   { key: 'notes', group: 'prospects', label: 'Voir les notes', hint: "Les notes laissées par l'équipe sur chaque prospect." },
   { key: 'writeNotes', group: 'prospects', label: 'Écrire et supprimer des notes', hint: 'Ajouter des notes et effacer celles qui ne servent plus.', requires: 'notes' },
   { key: 'add', group: 'prospects', label: 'Ajouter des prospects', hint: 'Créer de nouvelles cartes sur ce tableau.' },
-  { key: 'delete', group: 'prospects', label: 'Supprimer des prospects', hint: 'Retirer définitivement une carte du tableau.' },
+  { key: 'delete', group: 'prospects', label: 'Supprimer des prospects', hint: 'Retirer une carte du tableau (elle reste dans l’historique).' },
+  { key: 'email', group: 'prospects', label: 'Envoyer des courriels', hint: "Au nom de l'entreprise, depuis la fiche ou la sélection multiple ; voir les courriels déjà envoyés." },
+  { key: 'sms', group: 'prospects', label: 'Envoyer des SMS', hint: "Au nom de l'entreprise (facturés) ; voir la conversation et les réponses." },
+  { key: 'history', group: 'prospects', label: "Voir l'historique", hint: 'Où chaque entreprise est déjà passée : autres tableaux et prospects supprimés, avec leurs notes.' },
   { key: 'statuses', group: 'board', label: 'Statuts', hint: 'Ajouter, renommer, réordonner et supprimer les colonnes de ce tableau.' },
   { key: 'cardFields', group: 'board', label: 'Cartes', hint: 'Choisir les champs affichés sur les cartes et dans la fiche.' },
   { key: 'templates', group: 'board', label: 'Modèles courriel / SMS', hint: 'Écrire et modifier les modèles de messages de ce tableau.' },
   { key: 'export', group: 'board', label: 'Exporter en CSV', hint: 'Télécharger tous les prospects du tableau.' },
   { key: 'source', group: 'board', label: 'Source de prospects', hint: "Tableaux alimentés par un formulaire : adresse et secret, correspondance des champs, journal, alertes et SMS automatiques." },
-  { key: 'criteria', group: 'board', label: 'Critères et « Chercher plus »', hint: 'Tableaux Google Maps : voir les critères et lancer de nouvelles recherches (facturées par Google).' },
+  { key: 'criteria', group: 'board', label: 'Critères et nouvelles recherches', hint: 'Tableaux Google Maps : redéfinir les critères et lancer de nouvelles recherches (facturées par Google).' },
 ];
 
 /** Ce que propose un nouveau lien : l'accès complet, à resserrer au besoin. */
@@ -74,6 +83,9 @@ export const FULL_SHARE_PERMISSIONS: LeadSharePermissions = {
   writeNotes: true,
   add: true,
   delete: true,
+  email: true,
+  sms: true,
+  history: true,
   statuses: true,
   cardFields: true,
   templates: true,
@@ -90,6 +102,9 @@ export const READ_ONLY_SHARE_PERMISSIONS: LeadSharePermissions = {
   writeNotes: false,
   add: false,
   delete: false,
+  email: false,
+  sms: false,
+  history: false,
   statuses: false,
   cardFields: false,
   templates: false,

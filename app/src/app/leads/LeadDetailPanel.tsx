@@ -39,11 +39,11 @@ import {
   LuUserPlus,
   LuUserCheck,
   LuClock,
-  LuTriangleAlert,
   LuLoader,
   LuNotebook,
   LuMessageSquare,
   LuInfo,
+  LuHistory,
 } from 'react-icons/lu';
 import {
   NoteThread,
@@ -55,6 +55,9 @@ import {
   LeadAvatar,
   leadStateChips,
   leadSourceColor,
+  leadHistory,
+  historyContacted,
+  type LeadHistoryEntry,
   extraFieldId,
   isExtraFieldKey,
   visibleDetailFields,
@@ -127,6 +130,7 @@ export function LeadDetailView({
   onDeleteNote,
   footer,
   clearChatBubble = true,
+  historyNotes,
 }: {
   lead: Lead | null;
   statusConfigs: LeadStatusConfig[];
@@ -147,6 +151,8 @@ export function LeadDetailView({
   footer: (lead: Lead) => React.ReactNode;
   /** Garde de la place sous le pied pour la bulle de messagerie de l'application. */
   clearChatBubble?: boolean;
+  /** Les notes d'une fiche passée, par sa clé — absent : pas de bouton « Voir les notes ». */
+  historyNotes?: (identifier: string) => React.ReactNode;
 }) {
   const [editing, setEditing] = useState(false);
   const [savingStatus, setSavingStatus] = useState<string | null>(null);
@@ -516,14 +522,6 @@ export function LeadDetailView({
 
         {/* Body */}
         <div className='flex-1 px-5 py-4 space-y-5'>
-          {l.duplicateSearchTitles?.length > 0 && (
-            <div className='flex items-start gap-2 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-2'>
-              <LuTriangleAlert size={13} className='shrink-0 mt-0.5' />
-              <span>
-                Déjà présent dans : {l.duplicateSearchTitles.join(', ')}
-              </span>
-            </div>
-          )}
 
           {/* Contact info */}
           <section>
@@ -603,6 +601,15 @@ export function LeadDetailView({
               </div>
             )}
           </section>
+
+          {/* Historique : où cette entreprise est déjà passée. */}
+          {leadHistory(lead).length > 0 && (
+            <HistorySection
+              entries={leadHistory(lead)}
+              currentIdentifier={(lead as any).placeId ?? lead.id}
+              renderNotes={historyNotes}
+            />
+          )}
 
           {/* Notes */}
           {access.notes && <section>
@@ -722,6 +729,7 @@ export function LeadDetailPanel({
       cardFields={(cardFieldRows as CardFieldConfig[]) ?? []}
       notes={notes as any[]}
       access={FULL_DETAIL_ACCESS}
+      historyNotes={identifier => <PastNotes identifier={identifier} />}
       // Les notes ont leur propre section dans la fiche : pas d'étiquette en double.
       stateChips={l => leadStateChips(l, { smsCanSend, isClient: existingClientNames.has(l.name.toLowerCase()), notes: false })}
       onClose={handleClose}
@@ -878,5 +886,116 @@ function AppFooter({
         <LuTrash2 size={14} />
       </button>
     </>
+  );
+}
+
+// ─── Historique ───────────────────────────────────────────────────────────────
+
+const shortDate = (d: string | Date) =>
+  new Date(d).toLocaleDateString('fr-CA', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'America/Toronto' });
+
+const MATCHED_BY: Record<LeadHistoryEntry['matchedBy'], string> = {
+  google: 'Reconnu par sa fiche Google',
+  phone: 'Reconnu par son téléphone',
+  email: 'Reconnu par son courriel',
+};
+
+/**
+ * Les autres passages de la même entreprise : autres tableaux, et prospects
+ * supprimés gardés dans l'archive. Ce qui répond, avant d'écrire, à « l'a-t-on
+ * déjà contacté, et où en était-on ? ».
+ */
+function HistorySection({
+  entries,
+  currentIdentifier,
+  renderNotes,
+}: {
+  entries: LeadHistoryEntry[];
+  currentIdentifier: string;
+  renderNotes?: (identifier: string) => React.ReactNode;
+}) {
+  const [open, setOpen] = useState<string | null>(null);
+  const contacted = entries.some(historyContacted);
+  return (
+    <section aria-label='Historique'>
+      <h3 className='text-[15px] font-semibold text-ink mb-1 flex items-center gap-1.5'>
+        <LuHistory size={14} className='text-muted' />
+        Historique
+        <span className='rounded-full bg-canvas-200 px-2 py-0.5 text-xs font-medium text-ink-700'>{entries.length}</span>
+      </h3>
+      <p className='mb-2.5 text-[13px] text-muted'>
+        {contacted
+          ? 'Cette entreprise a déjà été contactée.'
+          : 'Cette entreprise est déjà passée par vos tableaux.'}
+      </p>
+      <ul className='space-y-2'>
+        {entries.map((h, i) => {
+          const key = `${h.kind}:${h.identifier}:${i}`;
+          const sameThread = h.identifier === currentIdentifier;
+          return (
+            <li key={key} className='rounded-xl border border-line bg-white px-3 py-2.5'>
+              <div className='flex items-start justify-between gap-2'>
+                <div className='min-w-0'>
+                  <div className='text-[13px] font-medium text-ink break-words'>
+                    {h.boardTitle || 'Tableau supprimé'}
+                  </div>
+                  <div className='text-xs text-muted'>
+                    {h.kind === 'archived'
+                      ? `Retiré le ${shortDate(h.archivedAt ?? h.addedAt)}${h.reason === 'board_deleted' ? ' (tableau supprimé)' : ''}`
+                      : `Toujours sur ce tableau · ajouté le ${shortDate(h.addedAt)}`}
+                  </div>
+                </div>
+                <span className='shrink-0 rounded-full border border-line px-2 py-0.5 text-xs text-ink-700'>
+                  {h.statusLabel ?? h.status}
+                </span>
+              </div>
+              <div className='mt-1.5 flex flex-wrap items-center gap-1.5'>
+                {h.emails > 0 && <span className='rounded-md bg-canvas-200 px-1.5 text-[11px] leading-[18px] text-ink-700'>{h.emails} courriel{h.emails > 1 ? 's' : ''}</span>}
+                {h.smsSent > 0 && <span className='rounded-md bg-canvas-200 px-1.5 text-[11px] leading-[18px] text-ink-700'>{h.smsSent} SMS envoyé{h.smsSent > 1 ? 's' : ''}</span>}
+                {h.smsReplies > 0 && <span className='rounded-md bg-accent-50 px-1.5 text-[11px] leading-[18px] text-accent-800'>{h.smsReplies} réponse{h.smsReplies > 1 ? 's' : ''} SMS</span>}
+                {h.notes > 0 && <span className='rounded-md bg-canvas-200 px-1.5 text-[11px] leading-[18px] text-ink-700'>{h.notes} note{h.notes > 1 ? 's' : ''}</span>}
+                {!historyContacted(h) && h.notes === 0 && <span className='text-[11px] text-muted'>Jamais contacté</span>}
+                <span className='text-[11px] text-muted'>· {MATCHED_BY[h.matchedBy]}</span>
+              </div>
+              {h.notes > 0 && (sameThread ? (
+                <p className='mt-1.5 text-[11px] text-muted'>Ses notes sont dans la section Notes ci-dessous.</p>
+              ) : renderNotes && (
+                <>
+                  <button
+                    type='button'
+                    className='mt-1.5 text-xs font-medium text-accent-700 hover:underline'
+                    aria-expanded={open === key}
+                    onClick={() => setOpen(open === key ? null : key)}
+                  >
+                    {open === key ? 'Masquer les notes' : 'Voir les notes'}
+                  </button>
+                  {open === key && <div className='mt-2'>{renderNotes(h.identifier)}</div>}
+                </>
+              ))}
+            </li>
+          );
+        })}
+      </ul>
+    </section>
+  );
+}
+
+/** Les notes d'une fiche passée, en lecture seule. */
+function PastNotes({ identifier }: { identifier: string }) {
+  const { data: notes, isLoading } = useQuery(getLeadNotes, { identifier });
+  if (isLoading) return <LuLoader size={14} className='animate-spin text-muted' />;
+  return (
+    <NoteThread
+      notes={(notes as any[]) ?? []}
+      text=''
+      setText={() => undefined}
+      onSubmit={e => e.preventDefault()}
+      onDelete={() => undefined}
+      saving={false}
+      deletingId={null}
+      autoFocus={false}
+      scrollable={false}
+      readOnly
+    />
   );
 }

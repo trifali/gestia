@@ -12,6 +12,16 @@ import {
   slugifyLeadSource,
 } from '../../shared/leadSources';
 import { normalizeLeadExtras } from '../../shared/leadIntake';
+import { findPlaces } from '../../server/googlePlaces';
+import { archiveLeads, prospectHistory } from '../../server/prospectArchive';
+import { getEmailCapability } from '../company/emailSettings';
+import { getSmsCapability } from '../company/smsSettings';
+import {
+  criteriaProblem,
+  criteriaTitle,
+  normalizeCriteria,
+  RADIUS_CHOICES,
+} from '../../shared/googleSearch';
 import {
   coerceSharePermissions,
   FULL_SHARE_PERMISSIONS,
@@ -53,116 +63,8 @@ function ensureCompany(user: any): string {
   return user.companyId;
 }
 
-const PLACES_BASE = 'https://maps.googleapis.com/maps/api/place';
-
-/**
- * Le numéro d'une fiche Google, dans une forme que Telnyx pourra composer.
- *
- * `formatted_phone_number` est au format *local* du pays : « (514) 574-2228 »
- * au Québec, mais « 01 42 68 53 00 » en France et « 020 7946 0958 » au
- * Royaume-Uni. Sans indicatif pays, `toE164` applique sa règle nord-américaine
- * et fabrique un numéro faux — mais valide : le français devient
- * `+10142685300`, que plus rien en aval ne peut détecter comme erroné.
- *
- * `international_phone_number` porte l'indicatif (« +33 1 42 68 53 00 ») : le
- * « + » suffit à désarmer la règle des dix chiffres, pour tous les pays d'un
- * coup. On le stocke tel quel — lisible pour un humain, et sans ambiguïté pour
- * `toE164`. Le format local ne sert que de repli quand Google ne le fournit pas.
- */
-function placePhone(d: any): string | undefined {
-  const intl = (d?.international_phone_number ?? '').trim();
-  if (intl) return intl;
-  return (d?.formatted_phone_number ?? '').trim() || undefined;
-}
-
-async function fetchJson(url: string): Promise<any> {
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  return res.json();
-}
-
-// Attempt to extract an email from a business website (best-effort, no errors thrown).
-async function extractEmailFromWebsite(websiteUrl: string): Promise<string> {
-  const EMAIL_RE = /\b[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}\b/g;
-  const NOISE_DOMAINS = [
-    'sentry.io', 'google.com', 'facebook.com', 'twitter.com', 'instagram.com',
-    'example.com', 'wixpress.com', 'squarespace.com', 'wordpress.com',
-    'cloudflare.com', 'googleapis.com', 'github.com', 'npmjs.com',
-    'w3.org', 'schema.org', 'jquery.com', 'adobe.com', 'microsoft.com',
-  ];
-
-  function isNoise(email: string): boolean {
-    return NOISE_DOMAINS.some(d => email.toLowerCase().includes('@' + d));
-  }
-
-  function firstEmail(html: string): string {
-    // Prefer mailto: links first
-    const mailtoRe = /mailto:([A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,})/gi;
-    let m = mailtoRe.exec(html);
-    while (m) {
-      if (!isNoise(m[1])) return m[1].toLowerCase();
-      m = mailtoRe.exec(html);
-    }
-    // Fall back to plain email pattern
-    let m2 = EMAIL_RE.exec(html);
-    while (m2) {
-      if (!isNoise(m2[0])) return m2[0].toLowerCase();
-      m2 = EMAIL_RE.exec(html);
-    }
-    return '';
-  }
-
-  async function safeGet(url: string): Promise<string> {
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 6000);
-    try {
-      const r = await fetch(url, {
-        signal: ctrl.signal,
-        headers: { 'User-Agent': 'Mozilla/5.0 (compatible; Gestia/1.0; +https://gestia.app)' },
-        redirect: 'follow',
-      });
-      clearTimeout(timer);
-      if (!r.ok) return '';
-      const ct = r.headers.get('content-type') ?? '';
-      if (!ct.includes('text') && !ct.includes('html')) return '';
-      return r.text();
-    } catch {
-      clearTimeout(timer);
-      return '';
-    }
-  }
-
-  try {
-    const base = new URL(websiteUrl);
-    // Try homepage first
-    const homepageHtml = await safeGet(base.href);
-    const fromHome = firstEmail(homepageHtml);
-    if (fromHome) return fromHome;
-
-    // Try /contact or /contact-us
-    for (const path of ['/contact', '/contact-us', '/nous-joindre', '/coordonnees']) {
-      const html = await safeGet(`${base.origin}${path}`);
-      const found = firstEmail(html);
-      if (found) return found;
-    }
-  } catch {
-    // malformed URL or network error
-  }
-  return '';
-}
 
 // ─── Types ────────────────────────────────────────────────────────────────────
-
-export type SearchFilters = {
-  businessType: string;
-  city: string;
-  province?: string;
-  radius?: number;         // meters, default 10000
-  minRating?: number;      // 0 | 3 | 4 | 4.5
-  requireWebsite?: boolean;
-  maxResults?: number;     // 10 | 20 | 40
-  language?: string;       // fr | en
-};
 
 type LeadSearchWithLeads = LeadSearch & { leads: (Lead & { duplicateSearchTitles?: string[] })[] };
 type LeadSearchSummary = LeadSearch & { leads: { id: string }[] };
@@ -200,59 +102,80 @@ export const getLeadSearchDetail: GetLeadSearchDetail<
   });
   if (!search || search.companyId !== companyId) throw new HttpError(404);
 
-  // Duplicate detection: find placeIds that appear in other searches of this company
-  const placeIds = search.leads.map(l => l.placeId).filter(Boolean) as string[];
-  const duplicates = placeIds.length
-    ? await context.entities.Lead.findMany({
-        where: {
-          placeId: { in: placeIds },
-          searchId: { not: searchId },
-          search: { companyId },
-        },
-        select: { placeId: true, search: { select: { title: true } } },
-      })
-    : [];
-
-  // Build a map: placeId → list of other search titles
-  const dupMap = new Map<string, string[]>();
-  for (const d of duplicates) {
-    if (!d.placeId) continue;
-    if (!dupMap.has(d.placeId)) dupMap.set(d.placeId, []);
-    const title = (d as any).search?.title;
-    if (title && !dupMap.get(d.placeId)!.includes(title)) {
-      dupMap.get(d.placeId)!.push(title);
-    }
+  // Où chaque entreprise est déjà passée : autres tableaux et archive des
+  // prospects supprimés (voir server/prospectArchive). Reconnue par Google, par
+  // téléphone ou par courriel — pas seulement par Google comme auparavant.
+  //
+  // Un complément, pas le tableau : si l'historique ne peut pas être lu (table
+  // absente avant sa migration, par exemple), le tableau s'affiche sans lui
+  // plutôt que de ne pas s'afficher du tout. La suppression, elle, reste stricte :
+  // sans archive, pas de suppression (voir `archiveBeforeDelete`).
+  const labels = statusLabelCache(context.entities, companyId);
+  let history = new Map<string, any[]>();
+  try {
+    history = await prospectHistory(context.entities, companyId, search.leads, labels.get);
+  } catch (err) {
+    console.error('[prospection] historique des prospects indisponible', err);
   }
+  const leadsWithDups = search.leads.map(l => {
+    const past = history.get(l.id) ?? [];
+    return {
+      ...l,
+      history: past,
+      duplicateSearchTitles: [...new Set(past.filter(h => h.kind === 'board').map(h => h.boardTitle))],
+    };
+  });
 
-  const leadsWithDups = search.leads.map(l => ({
-    ...l,
-    duplicateSearchTitles: l.placeId ? (dupMap.get(l.placeId) ?? []) : [],
-  }));
+  const flags = await leadContactFlags(context.entities, companyId, search.leads);
+  const leadsWithFlags = leadsWithDups.map(l => ({ ...l, ...flags.get(l.id) }));
 
-  // Attach note count + email flags (per placeId or lead.id)
-  const identifiers = search.leads.map(l => l.placeId ?? l.id);
+  return { ...search, leads: leadsWithFlags } as any;
+};
+
+export type LeadContactFlags = {
+  noteCount: number;
+  hasNotes: boolean;
+  hasEmailSent: boolean;
+  hasEmailDraft: boolean;
+  hasSmsSent: boolean;
+  smsUnreadCount: number;
+  hasSmsReply: boolean;
+};
+
+/**
+ * Ce qui s'est passé avec chaque carte : notes, courriels (envoyés, brouillon),
+ * SMS (envoyés, réponses, non lus). Le même calcul pour le tableau de
+ * l'application et pour celui d'un lien de partage — qui en retire ensuite ce
+ * que ses droits ne montrent pas.
+ */
+async function leadContactFlags(
+  entities: any,
+  companyId: string,
+  leads: { id: string; placeId?: string | null }[],
+): Promise<Map<string, LeadContactFlags>> {
+  const identifiers = leads.map(l => l.placeId ?? l.id);
   const [noteCounts, emailedIdentifiers, draftIdentifiers, smsedIdentifiers, smsUnread, smsRepliedIdentifiers] = identifiers.length
     ? await Promise.all([
-        (context.entities as any).LeadNote.groupBy({
+        entities.LeadNote.groupBy({
           by: ['identifier'],
           where: { companyId, identifier: { in: identifiers } },
           _count: { id: true },
         }),
-        (context.entities as any).LeadEmailLog.findMany({
+        entities.LeadEmailLog.findMany({
           where: { companyId, identifier: { in: identifiers } },
           select: { identifier: true },
           distinct: ['identifier'],
         }),
-        (context.entities as any).LeadEmailDraft.findMany({
+        entities.LeadEmailDraft.findMany({
           where: { companyId, identifier: { in: identifiers } },
           select: { identifier: true },
         }),
-        (context.entities as any).LeadSmsLog.findMany({
+        entities.LeadSmsLog.findMany({
           where: { companyId, identifier: { in: identifiers }, direction: 'outbound' },
           select: { identifier: true },
           distinct: ['identifier'],
         }),
-        (context.entities as any).LeadSmsLog.groupBy({
+        entities.LeadSmsLog.groupBy({
           by: ['identifier'],
           where: {
             companyId,
@@ -264,7 +187,7 @@ export const getLeadSearchDetail: GetLeadSearchDetail<
         }),
         // Any reply at all, read or not — the unread count above empties as soon
         // as a thread is opened, so it can't answer "who has answered us?".
-        (context.entities as any).LeadSmsLog.findMany({
+        entities.LeadSmsLog.findMany({
           where: { companyId, identifier: { in: identifiers }, direction: 'inbound' },
           select: { identifier: true },
           distinct: ['identifier'],
@@ -280,156 +203,39 @@ export const getLeadSearchDetail: GetLeadSearchDetail<
   );
   const smsRepliedSet = new Set<string>((smsRepliedIdentifiers as any[]).map((s: any) => s.identifier));
 
-  const leadsWithFlags = leadsWithDups.map(l => ({
-    ...l,
-    noteCount: noteCountMap.get(l.placeId ?? l.id) ?? 0,
-    hasNotes: noteCountMap.has(l.placeId ?? l.id),
-    hasEmailSent: emailSet.has(l.placeId ?? l.id),
-    hasEmailDraft: draftSet.has(l.placeId ?? l.id),
-    hasSmsSent: smsSet.has(l.placeId ?? l.id),
-    smsUnreadCount: smsUnreadMap.get(l.placeId ?? l.id) ?? 0,
-    hasSmsReply: smsRepliedSet.has(l.placeId ?? l.id),
-  }));
-
-  return { ...search, leads: leadsWithFlags } as any;
-};
+  const out = new Map<string, LeadContactFlags>();
+  for (const l of leads) {
+    const id = l.placeId ?? l.id;
+    out.set(l.id, {
+      noteCount: noteCountMap.get(id) ?? 0,
+      hasNotes: noteCountMap.has(id),
+      hasEmailSent: emailSet.has(id),
+      hasEmailDraft: draftSet.has(id),
+      hasSmsSent: smsSet.has(id),
+      smsUnreadCount: smsUnreadMap.get(id) ?? 0,
+      hasSmsReply: smsRepliedSet.has(id),
+    });
+  }
+  return out;
+}
 
 // ─── Actions ──────────────────────────────────────────────────────────────────
 
 export const searchLeads: SearchLeads<
-  { title: string; description?: string; purpose?: string; filters: SearchFilters },
+  { title: string; description?: string; purpose?: string; filters: Record<string, any> },
   LeadSearchWithLeads
 > = async ({ title, description, purpose, filters }, context) => {
   const companyId = ensureCompany(context.user);
+  const apiKey = requirePlacesKey();
 
-  const apiKey = process.env.GOOGLE_PLACES_API_KEY;
-  if (!apiKey) {
-    throw new HttpError(
-      500,
-      'Clé API Google Places non configurée. Ajoutez GOOGLE_PLACES_API_KEY dans votre fichier .env.server.',
-    );
-  }
+  const criteria = normalizeCriteria(filters);
+  const problem = criteriaProblem(criteria);
+  if (problem) throw new HttpError(400, problem);
 
-  const {
-    businessType,
-    city,
-    province = 'QC',
-    radius = 10000,
-    minRating = 0,
-    requireWebsite = false,
-    maxResults = 20,
-    language = 'fr',
-  } = filters;
-
-  if (!businessType?.trim()) throw new HttpError(400, 'Type d\'entreprise requis');
-  if (!city?.trim()) throw new HttpError(400, 'Ville requise');
-
-  // Build query string
-  const queryStr = encodeURIComponent(`${businessType} ${city} ${province} Canada`);
-
-  // Helper to get one page of text-search results
-  async function getPage(pageToken?: string): Promise<{ results: any[]; nextPageToken?: string }> {
-    let url = `${PLACES_BASE}/textsearch/json?query=${queryStr}&radius=${radius}&language=${language}&key=${apiKey}`;
-    if (pageToken) url += `&pagetoken=${pageToken}`;
-    const data = await fetchJson(url);
-    if (data.status !== 'OK' && data.status !== 'ZERO_RESULTS') {
-      throw new HttpError(502, `Google Places: ${data.status} — ${data.error_message ?? ''}`);
-    }
-    return { results: data.results ?? [], nextPageToken: data.next_page_token };
-  }
-
-  // Collect up to maxResults place stubs (max 3 pages × 20)
-  let stubs: any[] = [];
-  let pageToken: string | undefined;
-  const pages = Math.min(Math.ceil(maxResults / 20), 3);
-
-  for (let p = 0; p < pages && stubs.length < maxResults; p++) {
-    if (p > 0 && pageToken) {
-      // Google requires a short wait before using next_page_token
-      await new Promise(r => setTimeout(r, 2000));
-    }
-    const { results, nextPageToken } = await getPage(pageToken);
-    stubs.push(...results);
-    pageToken = nextPageToken;
-    if (!nextPageToken) break;
-  }
-
-  stubs = stubs.slice(0, maxResults);
-
-  // For each stub, fetch place details (in parallel, batches of 5)
-  async function getDetails(placeId: string): Promise<any> {
-    const fields = [
-      'name', 'formatted_address', 'formatted_phone_number', 'international_phone_number',
-      'website', 'rating', 'user_ratings_total', 'geometry',
-      'types', 'business_status', 'url', 'opening_hours',
-    ].join('%2C');
-    const url = `${PLACES_BASE}/details/json?place_id=${placeId}&fields=${fields}&language=${language}&key=${apiKey}`;
-    const data = await fetchJson(url);
-    return data.result ?? {};
-  }
-
-  async function batchRun<T>(items: T[], fn: (item: T) => Promise<any>, batchSize = 5): Promise<any[]> {
-    const results: any[] = [];
-    for (let i = 0; i < items.length; i += batchSize) {
-      const batch = items.slice(i, i + batchSize);
-      const settled = await Promise.allSettled(batch.map(fn));
-      results.push(...settled.map(s => (s.status === 'fulfilled' ? s.value : null)));
-    }
-    return results;
-  }
-
-  const details = await batchRun(stubs, (s: any) => getDetails(s.place_id));
-
-  // Merge stubs + details, filter, scrape emails
-  type RawLead = {
-    name: string;
-    address?: string;
-    phone?: string;
-    website?: string;
-    email?: string;
-    rating?: number;
-    reviewCount?: number;
-    category?: string;
-    placeId?: string;
-    mapsUrl?: string;
-    latitude?: number;
-    longitude?: number;
-    isOpen?: boolean;
-  };
-
-  let rawLeads: RawLead[] = (stubs
-    .map((stub: any, i: number) => {
-      const d = details[i] ?? {};
-      const rating = d.rating ?? stub.rating ?? null;
-      if (minRating > 0 && (rating === null || rating < minRating)) return null;
-      const website = d.website ?? null;
-      if (requireWebsite && !website) return null;
-      const raw: RawLead = {
-        name: d.name ?? stub.name,
-        address: d.formatted_address ?? stub.formatted_address ?? undefined,
-        phone: placePhone(d),
-        website: website ?? undefined,
-        rating: rating ?? undefined,
-        reviewCount: d.user_ratings_total ?? stub.user_ratings_total ?? undefined,
-        category: (d.types ?? stub.types ?? [])[0]?.replace(/_/g, ' ') ?? undefined,
-        placeId: stub.place_id ?? undefined,
-        mapsUrl: d.url ?? undefined,
-        latitude: d.geometry?.location?.lat ?? stub.geometry?.location?.lat ?? undefined,
-        longitude: d.geometry?.location?.lng ?? stub.geometry?.location?.lng ?? undefined,
-        isOpen: d.opening_hours?.open_now ?? stub.opening_hours?.open_now ?? undefined,
-      };
-      return raw;
-    })
-    .filter((l): l is RawLead => l !== null));
-
-  // Scrape emails in parallel (batch 5), timeout per site
-  const websitesForScraping = rawLeads.map(l => l.website ?? '');
-  const emailResults = await batchRun(
-    websitesForScraping,
-    (url: string) => (url ? extractEmailFromWebsite(url) : Promise.resolve('')),
-    5,
-  );
-  rawLeads = rawLeads.map((l, i) => ({ ...l, email: emailResults[i] || null }));
+  const exclude = criteria.skipKnown
+    ? await knownPlaces(context.entities, companyId, null)
+    : undefined;
+  const { places: rawLeads } = await findPlaces(criteria, { apiKey, exclude });
 
   // Carry over persistent prospect status for known placeIds
   const placeIds = rawLeads.map(l => l.placeId).filter(Boolean) as string[];
@@ -447,10 +253,10 @@ export const searchLeads: SearchLeads<
   const savedSearch = await context.entities.LeadSearch.create({
     data: {
       companyId,
-      title,
+      title: title?.trim() || criteriaTitle(criteria),
       description,
       purpose: purpose || null,
-      filters: filters as any,
+      filters: criteria as any,
       status: 'done',
       totalFound: rawLeads.length,
       leads: {
@@ -611,6 +417,8 @@ export const deleteLeadSearch: DeleteLeadSearch<{ id: string }, { id: string }> 
   const companyId = ensureCompany(context.user);
   const search = await context.entities.LeadSearch.findUnique({ where: { id } });
   if (!search || search.companyId !== companyId) throw new HttpError(404);
+  // Le tableau emporte ses cartes en cascade : elles passent d'abord à l'archive.
+  await archiveBeforeDelete(context.entities, companyId, { searchId: id }, 'board_deleted');
   await context.entities.LeadSearch.delete({ where: { id } });
   return { id };
 };
@@ -1932,13 +1740,11 @@ export const markLeadSmsRead = async (
 // ─── fetchMoreLeads ───────────────────────────────────────────────────────────
 
 export const fetchMoreLeads = async (
-  { searchId, radiusOverride }: { searchId: string; radiusOverride?: number },
+  { searchId, radiusOverride, filters }: { searchId: string; radiusOverride?: number; filters?: unknown },
   context: any,
-): Promise<{ added: number; exhausted: boolean; nextExpandedRadiusKm: number }> => {
+): Promise<{ added: number; exhausted: boolean; nextExpandedRadiusKm: number | null; located: boolean }> => {
   const companyId = ensureCompany(context.user);
-
-  const apiKey = process.env.GOOGLE_PLACES_API_KEY;
-  if (!apiKey) throw new HttpError(500, 'Clé API Google Places non configurée.');
+  const apiKey = requirePlacesKey();
 
   const search = await context.entities.LeadSearch.findUnique({
     where: { id: searchId },
@@ -1946,122 +1752,35 @@ export const fetchMoreLeads = async (
   });
   if (!search || search.companyId !== companyId) throw new HttpError(404);
 
-  const filters = search.filters as SearchFilters;
-  const {
-    businessType,
-    city,
-    province = 'QC',
-    radius = 10000,
-    minRating = 0,
-    requireWebsite = false,
-    maxResults = 20,
-    language = 'fr',
-  } = filters;
-
-  // Build dedup sets from existing leads
-  const existingPlaceIds = new Set(
-    (search.leads as any[]).map((l: any) => l.placeId).filter(Boolean),
-  );
-  const existingNames = new Set(
-    (search.leads as any[]).map((l: any) => l.name.toLowerCase()),
-  );
-
-  const queryStr = encodeURIComponent(`${businessType} ${city} ${province} Canada`);
-  const searchRadius = radiusOverride ?? radius;
-  const nextExpandedM = Math.min(Math.round(searchRadius * 2.5), 50000);
-
-  async function fetchAllPages(searchRadius: number): Promise<any[]> {
-    const results: any[] = [];
-    let token: string | undefined;
-    for (let p = 0; p < 3; p++) {
-      if (p > 0 && token) await new Promise(r => setTimeout(r, 2000));
-      let url = `${PLACES_BASE}/textsearch/json?query=${queryStr}&radius=${searchRadius}&language=${language}&key=${apiKey}`;
-      if (token) url += `&pagetoken=${token}`;
-      const data = await fetchJson(url);
-      if (data.status !== 'OK' && data.status !== 'ZERO_RESULTS') break;
-      results.push(...(data.results ?? []));
-      token = data.next_page_token;
-      if (!token) break;
-    }
-    return results;
+  // De nouveaux critères remplacent ceux du tableau avant de chercher : c'est ce
+  // qu'affichera l'en-tête, et ce que reprendra le prochain « Chercher plus ».
+  // Un élargissement de zone est retenu de la même façon.
+  let criteria = normalizeCriteria(filters === undefined ? search.filters : filters);
+  if (radiusOverride !== undefined) {
+    if (!RADIUS_CHOICES.includes(radiusOverride as any)) throw new HttpError(400, 'Rayon non reconnu.');
+    criteria = { ...criteria, radius: radiusOverride };
+  }
+  const problem = criteriaProblem(criteria);
+  if (problem) throw new HttpError(400, problem);
+  if (filters !== undefined || radiusOverride !== undefined) {
+    await context.entities.LeadSearch.update({ where: { id: searchId }, data: { filters: criteria as any } });
   }
 
-  function filterNew(stubs: any[]): any[] {
-    return stubs.filter((s: any) => {
-      if (s.place_id && existingPlaceIds.has(s.place_id)) return false;
-      if (!s.place_id && existingNames.has((s.name ?? '').toLowerCase())) return false;
-      return true;
-    });
-  }
-
-  const allStubs = await fetchAllPages(searchRadius);
-  const newStubs = filterNew(allStubs).slice(0, maxResults);
-  const exhausted = newStubs.length === 0;
-
-  if (exhausted) return { added: 0, exhausted: true, nextExpandedRadiusKm: nextExpandedM / 1000 };
-
-  async function getDetails(placeId: string): Promise<any> {
-    const fields = [
-      'name', 'formatted_address', 'formatted_phone_number', 'international_phone_number',
-      'website', 'rating', 'user_ratings_total', 'geometry',
-      'types', 'business_status', 'url', 'opening_hours',
-    ].join('%2C');
-    const url = `${PLACES_BASE}/details/json?place_id=${placeId}&fields=${fields}&language=${language}&key=${apiKey}`;
-    const data = await fetchJson(url);
-    return data.result ?? {};
-  }
-
-  async function batchRun<T>(items: T[], fn: (item: T) => Promise<any>, batchSize = 5): Promise<any[]> {
-    const results: any[] = [];
-    for (let i = 0; i < items.length; i += batchSize) {
-      const batch = items.slice(i, i + batchSize);
-      const settled = await Promise.allSettled(batch.map(fn));
-      results.push(...settled.map(s => (s.status === 'fulfilled' ? s.value : null)));
-    }
-    return results;
-  }
-
-  const details = await batchRun(newStubs, (s: any) => getDetails(s.place_id));
-
-  type RawLead = {
-    name: string; address?: string; phone?: string; website?: string;
-    email?: string; rating?: number; reviewCount?: number; category?: string;
-    placeId?: string; mapsUrl?: string; latitude?: number; longitude?: number; isOpen?: boolean;
+  // Ce tableau d'abord, puis — si demandé — tout ce que l'entreprise connaît.
+  const exclude = {
+    placeIds: new Set<string>((search.leads as any[]).map(l => l.placeId).filter(Boolean)),
+    names: new Set<string>((search.leads as any[]).map(l => String(l.name ?? '').toLowerCase())),
   };
+  if (criteria.skipKnown) {
+    const known = await knownPlaces(context.entities, companyId, searchId);
+    known.placeIds.forEach(id => exclude.placeIds.add(id));
+  }
 
-  let rawLeads: RawLead[] = newStubs
-    .map((stub: any, i: number) => {
-      const d = details[i] ?? {};
-      const rating = d.rating ?? stub.rating ?? null;
-      if (minRating > 0 && (rating === null || rating < minRating)) return null;
-      const website = d.website ?? null;
-      if (requireWebsite && !website) return null;
-      const resolvedName = (d.name ?? stub.name ?? '').toLowerCase();
-      if (existingNames.has(resolvedName)) return null;
-      return {
-        name: d.name ?? stub.name,
-        address: d.formatted_address ?? stub.formatted_address ?? undefined,
-        phone: placePhone(d),
-        website: website ?? undefined,
-        rating: rating ?? undefined,
-        reviewCount: d.user_ratings_total ?? stub.user_ratings_total ?? undefined,
-        category: (d.types ?? stub.types ?? [])[0]?.replace(/_/g, ' ') ?? undefined,
-        placeId: stub.place_id ?? undefined,
-        mapsUrl: d.url ?? undefined,
-        latitude: d.geometry?.location?.lat ?? stub.geometry?.location?.lat ?? undefined,
-        longitude: d.geometry?.location?.lng ?? stub.geometry?.location?.lng ?? undefined,
-        isOpen: d.opening_hours?.open_now ?? stub.opening_hours?.open_now ?? undefined,
-      } as RawLead;
-    })
-    .filter((l): l is RawLead => l !== null);
+  const { places: rawLeads, located } = await findPlaces(criteria, { apiKey, exclude });
+  const larger = RADIUS_CHOICES.find(r => r > criteria.radius) ?? null;
+  const nextExpandedRadiusKm = larger ? larger / 1000 : null;
 
-  // Scrape emails
-  const emailResults = await batchRun(
-    rawLeads.map(l => l.website ?? ''),
-    (url: string) => (url ? extractEmailFromWebsite(url) : Promise.resolve('')),
-    5,
-  );
-  rawLeads = rawLeads.map((l, i) => ({ ...l, email: emailResults[i] || null }));
+  if (rawLeads.length === 0) return { added: 0, exhausted: true, nextExpandedRadiusKm, located };
 
   // Insert the batch on top of the Nouveau column — where they all land — while
   // keeping the order Google returned them in.
@@ -2094,14 +1813,46 @@ export const fetchMoreLeads = async (
     })),
   });
 
-  // Update totalFound
-  await context.entities.LeadSearch.update({
-    where: { id: searchId },
-    data: { totalFound: { increment: rawLeads.length } },
-  });
+  await syncTotalFound(context.entities, searchId);
 
-  return { added: rawLeads.length, exhausted: false, nextExpandedRadiusKm: nextExpandedM / 1000 };
+  return { added: rawLeads.length, exhausted: false, nextExpandedRadiusKm, located };
 };
+
+function requirePlacesKey(): string {
+  const apiKey = process.env.GOOGLE_PLACES_API_KEY;
+  if (!apiKey) {
+    throw new HttpError(
+      500,
+      'Clé API Google Places non configurée. Ajoutez GOOGLE_PLACES_API_KEY dans votre fichier .env.server.',
+    );
+  }
+  return apiKey;
+}
+
+/**
+ * Les entreprises que l'entreprise a déjà dans ses tableaux (sauf `exceptSearchId`)
+ * ou dans son archive, pour « Ignorer les entreprises déjà prospectées ». Par identifiant Google
+ * seulement : deux commerces peuvent porter le même nom dans deux villes.
+ */
+async function knownPlaces(entities: any, companyId: string, exceptSearchId: string | null) {
+  const rows = await entities.Lead.findMany({
+    where: {
+      placeId: { not: null },
+      search: { companyId },
+      ...(exceptSearchId ? { searchId: { not: exceptSearchId } } : {}),
+    },
+    select: { placeId: true },
+  });
+  // Et ceux qui ont été retirés d'un tableau : déjà prospectés eux aussi.
+  const archived = await entities.ProspectArchive.findMany({
+    where: { companyId, placeId: { not: null } },
+    select: { placeId: true },
+  });
+  return {
+    placeIds: new Set<string>([...rows, ...archived].map((r: any) => r.placeId)),
+    names: new Set<string>(),
+  };
+}
 
 // ─── insertLeadOnTop ──────────────────────────────────────────────────────────
 
@@ -2217,6 +1968,52 @@ async function syncTotalFound(entities: any, searchId: string): Promise<void> {
   await entities.LeadSearch.update({ where: { id: searchId }, data: { totalFound } });
 }
 
+// ─── Archive avant suppression ───────────────────────────────────────────────
+
+/** Les intitulés de statut par tableau, lus une fois par tableau. */
+function statusLabelCache(entities: any, companyId: string) {
+  const boards = new Map<string, Promise<Map<string, string>>>();
+  const load = (searchId: string) => {
+    if (!boards.has(searchId)) {
+      boards.set(searchId, effectiveStatusConfigs(entities, companyId, searchId)
+        .then((rows: any[]) => new Map(rows.map(r => [r.key, r.label])))
+        .catch(() => new Map()));
+    }
+    return boards.get(searchId)!;
+  };
+  return {
+    get: async (searchId: string, status: string) => (await load(searchId)).get(status) ?? null,
+    load,
+  };
+}
+
+/**
+ * Recopie dans l'archive les prospects qui vont être supprimés, puis rend leurs
+ * lignes. Toute suppression de carte passe par ici : un prospect retiré d'un
+ * tableau doit pouvoir être reconnu le jour où il revient.
+ */
+async function archiveBeforeDelete(
+  entities: any,
+  companyId: string,
+  where: Record<string, unknown>,
+  reason: 'lead_deleted' | 'board_deleted',
+): Promise<any[]> {
+  const leads = await entities.Lead.findMany({
+    where: { ...where, search: { companyId } },
+    include: { search: { select: { title: true } } },
+  });
+  if (leads.length === 0) return leads;
+  const labels = statusLabelCache(entities, companyId);
+  const loaded = new Map<string, Map<string, string>>();
+  for (const searchId of new Set<string>(leads.map((l: any) => l.searchId))) loaded.set(searchId, await labels.load(searchId));
+  await archiveLeads(entities, companyId, leads, {
+    reason,
+    boardTitle: searchId => leads.find((l: any) => l.searchId === searchId)?.search?.title ?? '',
+    statusLabel: (searchId, status) => loaded.get(searchId)?.get(status) ?? null,
+  });
+  return leads;
+}
+
 // ─── deleteLead ───────────────────────────────────────────────────────────────
 
 export const deleteLead = async (
@@ -2229,6 +2026,7 @@ export const deleteLead = async (
     include: { search: { select: { companyId: true } } },
   });
   if (!lead || lead.search.companyId !== companyId) throw new HttpError(404);
+  await archiveBeforeDelete(context.entities, companyId, { id: leadId }, 'lead_deleted');
   await context.entities.Lead.delete({ where: { id: leadId } });
   await syncTotalFound(context.entities, lead.searchId);
   return { deleted: true };
@@ -2247,10 +2045,7 @@ export const deleteLeads = async (
   // ids belonging to another company are simply never matched. Reading the rows
   // first is what tells us which boards to recount afterwards: once deleted, the
   // ids no longer say where they lived.
-  const doomed = await context.entities.Lead.findMany({
-    where: { id: { in: ids }, search: { companyId } },
-    select: { searchId: true },
-  });
+  const doomed = await archiveBeforeDelete(context.entities, companyId, { id: { in: ids } }, 'lead_deleted');
   const { count } = await context.entities.Lead.deleteMany({
     where: { id: { in: ids }, search: { companyId } },
   });
@@ -2291,6 +2086,9 @@ const SHARE_PERMISSION_REFUSALS: Record<LeadSharePermissionKey, string> = {
   writeNotes: "Ce lien ne permet pas d'écrire ni de supprimer des notes.",
   add: "Ce lien ne permet pas d'ajouter des prospects.",
   delete: 'Ce lien ne permet pas de supprimer des prospects.',
+  email: "Ce lien ne permet pas d'envoyer de courriels.",
+  sms: "Ce lien ne permet pas d'envoyer de SMS.",
+  history: "Ce lien ne permet pas de voir l'historique.",
   statuses: 'Ce lien ne permet pas de modifier les statuts.',
   cardFields: 'Ce lien ne permet pas de modifier les cartes.',
   templates: 'Ce lien ne permet pas de gérer les modèles.',
@@ -2424,23 +2222,34 @@ export const getLeadSearchByToken = async (
     search.id,
   );
 
-  // Le nombre de notes trahirait leur existence à un lien qui ne doit pas les
-  // voir : il n'est compté que pour qui peut les lire.
-  const identifiers = (search as any).leads.map((l: any) => l.placeId ?? l.id);
-  const noteCounts = perms.notes && identifiers.length
-    ? await (context.entities as any).LeadNote.groupBy({
-        by: ['identifier'],
-        where: { companyId: search.companyId, identifier: { in: identifiers } },
-        _count: { id: true },
-      })
-    : [];
-  const noteCountMap = new Map<string, number>((noteCounts as any[]).map((n: any) => [n.identifier, n._count.id]));
-
-  const leadsWithFlags = (search as any).leads.map((l: any) => ({
-    ...l,
-    noteCount: noteCountMap.get(l.placeId ?? l.id) ?? 0,
-    hasNotes: noteCountMap.has(l.placeId ?? l.id),
-  }));
+  // Les mêmes indications que la fiche de l'application, droit par droit : un
+  // lien sans courriel ne voit pas qu'un courriel est parti, un lien sans notes
+  // ne voit pas qu'il en existe.
+  const flags = await leadContactFlags(context.entities, search.companyId, (search as any).leads);
+  let history = new Map<string, any[]>();
+  if (perms.history) {
+    try {
+      const labels = statusLabelCache(context.entities, search.companyId);
+      history = await prospectHistory(context.entities, search.companyId, (search as any).leads, labels.get);
+    } catch (err) {
+      console.error('[prospection] historique des prospects indisponible', err);
+    }
+  }
+  const leadsWithFlags = (search as any).leads.map((l: any) => {
+    const f = flags.get(l.id)!;
+    return {
+      ...l,
+      notes: perms.notes ? l.notes : null,
+      noteCount: perms.notes ? f.noteCount : 0,
+      hasNotes: perms.notes && f.hasNotes,
+      hasEmailSent: perms.email && f.hasEmailSent,
+      hasEmailDraft: perms.email && f.hasEmailDraft,
+      hasSmsSent: perms.sms && f.hasSmsSent,
+      smsUnreadCount: perms.sms ? f.smsUnreadCount : 0,
+      hasSmsReply: perms.sms && f.hasSmsReply,
+      history: history.get(l.id) ?? [],
+    };
+  });
 
   // Le portail n'est pas authentifié, donc il ne peut pas interroger le registre
   // des provenances lui-même. Sans ces lignes, la pastille d'une carte afficherait
@@ -2581,6 +2390,7 @@ export const deleteLeadByToken = async (
   const shareToken = await validateShareToken(token, context.entities);
   requireSharePermission(shareToken.perms, 'delete');
   const lead = await leadOfShare(context.entities, shareToken.searchId, leadId);
+  await archiveBeforeDelete(context.entities, shareToken.companyId, { id: leadId }, 'lead_deleted');
   await context.entities.Lead.delete({ where: { id: leadId } });
   await syncTotalFound(context.entities, lead.searchId);
   return { deleted: true };
@@ -2800,7 +2610,8 @@ async function boardTemplate(entities: any, searchId: string, id: string) {
 
 export const getProspectTemplatesByToken = async ({ token }: { token: string }, context: any) => {
   const shareToken = await validateShareToken(token, context.entities);
-  requireSharePermission(shareToken.perms, 'templates');
+  // Lire les modèles sert aussi à écrire : celui qui envoie s'en sert.
+  requireSharePermission(shareToken.perms, ['templates', 'email', 'sms']);
   return getProspectTemplates({ searchId: shareToken.searchId }, shareActor(shareToken, context.entities));
 };
 
@@ -2836,7 +2647,7 @@ export const deleteProspectTemplateByToken = async ({ token, id }: { token: stri
  */
 export const getTemplateContextByToken = async ({ token }: { token: string }, context: any) => {
   const shareToken = await validateShareToken(token, context.entities);
-  requireSharePermission(shareToken.perms, 'templates');
+  requireSharePermission(shareToken.perms, ['templates', 'email', 'sms']);
   const company = await context.entities.Company.findUnique({
     where: { id: shareToken.companyId },
     select: {
@@ -2865,3 +2676,91 @@ export const getLeadCardFieldsByToken = viaShareLink(null, getLeadCardFields);
 export const getLeadSourceConfigsByToken = viaShareLink(null, getLeadSourceConfigs);
 
 export const fetchMoreLeadsByToken = viaShareLink('criteria', fetchMoreLeads);
+
+// ─── Courriels, SMS et historique par lien (public – no auth) ─────────────────
+//
+// La fiche d'un lien montre ce que montre celle de l'application, droit par droit.
+// Chaque opération qui porte sur un prospect par sa clé (`identifier` : placeId,
+// sinon l'id de la carte) vérifie d'abord que cette clé est celle d'une carte du
+// tableau partagé : sans cela, un lien pourrait lire ou écrire la conversation
+// de n'importe quel prospect de l'entreprise.
+
+async function requireBoardIdentifier(entities: any, shareToken: { searchId: string }, identifier: string) {
+  const onBoard = await entities.Lead.count({
+    where: { searchId: shareToken.searchId, OR: [{ placeId: identifier }, { id: identifier }] },
+  });
+  if (!onBoard) throw new HttpError(403, "Ce prospect n'est pas sur ce tableau.");
+}
+
+/** Vérifie le lien, le droit et la clé, puis exécute l'opération de l'application. */
+function viaShareIdentifier<R>(
+  permission: LeadSharePermissionKey | LeadSharePermissionKey[],
+  impl: (args: any, context: any) => Promise<R>,
+) {
+  return async ({ token, ...args }: { token: string; identifier: string; [k: string]: unknown }, context: any): Promise<R> => {
+    const shareToken = await validateShareToken(token, context.entities);
+    requireSharePermission(shareToken.perms, permission);
+    await requireBoardIdentifier(context.entities, shareToken, String(args.identifier ?? ''));
+    return impl(args, shareActor(shareToken, context.entities));
+  };
+}
+
+export const getLeadEmailLogsByToken = viaShareIdentifier('email', getLeadEmailLogs);
+export const getLeadEmailDraftByToken = viaShareIdentifier('email', getLeadEmailDraft);
+export const saveLeadEmailDraftByToken = viaShareIdentifier('email', saveLeadEmailDraft);
+export const sendProspectEmailByToken = viaShareIdentifier('email', sendProspectEmail);
+export const getLeadSmsLogsByToken = viaShareIdentifier('sms', getLeadSmsLogs);
+export const markLeadSmsReadByToken = viaShareIdentifier('sms', markLeadSmsRead);
+
+/** Le SMS porte aussi la carte : elle doit être sur le tableau, et la clé être la sienne. */
+export const sendProspectSmsByToken = async (
+  { token, ...args }: { token: string; identifier: string; leadId: string; to: string; body: string },
+  context: any,
+) => {
+  const shareToken = await validateShareToken(token, context.entities);
+  requireSharePermission(shareToken.perms, 'sms');
+  const lead = await leadOfShare(context.entities, shareToken.searchId, args.leadId);
+  if ((lead.placeId ?? lead.id) !== args.identifier) throw new HttpError(403);
+  return sendProspectSms(args, shareActor(shareToken, context.entities));
+};
+
+/**
+ * Ce que l'envoi permet, vu d'un lien : comme dans l'application, sans jamais
+ * proposer de configurer — un visiteur sans compte n'a pas accès aux réglages.
+ */
+export const getEmailCapabilityByToken = async ({ token }: { token: string }, context: any) => {
+  const shareToken = await validateShareToken(token, context.entities);
+  requireSharePermission(shareToken.perms, 'email');
+  const cap: any = await (getEmailCapability as any)({}, shareActor(shareToken, context.entities));
+  return { ...cap, canConfigure: false };
+};
+
+export const getSmsCapabilityByToken = async ({ token }: { token: string }, context: any) => {
+  const shareToken = await validateShareToken(token, context.entities);
+  requireSharePermission(shareToken.perms, 'sms');
+  const cap: any = await (getSmsCapability as any)({}, shareActor(shareToken, context.entities));
+  return { ...cap, canConfigure: false };
+};
+
+/**
+ * Les notes d'une fiche passée (historique), en lecture. La clé doit figurer dans
+ * l'historique d'une carte du tableau : un lien ne lit pas les notes d'un prospect
+ * qui n'a rien à voir avec lui.
+ */
+export const getPastNotesByToken = async ({ token, identifier }: { token: string; identifier: string }, context: any) => {
+  const shareToken = await validateShareToken(token, context.entities);
+  requireSharePermission(shareToken.perms, 'history');
+  requireSharePermission(shareToken.perms, 'notes');
+  const leads = await context.entities.Lead.findMany({
+    where: { searchId: shareToken.searchId },
+    select: { id: true, searchId: true, placeId: true, phone: true, email: true },
+  });
+  const labels = statusLabelCache(context.entities, shareToken.companyId);
+  const history = await prospectHistory(context.entities, shareToken.companyId, leads, labels.get);
+  const known = [...history.values()].flat().some(h => h.identifier === identifier);
+  if (!known) throw new HttpError(403);
+  return context.entities.LeadNote.findMany({
+    where: { companyId: shareToken.companyId, identifier },
+    orderBy: { createdAt: 'asc' },
+  });
+};

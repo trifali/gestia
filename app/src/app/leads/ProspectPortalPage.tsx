@@ -29,7 +29,10 @@ import {
   getLeadNotesByToken,
   // @ts-ignore
   deleteLeadNoteByToken,
+  // @ts-ignore
+  getPastNotesByToken,
 } from 'wasp/client/operations';
+import { useEmailCapability, useSmsCapability } from '../../client/capabilities';
 import type { Lead, LeadStatusConfig } from 'wasp/entities';
 import {
   LuUsers,
@@ -48,12 +51,17 @@ import {
   LuDownload,
   LuLoader,
   LuEye,
+  LuSend,
+  LuMessageSquare,
+  LuMapPin,
   LuListChecks,
   LuArrowRightLeft,
 } from 'react-icons/lu';
 import { Modal } from '../../client/ui';
 import {
   LeadChip,
+  leadStateChips,
+  NoteThread,
   LeadDeleteConfirmModal,
   leadExtras,
   leadSourceLabel,
@@ -65,7 +73,10 @@ import { LeadKanbanBoard, KanbanMenu, type KanbanMenuItem } from './LeadKanbanBo
 import {
   boardKind,
   BulkFailureList,
+  BulkMessageModal,
   BulkNoteModal,
+  ProspectEmailModal,
+  ProspectSmsModal,
   runBulk,
   FetchMoreLeadsModal,
   ManageCardFieldsModal,
@@ -73,7 +84,7 @@ import {
   TemplatesModal,
 } from './LeadSearchPage';
 import { IntakePanel } from './intake/IntakePanel';
-import { SearchForm, defaultForm } from './GoogleSearchForm';
+import { BoardCriteriaEditor } from './GoogleSearchForm';
 import { ShareTokenProvider, useBoardOps, downloadCsv } from './boardOps';
 import { LeadDetailView } from './LeadDetailPanel';
 import { AddLeadModal } from './AddLeadModal';
@@ -114,6 +125,8 @@ function PortalDetailPanel({
   onClose,
   onRefetch,
   onDelete,
+  onEmail,
+  onSms,
 }: {
   token: string;
   lead: Lead | null;
@@ -124,6 +137,8 @@ function PortalDetailPanel({
   onClose: () => void;
   onRefetch: () => void;
   onDelete: (lead: Lead) => void;
+  onEmail: (lead: Lead) => void;
+  onSms: (lead: Lead) => void;
 }) {
   // Gardé pendant la fermeture, comme dans l'application.
   const lastLead = useRef<Lead | null>(incomingLead);
@@ -156,6 +171,9 @@ function PortalDetailPanel({
       cardFields={cardFields}
       notes={notes as any[]}
       access={{ status: perms.move, edit: perms.edit, notes: perms.notes, writeNotes: perms.writeNotes }}
+      // Les mêmes étiquettes que dans l'application, limitées à ce que le lien voit.
+      stateChips={l => leadStateChips(l, { smsCanSend: perms.sms, notes: false })}
+      historyNotes={perms.notes ? identifier => <PortalPastNotes token={token} identifier={identifier} /> : undefined}
       clearChatBubble={false}
       onClose={() => {
         if (notesDirty.current) {
@@ -196,30 +214,33 @@ function PortalDetailPanel({
         notesDirty.current = true;
         refetchNotes();
       }}
-      // Pas d'envoi de courriel ni de SMS au nom de l'entreprise depuis un lien
-      // public : l'employé appelle et écrit depuis son propre téléphone.
+      // Comme dans l'application quand le lien en a le droit ; sinon, le
+      // téléphone et la messagerie de l'employé.
       footer={l => (
         <>
-          {l.phone ? (
-            <a href={`tel:${l.phone}`} className='btn-primary flex-1 justify-center gap-1.5 text-sm'>
-              <LuPhone size={14} />
-              Appeler
+          {perms.email ? (
+            <PortalEmailButton lead={l} onEmail={onEmail} />
+          ) : l.email ? (
+            <a href={`mailto:${l.email}`} className='btn-secondary flex-1 justify-center gap-1.5 text-sm'>
+              <LuMail size={14} />
+              Courriel
             </a>
-          ) : (
+          ) : null}
+          {perms.sms && <PortalSmsButton lead={l} onSms={onSms} />}
+          {l.phone ? (
+            <a
+              href={`tel:${l.phone}`}
+              className={`${perms.email || perms.sms ? 'btn-secondary' : 'btn-primary flex-1 justify-center'} gap-1.5 text-sm`}
+              title='Appeler'
+              aria-label='Appeler'
+            >
+              <LuPhone size={14} />
+              {!(perms.email && perms.sms) && 'Appeler'}
+            </a>
+          ) : !(perms.email || perms.sms) && (
             <button className='btn-secondary flex-1 justify-center gap-1.5 text-sm' disabled title='Aucun téléphone pour ce prospect'>
               <LuPhone size={14} />
               Appeler
-            </button>
-          )}
-          {l.email ? (
-            <a href={`mailto:${l.email}`} className='btn-secondary gap-1.5 text-sm'>
-              <LuMail size={14} />
-              Courriel
-            </a>
-          ) : (
-            <button className='btn-secondary gap-1.5 text-sm' disabled title='Aucun courriel pour ce prospect'>
-              <LuMail size={14} />
-              Courriel
             </button>
           )}
           {perms.delete && (
@@ -229,6 +250,82 @@ function PortalDetailPanel({
           )}
         </>
       )}
+    />
+  );
+}
+
+/**
+ * Les boutons d'envoi de la fiche, comme ceux de l'application : vert une fois
+ * envoyé, ambre pour un brouillon, pastille pour les réponses non lues. Rendus
+ * seulement quand le lien a le droit — c'est ce qui les autorise à lire la
+ * capacité d'envoi, refusée sinon.
+ */
+function PortalEmailButton({ lead, onEmail }: { lead: Lead; onEmail: (lead: Lead) => void }) {
+  const { canSend, reason } = useEmailCapability();
+  const l = lead as any;
+  return (
+    <button
+      className={`gap-1.5 text-sm flex-1 justify-center ${
+        !canSend ? 'btn-secondary' : l.hasEmailSent ? 'btn-secondary text-success' : l.hasEmailDraft ? 'btn-secondary text-amber-600' : 'btn-primary'
+      }`}
+      onClick={() => onEmail(lead)}
+      disabled={!lead.email || !canSend}
+      title={
+        !canSend ? (reason ?? '')
+          : !lead.email ? 'Aucun courriel pour ce prospect'
+          : l.hasEmailSent ? 'Déjà contacté — écrire un nouveau courriel'
+          : l.hasEmailDraft ? 'Brouillon en cours — cliquer pour reprendre'
+          : 'Envoyer un courriel'
+      }
+    >
+      <LuSend size={14} />
+      Courriel
+    </button>
+  );
+}
+
+function PortalSmsButton({ lead, onSms }: { lead: Lead; onSms: (lead: Lead) => void }) {
+  const { canSend, reason } = useSmsCapability();
+  const l = lead as any;
+  return (
+    <button
+      className={`btn-secondary gap-1.5 text-sm relative ${l.hasSmsSent && canSend ? 'text-success' : ''}`}
+      onClick={() => onSms(lead)}
+      disabled={!lead.phone || !canSend}
+      title={
+        !canSend ? (reason ?? '')
+          : !lead.phone ? 'Aucun téléphone pour ce prospect'
+          : l.smsUnreadCount ? `${l.smsUnreadCount} réponse(s) non lue(s)`
+          : 'Envoyer un SMS'
+      }
+    >
+      <LuMessageSquare size={14} />
+      SMS
+      {canSend && l.smsUnreadCount > 0 && (
+        <span className='ml-0.5 min-w-[16px] h-4 px-1 rounded-full bg-accent-500 text-white text-[10px] font-semibold flex items-center justify-center'>
+          {l.smsUnreadCount}
+        </span>
+      )}
+    </button>
+  );
+}
+
+/** Les notes d'une fiche passée (historique), en lecture, par le lien. */
+function PortalPastNotes({ token, identifier }: { token: string; identifier: string }) {
+  const { data: notes, isLoading } = useQuery(getPastNotesByToken as any, { token, identifier }, { retry: false } as any);
+  if (isLoading) return <LuLoader size={14} className='animate-spin text-muted' />;
+  return (
+    <NoteThread
+      notes={(notes as any[]) ?? []}
+      text=''
+      setText={() => undefined}
+      onSubmit={(e: React.FormEvent) => e.preventDefault()}
+      onDelete={() => undefined}
+      saving={false}
+      deletingId={null}
+      autoFocus={false}
+      scrollable={false}
+      readOnly
     />
   );
 }
@@ -262,6 +359,7 @@ function PortalBoard({ token }: { token: string }) {
   const [sourceFilter, setSourceFilter] = useState<string | null>(null);
   const [settings, setSettings] = useState<'details' | 'statuses' | 'cardFields' | 'templates' | null>(null);
   const [showFetchMore, setShowFetchMore] = useState(false);
+  const [fetchingMore, setFetchingMore] = useState(false);
   const [exporting, setExporting] = useState(false);
   const ops = useBoardOps();
 
@@ -275,6 +373,10 @@ function PortalBoard({ token }: { token: string }) {
   const [bulkDeleting, setBulkDeleting] = useState(false);
   const [bulkFailures, setBulkFailures] = useState<{ lead: any; error: string }[] | null>(null);
   const [moveOverride, setMoveOverride] = useState<{ ids: Set<string>; status: string } | null>(null);
+  const [emailTarget, setEmailTarget] = useState<Lead | null>(null);
+  const [smsTarget, setSmsTarget] = useState<Lead | null>(null);
+  const [bulkMessage, setBulkMessage] = useState<'email' | 'sms' | null>(null);
+  const [bulkBusy, setBulkBusy] = useState(false);
   function exitSelection() {
     setSelectionMode(false);
     setSelectedIds(new Set());
@@ -439,6 +541,7 @@ function PortalBoard({ token }: { token: string }) {
   // « Source » sur un tableau alimenté par webhook, « Critères » sur une recherche
   // Google : le même bouton que dans l'application, selon la nature du tableau.
   const canDetails = kind === 'webhook' ? perms.source : kind === 'google_maps' ? perms.criteria : false;
+  const canFetchMore = kind === 'google_maps' && perms.criteria;
 
   // Les réglages que ce lien ouvre, dans l'ordre de l'application.
   const boardSettings: (KanbanMenuItem & { short: string; title: string })[] = [
@@ -459,7 +562,7 @@ function PortalBoard({ token }: { token: string }) {
   // Seules les cartes à l'écran comptent : une carte masquée par la recherche
   // n'est jamais emportée par une action groupée.
   const selectedVisible = filteredLeads.filter(l => selectedIds.has(l.id));
-  const canBulk = perms.move || perms.writeNotes || perms.delete;
+  const canBulk = perms.move || perms.writeNotes || perms.delete || perms.email || perms.sms;
 
   async function bulkMove(ids: string[], status: string) {
     if (ids.length === 0) return;
@@ -515,6 +618,26 @@ function PortalBoard({ token }: { token: string }) {
         onSelect: () => setDetailLeadId(lead.id),
       });
     }
+    if (perms.email) {
+      items.push({
+        key: 'email',
+        label: lead.hasEmailDraft && !lead.hasEmailSent ? 'Reprendre le brouillon' : 'Envoyer un courriel',
+        icon: <LuSend size={15} />,
+        onSelect: () => setEmailTarget(lead),
+        disabled: !lead.email,
+        hint: !lead.email ? 'Aucun courriel pour ce prospect' : undefined,
+      });
+    }
+    if (perms.sms) {
+      items.push({
+        key: 'sms',
+        label: lead.smsUnreadCount > 0 ? `Lire la réponse SMS (${lead.smsUnreadCount})` : 'Envoyer un SMS',
+        icon: <LuMessageSquare size={15} />,
+        onSelect: () => setSmsTarget(lead),
+        disabled: !lead.phone,
+        hint: !lead.phone ? 'Aucun téléphone pour ce prospect' : undefined,
+      });
+    }
     if (perms.delete) {
       items.push({ key: 'delete', label: 'Supprimer', icon: <LuTrash2 size={15} />, danger: true, onSelect: () => setDeleteTarget(lead) });
     }
@@ -560,8 +683,22 @@ function PortalBoard({ token }: { token: string }) {
           </select>
         )}
 
-        {(canBulk || perms.add) && (
+        {(canBulk || perms.add || canFetchMore) && (
           <div className='ml-auto flex items-center gap-2'>
+            {/* Le même bouton que dans l'application, pour les tableaux Google
+                dont le lien a le droit « Critères et nouvelles recherches ». */}
+            {canFetchMore && (
+              <button
+                type='button'
+                className='btn-secondary h-10 px-3'
+                onClick={() => setShowFetchMore(true)}
+                disabled={fetchingMore}
+                title='Chercher plus de prospects sur Google Maps avec les mêmes critères'
+              >
+                {fetchingMore ? <LuLoader size={16} className='animate-spin' /> : <LuMapPin size={16} />}
+                <span className='hidden lg:inline'>Chercher plus</span>
+              </button>
+            )}
             {canBulk && (
               <button
                 type='button'
@@ -640,6 +777,28 @@ function PortalBoard({ token }: { token: string }) {
                 }]}
               />
             )}
+            {perms.email && (
+              <button
+                type='button'
+                className='btn-secondary h-9 px-3 text-sm'
+                disabled={selectedVisible.length === 0}
+                onClick={() => setBulkMessage('email')}
+              >
+                <LuSend size={14} />
+                Courriel
+              </button>
+            )}
+            {perms.sms && (
+              <button
+                type='button'
+                className='btn-secondary h-9 px-3 text-sm'
+                disabled={selectedVisible.length === 0}
+                onClick={() => setBulkMessage('sms')}
+              >
+                <LuMessageSquare size={14} />
+                SMS
+              </button>
+            )}
             {perms.writeNotes && (
               <button
                 type='button'
@@ -680,7 +839,49 @@ function PortalBoard({ token }: { token: string }) {
         onClose={() => setDetailLeadId(null)}
         onRefetch={refetch}
         onDelete={setDeleteTarget}
+        onEmail={setEmailTarget}
+        onSms={setSmsTarget}
       />
+
+      <Modal
+        open={emailTarget !== null}
+        title={emailTarget ? `Envoyer un courriel — ${emailTarget.name}` : 'Envoyer un courriel'}
+        onClose={() => setEmailTarget(null)}
+      >
+        {emailTarget && (
+          <ProspectEmailModal lead={emailTarget} searchTitle={search.title} onClose={() => setEmailTarget(null)} onSent={refetch} />
+        )}
+      </Modal>
+      <Modal
+        open={smsTarget !== null}
+        title={smsTarget ? `Envoyer un SMS — ${smsTarget.name}` : 'Envoyer un SMS'}
+        onClose={() => setSmsTarget(null)}
+      >
+        {smsTarget && (
+          <ProspectSmsModal lead={smsTarget} searchTitle={search.title} onClose={() => setSmsTarget(null)} onSent={refetch} />
+        )}
+      </Modal>
+      <Modal
+        open={bulkMessage !== null}
+        title={bulkMessage === 'sms' ? 'SMS à la sélection' : 'Courriel à la sélection'}
+        onClose={() => { if (!bulkBusy) setBulkMessage(null); }}
+      >
+        {bulkMessage && (
+          <BulkMessageModal
+            channel={bulkMessage}
+            leads={selectedVisible}
+            searchId={search.id}
+            searchTitle={search.title}
+            statusConfigs={perms.move ? (statusConfigs as LeadStatusConfig[]) : []}
+            onBusyChange={setBulkBusy}
+            onClose={() => setBulkMessage(null)}
+            onSent={(sentIds, moveTo) => {
+              if (moveTo && sentIds.length) bulkMove(sentIds, moveTo);
+              else refetch();
+            }}
+          />
+        )}
+      </Modal>
 
       {/* Delete confirmation */}
       <Modal
@@ -714,7 +915,8 @@ function PortalBoard({ token }: { token: string }) {
       >
         <div className='space-y-4'>
           <p className='text-sm text-muted'>
-            Êtes-vous sûr de vouloir supprimer {bulkDelete?.length ?? 0} prospect(s) ? Cette action est irréversible.
+            Supprimer {bulkDelete?.length ?? 0} prospect(s) de ce tableau ? Ils restent dans l'historique de
+            l'entreprise, avec leurs notes et échanges.
           </p>
           <div className='rounded-xl border border-line bg-canvas p-3.5 text-sm max-h-48 overflow-y-auto space-y-1'>
             {(bulkDelete ?? []).slice(0, 20).map(l => (
@@ -754,7 +956,7 @@ function PortalBoard({ token }: { token: string }) {
 
       <Modal
         open={settings === 'details'}
-        title={kind === 'webhook' ? 'Source de prospects' : 'Détails de la recherche'}
+        title={kind === 'webhook' ? 'Source de prospects' : 'Critères de la recherche'}
         onClose={() => setSettings(null)}
         size={kind === 'webhook' ? 'xl' : 'md'}
       >
@@ -762,30 +964,13 @@ function PortalBoard({ token }: { token: string }) {
           // Le droit « Source » vaut les réglages d'administrateur de la source.
           <IntakePanel searchId={search.id} isAdmin onLeadsCreated={refetch} />
         ) : (
-          <SearchForm
-            readOnly
+          // Le droit « Critères » permet de les redéfinir et de relancer une
+          // recherche dans ce tableau, comme dans l'application.
+          <BoardCriteriaEditor
+            searchId={search.id}
+            criteria={search.filters}
             onClose={() => setSettings(null)}
-            onDone={() => setSettings(null)}
-            initialValues={{
-              ...defaultForm(),
-              title: search.title,
-              description: search.description ?? '',
-              purpose: search.purpose ?? '',
-              businessType: filters.businessType ?? '',
-              city: filters.city ?? '',
-              province: filters.province ?? 'QC',
-              radius: filters.radius ?? 10000,
-              minRating: filters.minRating ?? 0,
-              requireWebsite: filters.requireWebsite ?? false,
-              maxResults: filters.maxResults ?? 20,
-              language: filters.language ?? 'fr',
-            }}
-            footerExtra={
-              <button className='btn-primary gap-1.5 mr-auto' onClick={() => { setSettings(null); setShowFetchMore(true); }}>
-                <LuSearch size={14} />
-                Chercher plus de prospects
-              </button>
-            }
+            onSearched={refetch}
           />
         ))}
       </Modal>
@@ -798,6 +983,8 @@ function PortalBoard({ token }: { token: string }) {
           searchPurpose={search.purpose ?? undefined}
           onClose={() => setShowFetchMore(false)}
           onAdded={refetch}
+          onBusyChange={setFetchingMore}
+          onEditCriteria={() => setSettings('details')}
         />
       )}
       <Modal open={settings === 'statuses'} title='Statuts de ce tableau' onClose={() => setSettings(null)}>
@@ -887,11 +1074,7 @@ function PortalBoard({ token }: { token: string }) {
           onToggleSelect={toggleSelect}
           onSelectMany={selectMany}
           cardMenu={cardMenu}
-          cardBadges={lead => perms.notes && lead.noteCount > 0 ? (
-            <LeadChip icon={<LuNotebook size={11} />}>
-              {lead.noteCount} note{lead.noteCount > 1 ? 's' : ''}
-            </LeadChip>
-          ) : null}
+          cardBadges={lead => leadStateChips(lead, { smsCanSend: perms.sms })}
           toolbar={toolbar}
         />
       </div>

@@ -119,6 +119,7 @@ model Company {
   templates           DocumentTemplate[]
   leadSearches        LeadSearch[]
   prospectStatuses    ProspectStatus[]
+  prospectArchives    ProspectArchive[]
   leadStatusConfigs   LeadStatusConfig[]
   leadCardFields      LeadCardFieldConfig[]
   leadSourceConfigs   LeadSourceConfig[]
@@ -726,6 +727,54 @@ model ProspectStatus {
 
   @@unique([companyId, placeId])
   @@index([companyId])
+}
+
+// Mémoire des prospects retirés d'un tableau (voir server/prospectArchive).
+//
+// Supprimer un prospect — ou tout un tableau — enlève sa carte, jamais sa trace :
+// la fiche est recopiée ici juste avant. Quand la même entreprise réapparaît plus
+// tard (recherche Google, formulaire, saisie), on sait qu'elle a déjà été
+// prospectée, sur quel tableau, avec quel statut, et ses notes, courriels et SMS
+// se retrouvent par `identifier`, la clé qu'ils portent déjà.
+//
+// Une table à part plutôt qu'un `deletedAt` sur Lead : des dizaines de requêtes
+// lisent les prospects (tableaux, webhooks, SMS entrants, exports) et chacune
+// aurait dû apprendre à écarter les cartes supprimées. Et la suppression d'un
+// tableau emporte ses prospects en cascade : il fallait de toute façon les
+// recopier ailleurs avant.
+model ProspectArchive {
+  id         String   @id @default(uuid())
+  archivedAt DateTime @default(now())
+
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  companyId String
+
+  // La clé des notes, courriels et SMS du prospect : placeId, sinon l'id de la carte.
+  identifier String
+  // De quoi reconnaître l'entreprise quand elle revient.
+  placeId String?
+  phone   String? // E.164 quand le numéro s'y prête
+  email   String? // en minuscules
+  name    String
+
+  // Le tableau d'où il a été retiré. Pas de relation : le tableau peut être
+  // supprimé à son tour, son titre est donc recopié.
+  searchId      String?
+  boardTitle    String
+  status        String
+  // L'intitulé de la colonne ce jour-là : le statut peut être renommé ou supprimé ensuite.
+  statusLabel   String?
+  source        String
+  leadCreatedAt DateTime
+  // lead_deleted | board_deleted
+  reason        String
+  // La fiche entière au moment du retrait.
+  snapshot      Json     @default("{}")
+
+  @@index([companyId, placeId])
+  @@index([companyId, phone])
+  @@index([companyId, email])
+  @@index([companyId, identifier])
 }
 
 // Timeline notes for a prospect (keyed by placeId if available, else lead.id)
