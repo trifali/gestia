@@ -69,6 +69,7 @@ import {
   type LeadFormValues,
   type VoiceNotePayload,
 } from './leads.shared';
+import { AssigneeField } from './assignees';
 
 // ─── Read-only contact row ────────────────────────────────────────────────────
 
@@ -495,6 +496,8 @@ export function LeadDetailView({
             </div>
           </div>
 
+          <AssigneeField lead={lead as any} />
+
           {/* Provenance */}
           <div className='mt-3'>
             <div className='text-[11px] font-semibold uppercase tracking-wide text-muted mb-1.5'>Provenance</div>
@@ -740,7 +743,7 @@ export function LeadDetailPanel({
       stateChips={l => leadStateChips(l, { smsCanSend, isClient: existingClientNames.has(l.name.toLowerCase()), notes: false })}
       onClose={handleClose}
       onStatus={async (l, key) => {
-        await updateLead({ id: l.id, status: key });
+        await updateLead({ id: l.id, status: key, claim: true });
         onRefetch();
       }}
       onSource={async (l, source) => {
@@ -760,15 +763,19 @@ export function LeadDetailPanel({
         } as any);
         onRefetch();
       }}
+      // Une note sur une carte libre la prend : le tableau se relit tout de
+      // suite pour que la carte derrière la fiche porte déjà le nom.
       onAddNote={async (l, text) => {
         await addLeadNote({ leadId: l.id, text });
         notesDirty.current = true;
         refetchNotes();
+        if (!(l as any).assignee) onRefetch();
       }}
       onAddVoiceNote={async (l, payload) => {
         await addLeadVoiceNote({ leadId: l.id, ...payload });
         notesDirty.current = true;
         refetchNotes();
+        if (!(l as any).assignee) onRefetch();
       }}
       onDeleteNote={async id => {
         await deleteLeadNote({ id });

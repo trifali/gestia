@@ -34,6 +34,7 @@ import {
 import { formatMontrealTime } from '../../client/format';
 import { PhoneInput } from '../../client/ui';
 import { MicButton, VoiceNotePlayer, VoiceRecorder, canRecordVoice, type VoiceNotePayload } from './VoiceNote';
+import { AssigneeAvatar, AssigneeStripe, AssigneeTag, useAssignees } from './assignees';
 export { formatMontrealTime };
 export type { VoiceNotePayload };
 
@@ -94,6 +95,8 @@ type NoteItem = {
   id: string;
   text: string;
   createdAt: Date | string;
+  /** Qui l'a écrite. Absent pour les notes d'avant la signature. */
+  authorName?: string | null;
   audioKey?: string | null;
   audioUrl?: string | null;
   audioDuration?: number | null;
@@ -132,6 +135,7 @@ export function NoteThread({
   const timelineRef = useRef<HTMLDivElement>(null);
   const prevCount = useRef<number | null>(null);
   const [recording, setRecording] = useState(false);
+  const assignees = useAssignees();
   // Évalué une fois : le navigateur ne gagne pas de micro en cours de route.
   const [voiceSupported] = useState(() => canRecordVoice());
 
@@ -201,7 +205,18 @@ export function NoteThread({
               <div className='min-w-0 flex-1 pb-3'>
                 <div className='rounded-xl border border-line bg-white px-3 py-2.5 shadow-soft'>
                   <div className='flex items-start justify-between gap-2'>
-                    <p className='text-xs text-muted'>{formatMontrealTime(n.createdAt)}</p>
+                    <p className='flex min-w-0 items-center gap-1.5 text-xs text-muted'>
+                      {n.authorName && (
+                        <>
+                          <AssigneeAvatar name={n.authorName} size={16} />
+                          <span className='truncate font-medium text-ink-700'>
+                            {assignees?.isMe(n.authorName) ? 'Vous' : n.authorName}
+                          </span>
+                          <span aria-hidden>·</span>
+                        </>
+                      )}
+                      <span className='shrink-0'>{formatMontrealTime(n.createdAt)}</span>
+                    </p>
                     {/* Toujours visible sur écran tactile : il n'y a pas de survol. */}
                     {!readOnly && <button
                       className='-mr-1 -mt-0.5 flex h-6 w-6 items-center justify-center rounded-full text-muted transition-opacity hover:bg-red-50 hover:text-red-500 sm:opacity-0 sm:group-hover:opacity-100 focus:opacity-100'
@@ -652,6 +667,9 @@ export function LeadCardInfo({
     viewedAt?: string | Date | null;
     /** Informations libres. Lues via `leadExtras`. */
     extras?: unknown;
+    /** Qui s'en occupe (voir shared/leadAssignee). */
+    assignee?: string | null;
+    assignedAt?: string | Date | null;
   };
   /** Le bouton ⋮ de la carte, aligné sur le nom. */
   menu?: ReactNode;
@@ -825,7 +843,8 @@ export function LeadCardInfo({
   ) : null;
 
   return (
-    <div className='p-2.5'>
+    <div className='relative p-2.5'>
+      {lead.assignee && <AssigneeStripe name={lead.assignee} />}
       <div className='flex items-start gap-2'>
         {selection}
         <LeadAvatar name={lead.name} />
@@ -860,10 +879,17 @@ export function LeadCardInfo({
 
       {/* La date de déplacement n'est pas un champ du prospect mais une trace du
           tableau : elle ne se règle donc pas et garde sa place en pied de carte. */}
-      {movedLabel && (
-        <div className='mt-1.5 flex items-center gap-1 text-[11px] text-muted' title={`Déplacé le ${movedLabel}`}>
-          <LuClock size={11} className='shrink-0' />
-          <span>{movedLabel}</span>
+      {/* Le responsable en pied, à droite : là où l'œil le cherche en
+          parcourant une colonne de haut en bas. */}
+      {(movedLabel || lead.assignee) && (
+        <div className='mt-1.5 flex items-center justify-between gap-2'>
+          {movedLabel ? (
+            <div className='flex min-w-0 items-center gap-1 text-[11px] text-muted' title={`Déplacé le ${movedLabel}`}>
+              <LuClock size={11} className='shrink-0' />
+              <span className='truncate'>{movedLabel}</span>
+            </div>
+          ) : <span />}
+          {lead.assignee && <AssigneeTag name={lead.assignee} since={lead.assignedAt} />}
         </div>
       )}
     </div>

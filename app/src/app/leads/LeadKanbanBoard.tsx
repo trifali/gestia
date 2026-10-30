@@ -41,6 +41,7 @@ import { CSS as DndCSS } from '@dnd-kit/utilities';
 import { LuEllipsis, LuEllipsisVertical, LuInbox } from 'react-icons/lu';
 import { UNKNOWN_STATUS_KEY } from '../../shared/leadStatus';
 import { LeadCardInfo, type CardFieldConfig, type LeadSourceOption } from './leads.shared';
+import { useAssignees } from './assignees';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -708,8 +709,11 @@ export function LeadKanbanBoard({
   const pendingWrites = useRef(0);
   const writeQueue = useRef<Promise<void>>(Promise.resolve());
 
-  const refs = useRef({ updateStatus, reorder, refetch, onCardClick, onToggleSelect, cardMenu, statusConfigs, canMove });
-  refs.current = { updateStatus, reorder, refetch, onCardClick, onToggleSelect, cardMenu, statusConfigs, canMove };
+  // « Responsable » dans le menu de chaque carte, partout où le tableau est
+  // posé sous un `AssigneeProvider` — l'application comme le lien de partage.
+  const assignees = useAssignees();
+  const refs = useRef({ updateStatus, reorder, refetch, onCardClick, onToggleSelect, cardMenu, statusConfigs, canMove, assignees });
+  refs.current = { updateStatus, reorder, refetch, onCardClick, onToggleSelect, cardMenu, statusConfigs, canMove, assignees };
 
   /** Rend la main aux données du serveur quand plus rien n'est en vol. */
   function settle() {
@@ -765,9 +769,11 @@ export function LeadKanbanBoard({
       const current = findColumn(liveColumns.current, lead.id) ?? lead.status;
       const targets = refs.current.statusConfigs.filter(s => s.key !== current && s.key !== UNKNOWN_STATUS_KEY);
       const items = refs.current.cardMenu(lead);
-      if (!refs.current.canMove) return [{ items }];
+      const assign = refs.current.assignees?.menuSection(lead);
+      const head = assign ? [{ items }, assign] : [{ items }];
+      if (!refs.current.canMove) return head;
       return [
-        { items },
+        ...head,
         {
           title: 'Déplacer vers',
           items: targets.map(s => ({

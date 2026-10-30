@@ -25,7 +25,10 @@ import {
   markLeadViewedByToken,
   // @ts-ignore
   addLeadNoteByToken,
+  // @ts-ignore
   addLeadVoiceNoteByToken,
+  // @ts-ignore
+  assignLeadByToken,
   // @ts-ignore
   getLeadNotesByToken,
   // @ts-ignore
@@ -89,7 +92,17 @@ import { BoardCriteriaEditor } from './GoogleSearchForm';
 import { ShareTokenProvider, useBoardOps, downloadCsv } from './boardOps';
 import { LeadDetailView } from './LeadDetailPanel';
 import { AddLeadModal } from './AddLeadModal';
-import { normalizeSharePermissions, type LeadSharePermissions } from '../../shared/leadShare';
+import { canAssignLeads, normalizeSharePermissions, type LeadSharePermissions } from '../../shared/leadShare';
+import { sameAssignee } from '../../shared/leadAssignee';
+import {
+  AssigneeFilterBar,
+  AssigneeProvider,
+  NicknameButton,
+  NicknameModal,
+  useAssigneeFilter,
+  useAssignees,
+  usePortalNickname,
+} from './assignees';
 import { UNKNOWN_STATUS_KEY } from '../../shared/leadStatus';
 
 // ─── Shell ────────────────────────────────────────────────────────────────────
@@ -103,7 +116,8 @@ function PortalShell({ children, searchTitle }: { children: React.ReactNode; sea
           <span className='font-semibold text-ink truncate'>
             {searchTitle ? `Prospection — ${searchTitle}` : 'Portail prospection'}
           </span>
-          <span className='ml-auto shrink-0 text-xs text-muted flex items-center gap-1'>
+          <PortalIdentity />
+          <span className='ml-auto shrink-0 text-xs text-muted hidden sm:flex items-center gap-1'>
             <LuLock size={12} /> Accès sécurisé
           </span>
         </div>
@@ -111,6 +125,91 @@ function PortalShell({ children, searchTitle }: { children: React.ReactNode; sea
       <main className='max-w-screen-2xl mx-auto px-4 py-6'>{children}</main>
     </div>
   );
+}
+
+/** « Qui suis-je » dans l'en-tête — seulement là où le lien permet de prendre des cartes. */
+function PortalIdentity() {
+  const ctx = useAssignees();
+  if (!ctx?.editMe) return null;
+  return (
+    <div className='ml-auto sm:ml-4 shrink-0 sm:order-last'>
+      <NicknameButton nickname={ctx.me} onClick={ctx.editMe} />
+    </div>
+  );
+}
+
+// ─── Qui travaille sur le lien ────────────────────────────────────────────────
+
+/**
+ * Les personnes d'un lien de partage : le surnom de cet appareil, la question
+ * « Qui êtes-vous ? » à la première visite, et l'attribution des cartes.
+ *
+ * Au-dessus du tableau plutôt que dedans pour que le tableau, sa barre d'outils
+ * et sa fiche lisent tous le même contexte. La requête est celle du tableau :
+ * même clé, même cache, aucun appel de plus.
+ */
+function PortalAssigneeLayer({ token, children }: { token: string; children: React.ReactNode }) {
+  const { data, refetch } = useQuery(getLeadSearchByToken as any, { token }, { retry: false });
+  const [nickname, setNickname] = usePortalNickname();
+  const [asking, setAsking] = useState(false);
+  const pending = useRef<((name: string | null) => void) | null>(null);
+  const asked = useRef(false);
+
+  const leads: any[] = (data as any)?.leads ?? [];
+  const canAssign = !!data && canAssignLeads(normalizeSharePermissions((data as any).permissions));
+
+  // Une seule fois par visite, et seulement à qui peut travailler les cartes :
+  // un lien en lecture seule n'a rien à attribuer.
+  useEffect(() => {
+    if (!canAssign || nickname || asked.current) return;
+    asked.current = true;
+    setAsking(true);
+  }, [canAssign, nickname]);
+
+  function close(result: string | null) {
+    setAsking(false);
+    pending.current?.(result);
+    pending.current = null;
+  }
+
+  async function save(name: string, carry: boolean) {
+    const previous = nickname;
+    setNickname(name);
+    close(name);
+    if (carry && previous && !sameAssignee(previous, name)) {
+      const mine = leads.filter(l => sameAssignee(l.assignee, previous));
+      await Promise.allSettled(mine.map(l => (assignLeadByToken as any)({ token, leadId: l.id, assignee: name, as: name })));
+      refetch();
+    }
+  }
+
+  return (
+    <AssigneeProvider
+      leads={leads}
+      me={nickname}
+      canAssign={canAssign}
+      assign={(leadId, name, self) => (assignLeadByToken as any)({ token, leadId, assignee: name, as: self ? name : nickname })}
+      onChanged={refetch}
+      requestMe={() => new Promise<string | null>(resolve => {
+        pending.current = resolve;
+        setAsking(true);
+      })}
+      editMe={canAssign ? () => setAsking(true) : undefined}
+    >
+      {children}
+      <PortalNicknameModal open={asking} current={nickname} onSave={save} onClose={() => close(null)} />
+    </AssigneeProvider>
+  );
+}
+
+function PortalNicknameModal(props: {
+  open: boolean;
+  current: string | null;
+  onSave: (name: string, carry: boolean) => Promise<void>;
+  onClose: () => void;
+}) {
+  const ctx = useAssignees();
+  return <NicknameModal {...props} people={ctx?.people ?? []} />;
 }
 
 // ─── Fiche ────────────────────────────────────────────────────────────────────
@@ -163,6 +262,7 @@ function PortalDetailPanel({
   }, [openedId]);
 
   const notesDirty = useRef(false);
+  const me = useAssignees()?.me ?? undefined;
 
   return (
     <LeadDetailView
@@ -184,7 +284,7 @@ function PortalDetailPanel({
         onClose();
       }}
       onStatus={async (l, status) => {
-        await (updateLeadByToken as any)({ token, leadId: l.id, status });
+        await (updateLeadByToken as any)({ token, leadId: l.id, status, claimAs: me });
         onRefetch();
       }}
       onSource={async (l, source) => {
@@ -206,14 +306,16 @@ function PortalDetailPanel({
         onRefetch();
       }}
       onAddNote={async (l, text) => {
-        await (addLeadNoteByToken as any)({ token, leadId: l.id, text });
+        await (addLeadNoteByToken as any)({ token, leadId: l.id, text, authorName: me });
         notesDirty.current = true;
         refetchNotes();
+        if (me && !(l as any).assignee) onRefetch();
       }}
       onAddVoiceNote={async (l, payload) => {
-        await (addLeadVoiceNoteByToken as any)({ token, leadId: l.id, ...payload });
+        await (addLeadVoiceNoteByToken as any)({ token, leadId: l.id, ...payload, authorName: me });
         notesDirty.current = true;
         refetchNotes();
+        if (me && !(l as any).assignee) onRefetch();
       }}
       onDeleteNote={async noteId => {
         await (deleteLeadNoteByToken as any)({ token, noteId });
@@ -344,7 +446,9 @@ export default function ProspectPortalPage() {
   // opérations du lien dès qu'ils sont sous ce fournisseur.
   return (
     <ShareTokenProvider token={token!}>
-      <PortalBoard token={token!} />
+      <PortalAssigneeLayer token={token!}>
+        <PortalBoard token={token!} />
+      </PortalAssigneeLayer>
     </ShareTokenProvider>
   );
 }
@@ -446,12 +550,16 @@ function PortalBoard({ token }: { token: string }) {
     ].some((v: any) => v?.toLowerCase().includes(q)));
   }, [rawLeads, searchQuery]);
 
-  const filteredLeads = useMemo(
+  const leadsBeforeAssignee = useMemo(
     () => sourceFilter
       ? leadsBeforeSource.filter(l => (l.source || FALLBACK_SOURCE_KEY) === sourceFilter)
       : leadsBeforeSource,
     [leadsBeforeSource, sourceFilter],
   );
+  // Le filtre « qui », retenu par ce navigateur pour ce tableau.
+  const assignees = useAssignees();
+  const assigneeFilter = useAssigneeFilter((data as any)?.search?.id);
+  const filteredLeads = assigneeFilter.apply(leadsBeforeAssignee);
 
   // Un déplacement groupé s'affiche tout de suite, cartes en tête de leur
   // nouvelle colonne, le temps que les écritures soient faites et relues.
@@ -505,9 +613,14 @@ function PortalBoard({ token }: { token: string }) {
   const { search, statusConfigs, cardFields = [] } = data as any;
   const perms = normalizeSharePermissions((data as any).permissions);
   const detailLead: Lead | null = detailLeadId ? rawLeads.find(l => l.id === detailLeadId) ?? null : null;
-  const isFiltered = !!searchQuery.trim() || !!sourceFilter;
+  const isFiltered = !!searchQuery.trim() || !!sourceFilter || !!assigneeFilter.value;
 
+  // Un geste sur une carte (glisser, menu) la prend si elle est libre, au nom de
+  // cet appareil ; un déplacement groupé range sans rien prendre.
   async function updateStatus(leadId: string, newStatus: string) {
+    await (updateLeadByToken as any)({ token: token!, leadId, status: newStatus, claimAs: assignees?.me ?? undefined });
+  }
+  async function moveOnly(leadId: string, newStatus: string) {
     await (updateLeadByToken as any)({ token: token!, leadId, status: newStatus });
   }
 
@@ -568,7 +681,7 @@ function PortalBoard({ token }: { token: string }) {
   // Seules les cartes à l'écran comptent : une carte masquée par la recherche
   // n'est jamais emportée par une action groupée.
   const selectedVisible = filteredLeads.filter(l => selectedIds.has(l.id));
-  const canBulk = perms.move || perms.writeNotes || perms.delete || perms.email || perms.sms;
+  const canBulk = perms.move || perms.writeNotes || perms.delete || perms.email || perms.sms || !!assignees?.canAssign;
 
   async function bulkMove(ids: string[], status: string) {
     if (ids.length === 0) return;
@@ -577,7 +690,7 @@ function PortalBoard({ token }: { token: string }) {
     setMoveOverride({ ids: idSet, status });
     const toastId = toast.loading(`Déplacement vers « ${label} »…`);
     const movers = rawLeads.filter(l => idSet.has(l.id) && l.status !== status);
-    const failures = await runBulk(movers, lead => updateStatus(lead.id, status), { concurrency: 4 });
+    const failures = await runBulk(movers, lead => moveOnly(lead.id, status), { concurrency: 4 });
     const failedIds = new Set(failures.map(f => f.lead.id));
     try {
       const existing = rawLeads.filter(l => l.status === status && !idSet.has(l.id)).map(l => l.id);
@@ -727,6 +840,8 @@ function PortalBoard({ token }: { token: string }) {
         )}
       </div>
 
+      <AssigneeFilterBar leads={leadsBeforeAssignee} value={assigneeFilter.value} onChange={assigneeFilter.setValue} />
+
       {isFiltered && (
         <div className='flex items-center gap-2 text-sm text-muted'>
           <span>
@@ -735,7 +850,7 @@ function PortalBoard({ token }: { token: string }) {
           <button
             type='button'
             className='font-medium text-accent-700 hover:underline'
-            onClick={() => { setSearchQuery(''); setSourceFilter(null); }}
+            onClick={() => { setSearchQuery(''); setSourceFilter(null); assigneeFilter.setValue(''); }}
           >
             Réinitialiser
           </button>
@@ -781,6 +896,16 @@ function PortalBoard({ token }: { token: string }) {
                     onSelect: () => bulkMove(selectedVisible.map(l => l.id), c.key),
                   })),
                 }]}
+              />
+            )}
+            {assignees?.canAssign && assignees.bulkItems([]).length > 0 && (
+              <KanbanMenu
+                label='Confier la sélection'
+                sheetTitle={`Confier ${selectedVisible.length} prospect(s)`}
+                disabled={selectedVisible.length === 0}
+                trigger={<><LuUsers size={14} />Confier</>}
+                triggerClassName='btn-secondary h-9 px-3 text-sm'
+                sections={() => [{ title: 'Confier à', items: assignees.bulkItems(selectedVisible) }]}
               />
             )}
             {perms.email && (
@@ -907,7 +1032,7 @@ function PortalBoard({ token }: { token: string }) {
         {bulkNote && (
           <BulkNoteModal
             leads={selectedVisible}
-            addNote={(lead, text) => (addLeadNoteByToken as any)({ token, leadId: lead.id, text })}
+            addNote={(lead, text) => (addLeadNoteByToken as any)({ token, leadId: lead.id, text, authorName: assignees?.me ?? undefined })}
             onClose={() => setBulkNote(false)}
             onDone={refetch}
           />

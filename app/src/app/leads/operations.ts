@@ -26,9 +26,11 @@ import {
   coerceSharePermissions,
   FULL_SHARE_PERMISSIONS,
   normalizeSharePermissions,
+  canAssignLeads,
   type LeadSharePermissionKey,
   type LeadSharePermissions,
 } from '../../shared/leadShare';
+import { normalizeAssigneeName, sameAssignee } from '../../shared/leadAssignee';
 import { DEFAULT_CARD_FIELDS, hasDetailToggle, isLockedCardField } from '../../shared/leadCardFields';
 import { randomBytes } from 'crypto';
 import { sendEmailWithAttachment, companySmtp } from '../../server/mail';
@@ -62,6 +64,31 @@ function ensureCompany(user: any): string {
   if (!user) throw new HttpError(401);
   if (!user.companyId) throw new HttpError(403, 'Aucune entreprise associée');
   return user.companyId;
+}
+
+/**
+ * Le nom sous lequel le compte de l'entreprise prend une carte et signe ses
+ * notes. Lu ici plutôt que reçu de l'écran : depuis l'application, on est
+ * l'entreprise, on ne se choisit pas de surnom.
+ */
+async function companyActorName(entities: any, companyId: string): Promise<string | null> {
+  const company = await entities.Company.findUnique({ where: { id: companyId }, select: { name: true } });
+  return normalizeAssigneeName(company?.name);
+}
+
+/**
+ * Travailler une carte libre la prend : on la déplace ou on y écrit une note, et
+ * l'équipe voit qui s'en occupe sans que personne ait pensé à le dire. Jamais
+ * une carte déjà prise — on ne vole pas le travail d'un collègue ; la condition
+ * est dans la requête pour que deux personnes qui la touchent en même temps ne
+ * se l'arrachent pas.
+ */
+async function claimIfUnassigned(entities: any, leadId: string, name: string | null): Promise<void> {
+  if (!name) return;
+  await entities.Lead.updateMany({
+    where: { id: leadId, assignee: null },
+    data: { assignee: name, assignedAt: new Date() },
+  });
 }
 
 
@@ -130,7 +157,10 @@ export const getLeadSearchDetail: GetLeadSearchDetail<
   const flags = await leadContactFlags(context.entities, companyId, search.leads);
   const leadsWithFlags = leadsWithDups.map(l => ({ ...l, ...flags.get(l.id) }));
 
-  return { ...search, leads: leadsWithFlags } as any;
+  // Qui « vous » êtes sur ce tableau : le nom sous lequel ce compte prend les cartes.
+  const actorName = await companyActorName(context.entities, companyId);
+
+  return { ...search, leads: leadsWithFlags, actorName } as any;
 };
 
 export type LeadContactFlags = {
@@ -313,9 +343,15 @@ export const updateLead: UpdateLead<
      * l'ordre en fait partie et qu'il se règle en déplaçant les lignes.
      */
     extras?: { label?: string; value?: string }[];
+    /**
+     * Un déplacement à la carte (glisser, menu, fiche) prend la carte si elle est
+     * libre. Absent pour un déplacement groupé : ranger vingt cartes d'un coup,
+     * c'est trier le tableau, pas annoncer qu'on s'en occupe.
+     */
+    claim?: boolean;
   },
   Lead
-> = async ({ id, status, notes, email, name, phone, website, address, category, source, extras }, context) => {
+> = async ({ id, status, notes, email, name, phone, website, address, category, source, extras, claim }, context) => {
   const companyId = ensureCompany(context.user);
   const lead = await context.entities.Lead.findUnique({
     where: { id },
@@ -346,6 +382,9 @@ export const updateLead: UpdateLead<
       ...(extras !== undefined && { extras: normalizeLeadExtras(extras) }),
     },
   });
+  if (status !== undefined && claim && !(lead as any).assignee) {
+    await claimIfUnassigned(context.entities, id, await companyActorName(context.entities, companyId));
+  }
 
   // Persist status/notes to ProspectStatus so they survive search deletion
   if ((status !== undefined || notes !== undefined) && lead.placeId) {
@@ -1184,9 +1223,12 @@ export const addLeadNote = async (
   });
   if (!lead || (lead as any).search.companyId !== companyId) throw new HttpError(404);
   const identifier = lead.placeId ?? lead.id;
-  return (context.entities as any).LeadNote.create({
-    data: { companyId, identifier, text: text.trim() },
+  const authorName = await companyActorName(context.entities, companyId);
+  const note = await (context.entities as any).LeadNote.create({
+    data: { companyId, identifier, text: text.trim(), authorName },
   });
+  await claimIfUnassigned(context.entities, lead.id, authorName);
+  return note;
 };
 
 export const addLeadVoiceNote = async (
@@ -1199,8 +1241,64 @@ export const addLeadVoiceNote = async (
     include: { search: { select: { companyId: true } } },
   });
   if (!lead || (lead as any).search.companyId !== companyId) throw new HttpError(404);
-  return createVoiceNote(context.entities, { companyId, identifier: lead.placeId ?? lead.id }, input);
+  const authorName = await companyActorName(context.entities, companyId);
+  const note = await createVoiceNote(context.entities, { companyId, identifier: lead.placeId ?? lead.id, authorName }, input);
+  await claimIfUnassigned(context.entities, lead.id, authorName);
+  return note;
 };
+
+/**
+ * Confier une carte — à soi ou à quelqu'un qui a déjà des cartes sur ce
+ * tableau — ou la libérer (`assignee: null`). C'est le seul chemin qui remplace
+ * un responsable.
+ */
+export const assignLead = async (
+  { leadId, assignee }: { leadId: string; assignee: string | null },
+  context: any,
+) => {
+  const companyId = ensureCompany(context.user);
+  const lead = await context.entities.Lead.findUnique({
+    where: { id: leadId },
+    include: { search: { select: { companyId: true } } },
+  });
+  if (!lead || (lead as any).search.companyId !== companyId) throw new HttpError(404);
+  const self = await companyActorName(context.entities, companyId);
+  return writeAssignee(context.entities, lead, assignee, self);
+};
+
+/**
+ * Écrit le responsable d'une carte.
+ *
+ * Un nom n'est accepté que s'il existe déjà : celui de la personne qui agit
+ * (`self` — elle prend la carte), ou celui de quelqu'un qui a une carte sur le
+ * même tableau. On ne tape pas un nom pour autrui : une faute de frappe
+ * créerait une personne fantôme à qui des cartes resteraient confiées. Le nom
+ * enregistré est celui qui existe, avec son orthographe — « marie » confie à
+ * « Marie », pas à une seconde Marie.
+ */
+async function writeAssignee(
+  entities: any,
+  lead: { id: string; searchId: string },
+  raw: string | null,
+  self: string | null,
+) {
+  let assignee: string | null = null;
+  if (raw !== null) {
+    const name = normalizeAssigneeName(raw);
+    if (!name) throw new HttpError(400, 'Le nom est requis');
+    const existing = await entities.Lead.findFirst({
+      where: { searchId: lead.searchId, assignee: { equals: name, mode: 'insensitive' } },
+      select: { assignee: true },
+    });
+    if (existing) assignee = existing.assignee;
+    else if (self && sameAssignee(name, self)) assignee = self;
+    else throw new HttpError(400, "Cette personne n'a aucune carte sur ce tableau");
+  }
+  return entities.Lead.update({
+    where: { id: lead.id },
+    data: { assignee, assignedAt: assignee ? new Date() : null },
+  });
+}
 
 export const deleteLeadNote = async (
   { id }: { id: string },
@@ -2315,11 +2413,14 @@ export const updateLeadByToken = async (
     category?: string;
     source?: string;
     extras?: { key?: string; label?: string; value?: string }[];
+    /** Le surnom de la personne, pour prendre la carte si elle est libre (voir `updateLead`). */
+    claimAs?: string;
   },
   context: any,
 ) => {
   const shareToken = await validateShareToken(token, context.entities);
   const lead = await leadOfShare(context.entities, shareToken.searchId, leadId);
+  const { claimAs, ...fields } = rest;
 
   const updateData: any = {};
   if (rest.status !== undefined) {
@@ -2345,7 +2446,25 @@ export const updateLeadByToken = async (
   }
   if (rest.extras !== undefined) updateData.extras = normalizeLeadExtras(rest.extras);
 
-  return context.entities.Lead.update({ where: { id: leadId }, data: updateData });
+  const updated = await context.entities.Lead.update({ where: { id: leadId }, data: updateData });
+  if (fields.status !== undefined && !lead.assignee) {
+    await claimIfUnassigned(context.entities, leadId, normalizeAssigneeName(claimAs));
+  }
+  return updated;
+};
+
+/**
+ * `assignLead`, par le lien. `as` est le surnom de qui agit : c'est lui qui
+ * permet de prendre une carte sous un nom que le tableau ne connaît pas encore.
+ */
+export const assignLeadByToken = async (
+  { token, leadId, assignee, as }: { token: string; leadId: string; assignee: string | null; as?: string | null },
+  context: any,
+) => {
+  const shareToken = await validateShareToken(token, context.entities);
+  if (!canAssignLeads(shareToken.perms)) throw new HttpError(403, "Ce lien ne permet pas d'attribuer les cartes");
+  const lead = await leadOfShare(context.entities, shareToken.searchId, leadId);
+  return writeAssignee(context.entities, lead, assignee, normalizeAssigneeName(as));
 };
 
 // ─── createLeadByToken (public – no auth) ────────────────────────────────────
@@ -2415,7 +2534,7 @@ export const deleteLeadByToken = async (
 // ─── addLeadNoteByToken (public – no auth) ────────────────────────────────────
 
 export const addLeadNoteByToken = async (
-  { token, leadId, text }: { token: string; leadId: string; text: string },
+  { token, leadId, text, authorName: rawAuthor }: { token: string; leadId: string; text: string; authorName?: string },
   context: any,
 ) => {
   const shareToken = await validateShareToken(token, context.entities);
@@ -2424,27 +2543,34 @@ export const addLeadNoteByToken = async (
   if (!text?.trim()) throw new HttpError(400, 'Le texte est requis');
 
   const identifier = lead.placeId ?? lead.id;
-  return (context.entities as any).LeadNote.create({
+  const authorName = normalizeAssigneeName(rawAuthor);
+  const note = await (context.entities as any).LeadNote.create({
     data: {
       companyId: lead.search.companyId,
       identifier,
       text: text.trim(),
+      authorName,
     },
   });
+  await claimIfUnassigned(context.entities, lead.id, authorName);
+  return note;
 };
 
 export const addLeadVoiceNoteByToken = async (
-  { token, leadId, ...input }: VoiceNoteInput & { token: string; leadId: string },
+  { token, leadId, authorName: rawAuthor, ...input }: VoiceNoteInput & { token: string; leadId: string; authorName?: string },
   context: any,
 ) => {
   const shareToken = await validateShareToken(token, context.entities);
   requireSharePermission(shareToken.perms, 'writeNotes');
   const lead = await leadOfShare(context.entities, shareToken.searchId, leadId);
-  return createVoiceNote(
+  const authorName = normalizeAssigneeName(rawAuthor);
+  const note = await createVoiceNote(
     context.entities,
-    { companyId: lead.search.companyId, identifier: lead.placeId ?? lead.id },
+    { companyId: lead.search.companyId, identifier: lead.placeId ?? lead.id, authorName },
     input,
   );
+  await claimIfUnassigned(context.entities, lead.id, authorName);
+  return note;
 };
 
 // ─── getLeadNotesByToken (public – no auth) ───────────────────────────────────

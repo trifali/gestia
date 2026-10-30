@@ -38,7 +38,7 @@ const URL_EXPIRY_SECS = 7 * 24 * 3600;
 
 export async function createVoiceNote(
   entities: any,
-  { companyId, identifier }: { companyId: string; identifier: string },
+  { companyId, identifier, authorName = null }: { companyId: string; identifier: string; authorName?: string | null },
   input: VoiceNoteInput,
 ) {
   const mime = String(input?.mimeType ?? '').split(';')[0].trim().toLowerCase();
@@ -69,6 +69,7 @@ export async function createVoiceNote(
         companyId,
         identifier,
         text: '',
+        authorName,
         audioKey: key,
         audioMime: mime,
         audioDuration: Math.round(duration * 10) / 10,

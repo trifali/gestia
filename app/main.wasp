@@ -618,7 +618,7 @@ query getLeadSearches {
 }
 query getLeadSearchDetail {
   fn: import { getLeadSearchDetail } from "@src/app/leads/operations",
-  entities: [User, LeadSearch, Lead, LeadNote, LeadEmailLog, LeadEmailDraft, LeadSmsLog, LeadInboundWebhook, ProspectArchive, LeadStatusConfig]
+  entities: [User, Company, LeadSearch, Lead, LeadNote, LeadEmailLog, LeadEmailDraft, LeadSmsLog, LeadInboundWebhook, ProspectArchive, LeadStatusConfig]
 }
 action searchLeads {
   fn: import { searchLeads } from "@src/app/leads/operations",
@@ -626,7 +626,11 @@ action searchLeads {
 }
 action updateLead {
   fn: import { updateLead } from "@src/app/leads/operations",
-  entities: [User, LeadSearch, Lead, ProspectStatus, LeadSourceConfig]
+  entities: [User, Company, LeadSearch, Lead, ProspectStatus, LeadSourceConfig]
+}
+action assignLead {
+  fn: import { assignLead } from "@src/app/leads/operations",
+  entities: [User, Company, Lead, LeadSearch]
 }
 action reorderLeads {
   fn: import { reorderLeads } from "@src/app/leads/operations",
@@ -724,11 +728,11 @@ query getLeadNotes {
 }
 action addLeadNote {
   fn: import { addLeadNote } from "@src/app/leads/operations",
-  entities: [User, LeadNote, Lead]
+  entities: [User, Company, LeadNote, Lead]
 }
 action addLeadVoiceNote {
   fn: import { addLeadVoiceNote } from "@src/app/leads/operations",
-  entities: [User, LeadNote, Lead]
+  entities: [User, Company, LeadNote, Lead]
 }
 action deleteLeadNote {
   fn: import { deleteLeadNote } from "@src/app/leads/operations",
@@ -976,6 +980,10 @@ query getLeadSearchByToken {
 action updateLeadByToken {
   fn: import { updateLeadByToken } from "@src/app/leads/operations",
   entities: [Lead, LeadSearch, LeadSearchShareToken, LeadSourceConfig]
+}
+action assignLeadByToken {
+  fn: import { assignLeadByToken } from "@src/app/leads/operations",
+  entities: [Lead, LeadSearch, LeadSearchShareToken]
 }
 action reorderLeadsByToken {
   fn: import { reorderLeadsByToken } from "@src/app/leads/operations",

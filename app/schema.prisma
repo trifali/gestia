@@ -563,6 +563,12 @@ model Lead {
   // cartes déjà reçues, qui portent bien ce que le formulaire disait ce jour-là.
   extras          Json      @default("[]")
   order           Int       @default(0) // manual position inside its kanban column
+  // Qui s'occupe de la carte : un surnom saisi sur un lien de partage (sans
+  // compte), ou le nom de l'entreprise depuis l'application. Un nom et non une
+  // référence à un utilisateur : les personnes d'un lien n'ont pas de compte.
+  // Voir shared/leadAssignee.
+  assignee        String?
+  assignedAt      DateTime?
 
   @@index([searchId])
   @@index([externalId])
@@ -787,6 +793,7 @@ model LeadNote {
 
   identifier String // placeId when available, else lead.id
   text       String // empty for a voice note
+  authorName String? // nickname or company name; null for notes written before authorship
 
   // Note vocale : le fichier vit dans MinIO (voir server/voiceNotes). La durée et
   // la forme d'onde sont calculées à l'enregistrement, dans le navigateur, pour

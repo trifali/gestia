@@ -154,6 +154,17 @@ export function coerceSharePermissions(raw: Record<string, unknown>): LeadShareP
   return perms;
 }
 
+/**
+ * Prendre une carte, la confier à quelqu'un ou la libérer.
+ *
+ * Pas une case de plus : quiconque peut travailler les cartes doit pouvoir dire
+ * qu'il s'en occupe, et les liens déjà envoyés — dont les droits sont figés —
+ * doivent en profiter sans être recréés. Un lien en lecture seule regarde.
+ */
+export function canAssignLeads(perms: LeadSharePermissions): boolean {
+  return perms.move || perms.edit || perms.writeNotes;
+}
+
 /** Résumé d'une ligne : « Accès complet », « Lecture seule » ou la liste des droits. */
 export function sharePermissionsSummary(perms: LeadSharePermissions): string {
   const on = LEAD_SHARE_PERMISSION_OPTIONS.filter(o => perms[o.key]);

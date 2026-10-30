@@ -274,6 +274,7 @@ export function StatusBadge({ status, map }: { status: string; map: Record<strin
  * 672 px tronquait les listes déroulantes et empilait un mot par ligne.
  */
 const MODAL_WIDTHS = {
+  sm: 'sm:max-w-md',
   md: 'sm:max-w-2xl',
   lg: 'sm:max-w-4xl',
   xl: 'sm:max-w-[84rem]',
