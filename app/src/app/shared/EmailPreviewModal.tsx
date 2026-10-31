@@ -12,6 +12,7 @@ import {
   QUOTED_HISTORY_LIMIT,
   buildEmailHtml,
   buildQuotedHistory,
+  linkifyEmailHtml,
   type SentEmailLog,
 } from '../../shared/mailThread';
 
@@ -33,6 +34,9 @@ export function EmailPreviewModal({
   attachmentName,
   onOpenAttachment,
   onClose,
+  linkify = false,
+  onSend,
+  sending = false,
 }: {
   headers: EmailPreviewHeaders;
   body: string;
@@ -42,9 +46,15 @@ export function EmailPreviewModal({
   /** Ouvre la pièce jointe. Absent = le nom reste du texte. */
   onOpenAttachment?: () => void;
   onClose: () => void;
+  /** Les adresses web du message deviennent des liens, comme le fait l'envoi. */
+  linkify?: boolean;
+  /** Fait de l'aperçu l'étape de confirmation : un bouton « Envoyer » apparaît. */
+  onSend?: () => void;
+  sending?: boolean;
 }) {
   const quoted = buildQuotedHistory((previousLogs || []).slice(0, QUOTED_HISTORY_LIMIT));
-  const html = buildEmailHtml(body, quoted);
+  const built = buildEmailHtml(body, quoted);
+  const html = linkify ? linkifyEmailHtml(built) : built;
 
   const from = headers.fromEmail
     ? `${headers.fromName || 'Gestia'} <${headers.fromEmail}>`
@@ -58,16 +68,21 @@ export function EmailPreviewModal({
       footer={
         <>
           <div className='flex-1' />
-          <button className='btn-secondary' onClick={onClose}>
-            Fermer
+          <button className='btn-secondary' onClick={onClose} disabled={sending}>
+            {onSend ? 'Modifier' : 'Fermer'}
           </button>
+          {onSend && (
+            <button className='btn-primary' onClick={onSend} disabled={sending}>
+              {sending ? 'Envoi…' : 'Envoyer'}
+            </button>
+          )}
         </>
       }
     >
       <div className='space-y-3'>
         <p className='text-xs text-muted flex items-start gap-1.5'>
           <LuMailOpen size={13} className='mt-0.5 shrink-0' />
-          <span>Ce que recevra le destinataire. Rien n’est envoyé depuis cet écran.</span>
+          <span>{onSend ? 'Ce que recevra le destinataire. Vérifiez, puis envoyez.' : 'Ce que recevra le destinataire. Rien n’est envoyé depuis cet écran.'}</span>
         </p>
 
         <dl className='text-xs space-y-1 border border-line rounded-md px-3 py-2.5 bg-canvas-100'>

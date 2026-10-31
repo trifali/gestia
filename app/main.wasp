@@ -422,6 +422,12 @@ action createSupplierPortalAccess {
   fn: import { createSupplierPortalAccess } from "@src/app/suppliers/operations",
   entities: [User, Supplier, SupplierPortalAccess]
 }
+// Le lien du portail, envoyé depuis le courriel de l'entreprise après aperçu.
+// `SupplierNote` : l'envoi laisse une note interne dans le fil.
+action sendSupplierPortalLink {
+  fn: import { sendSupplierPortalLink } from "@src/app/suppliers/operations",
+  entities: [User, Company, Supplier, SupplierPortalAccess, SupplierNote]
+}
 action revokeSupplierPortalAccess {
   fn: import { revokeSupplierPortalAccess } from "@src/app/suppliers/operations",
   entities: [User, Supplier, SupplierPortalAccess]

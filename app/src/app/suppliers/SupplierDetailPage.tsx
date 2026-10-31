@@ -40,6 +40,7 @@ import { PAYMENT_METHODS } from '../payments/PaymentForm';
 import { SharedFileManager } from '../projects/SharedFileManager';
 import { SupplierForm } from './SupplierForm';
 import { MessageBody, MessageComposer } from './MessageMarkdown';
+import { SendPortalLinkModal } from './PortalLinkEmail';
 import { SupplierInvoiceForm, SupplierInvoiceList, type SupplierInvoiceRow } from './InvoiceComponents';
 import {
   NewContractModal, ContractEditorModal, ContractStatusBadge, downloadContractPdf, toggleContractShare, contractPeriod, resolveContract,
@@ -581,6 +582,7 @@ function PortalTab({ supplier }: { supplier: any }) {
   const base = typeof window !== 'undefined' ? `${window.location.origin}/portail-fournisseur/` : '/portail-fournisseur/';
   const active = supplier.access.filter((a: any) => !a.isRevoked);
   const revoked = supplier.access.filter((a: any) => a.isRevoked);
+  const [emailing, setEmailing] = useState<any | null>(null);
 
   const create = async () => {
     setCreating(true);
@@ -612,14 +614,6 @@ function PortalTab({ supplier }: { supplier: any }) {
     } catch {
       toast.error('Copie impossible');
     }
-  };
-
-  const mailto = (token: string) => {
-    const subject = encodeURIComponent('Votre portail fournisseur');
-    const body = encodeURIComponent(
-      `Bonjour ${supplier.contactName || supplier.name},\n\nVoici votre accès à votre portail fournisseur. Vous pourrez y déposer vos factures, consulter et signer vos ententes, échanger des documents et suivre vos paiements :\n\n${base}${token}\n\nConservez ce lien : il vous est personnel.\n\nMerci !`,
-    );
-    return `mailto:${supplier.email || ''}?subject=${subject}&body=${body}`;
   };
 
   const toggleNotify = async (v: boolean) => {
@@ -662,7 +656,7 @@ function PortalTab({ supplier }: { supplier: any }) {
                 </p>
                 <div className='flex flex-wrap gap-2 mt-3'>
                   <button className='btn-secondary px-3 py-1.5 text-xs' onClick={() => copy(a.token)}><LuCopy size={13} /> Copier</button>
-                  <a className='btn-secondary px-3 py-1.5 text-xs' href={mailto(a.token)}><LuMail size={13} /> Envoyer par courriel</a>
+                  <button className='btn-secondary px-3 py-1.5 text-xs' onClick={() => setEmailing(a)}><LuMail size={13} /> Envoyer par courriel</button>
                   <a className='btn-secondary px-3 py-1.5 text-xs' href={`/portail-fournisseur/${a.token}`} target='_blank' rel='noreferrer'><LuExternalLink size={13} /> Voir</a>
                   <button className='btn-danger px-3 py-1.5 text-xs' onClick={() => revoke(a)}><LuX size={13} /> Révoquer</button>
                 </div>
@@ -690,6 +684,7 @@ function PortalTab({ supplier }: { supplier: any }) {
           </div>
         </label>
       </div>
+      {emailing && <SendPortalLinkModal supplier={supplier} access={emailing} link={`${base}${emailing.token}`} onClose={() => setEmailing(null)} />}
       {Dialog}
     </div>
   );

@@ -1,5 +1,7 @@
 import { HttpError } from 'wasp/server';
 import { removeObject } from '../../server/storage';
+import { companySmtp, sendEmailWithAttachment } from '../../server/mail';
+import { buildEmailHtml, linkifyEmailHtml } from '../../shared/mailThread';
 import {
   invoiceBalance,
   invoiceDisplayStatus,
@@ -522,6 +524,58 @@ export const createSupplierPortalAccess = async (
   return context.entities.SupplierPortalAccess.create({
     data: { supplierId, token: generateToken(), label: label?.trim() || null },
   });
+};
+
+/**
+ * Envoie le lien du portail au fournisseur depuis le courriel de l'entreprise
+ * (Paramètres → Intégrations). Comme pour une facture client : Reply-To et copie
+ * en Cci éventuelle viennent de la configuration de l'entreprise, et sans SMTP
+ * configuré on refuse plutôt que d'emprunter le serveur de la plateforme.
+ *
+ * Le corps est celui que l'aperçu a montré : texte saisi, échappé, adresses
+ * rendues cliquables. Une trace reste dans les notes internes du fil.
+ */
+export const sendSupplierPortalLink = async (
+  { accessId, to, cc, subject, body }: { accessId: string; to: string; cc?: string; subject: string; body: string },
+  context: any,
+) => {
+  const companyId = ensureCompany(context.user);
+  const access = await context.entities.SupplierPortalAccess.findUnique({ where: { id: accessId } });
+  if (!access) throw new HttpError(404);
+  const supplier = await ensureSupplierOwned(access.supplierId, companyId, context.entities);
+  if (access.isRevoked) throw new HttpError(400, 'Ce lien a été révoqué : générez-en un nouveau.');
+  if (!to?.trim()) throw new HttpError(400, 'Destinataire requis');
+  if (!subject?.trim()) throw new HttpError(400, 'Objet requis');
+  // Le message est modifiable : on s'assure que le lien, lui, y est toujours.
+  if (!body?.includes(access.token)) throw new HttpError(400, "Le lien du portail n'est plus dans le message : remettez-le avant d'envoyer.");
+
+  const company = await context.entities.Company.findUnique({ where: { id: companyId } });
+  const smtp = companySmtp(company);
+  if (!smtp) throw new HttpError(400, 'Courriel non configuré. Ajoutez votre serveur SMTP dans Paramètres → Intégrations.');
+
+  try {
+    await sendEmailWithAttachment({
+      smtp,
+      to: to.trim(),
+      cc: cc?.trim() || undefined,
+      subject: subject.trim(),
+      text: body,
+      html: linkifyEmailHtml(buildEmailHtml(body, { html: '' })),
+      clientFacing: true,
+    });
+  } catch (err: any) {
+    throw new HttpError(502, `Envoi impossible : ${err?.message || 'erreur SMTP'}`);
+  }
+
+  await context.entities.SupplierNote.create({
+    data: {
+      supplierId: supplier.id,
+      isPrivate: true,
+      authorName: context.user.fullName || context.user.email || null,
+      content: `Lien du portail${access.label ? ` « ${access.label} »` : ''} envoyé par courriel à ${to.trim()}${cc?.trim() ? ` (cc ${cc.trim()})` : ''}.`,
+    },
+  });
+  return { sent: true };
 };
 
 export const revokeSupplierPortalAccess = async ({ id }: { id: string }, context: any) => {

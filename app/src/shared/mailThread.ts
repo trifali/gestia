@@ -162,6 +162,15 @@ export function buildThreadHeaders(logs: SentEmailLog[]): {
  * précédents. Tout ce qui vient de l'utilisateur passe par `escapeHtml`, donc le
  * résultat est sûr à injecter dans l'aperçu.
  */
+/**
+ * Rend cliquables les adresses web d'un HTML déjà échappé par `buildEmailHtml`.
+ * Le texte y arrive échappé : l'adresse ne peut contenir ni `<` ni `"`, et `&`
+ * y est déjà `&amp;`, ce que l'attribut href accepte tel quel.
+ */
+export function linkifyEmailHtml(html: string): string {
+  return html.replace(/https?:\/\/[^\s<>"']+[^\s<>"'.,;:!?)]/g, (url) => `<a href="${url}" style="color:#0369a1;">${url}</a>`);
+}
+
 export function buildEmailHtml(message: string, quoted: { html: string }): string {
   return (
     `<div style="font-family: Arial, sans-serif; font-size: 14px; color:#1a1a1a; white-space: pre-wrap;">${escapeHtml(
