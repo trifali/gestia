@@ -364,6 +364,9 @@ model SupplierNote {
   isFromSupplier Boolean   @default(false)
   authorName     String?
   readAt         DateTime? // messages du fournisseur seulement : lu dans l'application
+  // Modifié après envoi (messages de l'entreprise seulement). Affiché des deux
+  // côtés : le fournisseur doit savoir que le texte n'est plus celui qu'il a lu.
+  editedAt       DateTime?
 
   @@index([supplierId, createdAt])
 }

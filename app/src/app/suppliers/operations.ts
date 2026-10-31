@@ -480,6 +480,18 @@ export const createSupplierNote = async (
   });
 };
 
+/** Ses propres messages seulement : ceux du fournisseur restent tels qu'il les a écrits. */
+export const updateSupplierNote = async ({ id, content }: { id: string; content: string }, context: any) => {
+  const companyId = ensureCompany(context.user);
+  const note = await context.entities.SupplierNote.findUnique({ where: { id } });
+  if (!note) throw new HttpError(404);
+  await ensureSupplierOwned(note.supplierId, companyId, context.entities);
+  if (note.isFromSupplier) throw new HttpError(403, 'Un message du fournisseur ne peut pas être modifié.');
+  if (!content?.trim()) throw new HttpError(400, 'Le message est vide.');
+  if (content.trim() === note.content) return note;
+  return context.entities.SupplierNote.update({ where: { id }, data: { content: content.trim(), editedAt: new Date() } });
+};
+
 export const deleteSupplierNote = async ({ id }: { id: string }, context: any) => {
   const companyId = ensureCompany(context.user);
   const note = await context.entities.SupplierNote.findUnique({ where: { id } });

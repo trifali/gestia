@@ -80,6 +80,7 @@ export const getSupplierPortal = async ({ token }: { token: string }, context: a
       isFromSupplier: n.isFromSupplier,
       authorName: n.authorName,
       createdAt: n.createdAt,
+      editedAt: n.editedAt,
     })),
     stats: {
       totalInvoiced: round2(invoices.filter((i: any) => i.status !== 'rejetee').reduce((s: number, i: any) => s + i.total, 0)),

@@ -49,5 +49,6 @@ module.exports = {
       },
     },
   },
-  plugins: [],
+  // Typographie : rendu Markdown des messages fournisseurs (classes `prose`).
+  plugins: [require('@tailwindcss/typography')],
 };

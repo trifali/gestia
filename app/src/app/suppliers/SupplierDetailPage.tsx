@@ -17,6 +17,7 @@ import {
   duplicateSupplierContract,
   deleteSupplierContract,
   createSupplierNote,
+  updateSupplierNote,
   deleteSupplierNote,
   markSupplierNotesRead,
   createSupplierPortalAccess,
@@ -38,6 +39,7 @@ import type { BrandAssets } from '../documents/pdf';
 import { PAYMENT_METHODS } from '../payments/PaymentForm';
 import { SharedFileManager } from '../projects/SharedFileManager';
 import { SupplierForm } from './SupplierForm';
+import { MessageBody, MessageComposer } from './MessageMarkdown';
 import { SupplierInvoiceForm, SupplierInvoiceList, type SupplierInvoiceRow } from './InvoiceComponents';
 import {
   NewContractModal, ContractEditorModal, ContractStatusBadge, downloadContractPdf, toggleContractShare, contractPeriod, resolveContract,
@@ -455,6 +457,9 @@ function MessagesTab({ supplier }: { supplier: any }) {
   const [content, setContent] = useState('');
   const [isPrivate, setIsPrivate] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [draft, setDraft] = useState('');
+  const [savingEdit, setSavingEdit] = useState(false);
   const hasUnread = supplier.messages.some((m: any) => m.isFromSupplier && !m.readAt);
   const hasPortal = supplier.access.some((a: any) => !a.isRevoked);
 
@@ -462,8 +467,7 @@ function MessagesTab({ supplier }: { supplier: any }) {
     if (hasUnread) markSupplierNotesRead({ supplierId: supplier.id }).catch(() => {});
   }, [hasUnread, supplier.id]);
 
-  const submit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const submit = async () => {
     if (!content.trim()) return;
     setSaving(true);
     try {
@@ -474,6 +478,22 @@ function MessagesTab({ supplier }: { supplier: any }) {
       toast.error(err?.message || 'Erreur');
     } finally {
       setSaving(false);
+    }
+  };
+
+  const startEdit = (m: any) => { setEditingId(m.id); setDraft(m.content); };
+
+  const saveEdit = async () => {
+    if (!editingId || !draft.trim()) return;
+    setSavingEdit(true);
+    try {
+      await updateSupplierNote({ id: editingId, content: draft });
+      setEditingId(null);
+      toast.success('Message modifié');
+    } catch (err: any) {
+      toast.error(err?.message || 'Erreur');
+    } finally {
+      setSavingEdit(false);
     }
   };
 
@@ -488,13 +508,12 @@ function MessagesTab({ supplier }: { supplier: any }) {
 
   return (
     <div className='max-w-2xl space-y-5'>
-      <form onSubmit={submit} className={`card p-4 space-y-3 ${isPrivate ? 'border-amber-200 bg-amber-50/40' : ''}`}>
-        <textarea
-          className='input'
-          rows={3}
-          placeholder={isPrivate ? 'Note interne : jamais visible par le fournisseur…' : `Message à ${supplier.contactName || supplier.name}…`}
+      <form onSubmit={(e) => { e.preventDefault(); submit(); }} className={`card p-4 space-y-3 ${isPrivate ? 'border-amber-200 bg-amber-50/40' : ''}`}>
+        <MessageComposer
           value={content}
-          onChange={(e) => setContent(e.target.value)}
+          onChange={setContent}
+          onSubmitShortcut={submit}
+          placeholder={isPrivate ? 'Note interne : jamais visible par le fournisseur…' : `Message à ${supplier.contactName || supplier.name}…`}
         />
         <div className='flex flex-col sm:flex-row sm:items-center gap-3'>
           <label className='flex items-center gap-2 text-sm cursor-pointer'>
@@ -520,14 +539,30 @@ function MessagesTab({ supplier }: { supplier: any }) {
               <div className='flex items-center gap-2 mb-1.5 text-xs'>
                 <span className='font-medium text-ink'>{m.isFromSupplier ? m.authorName || supplier.name : m.authorName || 'Vous'}</span>
                 {m.isPrivate && <span className='badge-warning'><LuLock size={10} /> Interne</span>}
-                <span className='text-muted ml-auto'>{formatDateTime(m.createdAt)}</span>
-                {!m.isFromSupplier && (
-                  <button className='text-muted hover:text-danger sm:opacity-0 group-hover:opacity-100 transition-opacity' title='Supprimer' onClick={() => remove(m.id)}>
-                    <LuTrash2 size={13} />
-                  </button>
+                <span className='text-muted ml-auto' title={m.editedAt ? `Modifié le ${formatDateTime(m.editedAt)}` : undefined}>
+                  {formatDateTime(m.createdAt)}{m.editedAt && ' · modifié'}
+                </span>
+                {!m.isFromSupplier && editingId !== m.id && (
+                  <span className='flex items-center gap-1.5 sm:opacity-0 group-hover:opacity-100 transition-opacity'>
+                    <button className='text-muted hover:text-ink' title='Modifier' onClick={() => startEdit(m)}><LuPencil size={13} /></button>
+                    <button className='text-muted hover:text-danger' title='Supprimer' onClick={() => remove(m.id)}><LuTrash2 size={13} /></button>
+                  </span>
                 )}
               </div>
-              <p className='text-sm text-ink whitespace-pre-wrap leading-relaxed'>{m.content}</p>
+              {editingId === m.id ? (
+                <div className='space-y-2'>
+                  <MessageComposer value={draft} onChange={setDraft} onSubmitShortcut={saveEdit} autoFocus />
+                  <div className='flex justify-end gap-2'>
+                    <button className='btn-secondary px-3 py-1.5 text-xs' onClick={() => setEditingId(null)}>Annuler</button>
+                    <button className='btn-primary px-3 py-1.5 text-xs' onClick={saveEdit} disabled={savingEdit || !draft.trim()}>
+                      {savingEdit ? 'Enregistrement…' : 'Enregistrer'}
+                    </button>
+                  </div>
+                  {!m.isPrivate && <p className='text-[11px] text-muted'>Le fournisseur verra la mention « modifié » sur ce message.</p>}
+                </div>
+              ) : (
+                <MessageBody source={m.content} />
+              )}
             </li>
           ))}
         </ul>

@@ -406,6 +406,10 @@ action createSupplierNote {
   fn: import { createSupplierNote } from "@src/app/suppliers/operations",
   entities: [User, Supplier, SupplierNote]
 }
+action updateSupplierNote {
+  fn: import { updateSupplierNote } from "@src/app/suppliers/operations",
+  entities: [User, Supplier, SupplierNote]
+}
 action deleteSupplierNote {
   fn: import { deleteSupplierNote } from "@src/app/suppliers/operations",
   entities: [User, Supplier, SupplierNote]

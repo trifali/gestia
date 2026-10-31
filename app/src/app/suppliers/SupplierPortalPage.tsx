@@ -27,6 +27,7 @@ import { computeTaxes, invoiceBalance, invoiceDisplayStatus, withSignature, type
 import { SharedFileManager } from '../projects/SharedFileManager';
 import { PaidBar, readFileAsDataUrl, todayInput, MAX_UPLOAD_BYTES } from './InvoiceComponents';
 import { ContractStatusBadge, downloadContractPdf, contractPeriod } from './ContractComponents';
+import { MessageBody, MessageComposer } from './MessageMarkdown';
 
 const TABS = [
   { id: 'factures', label: 'Factures', icon: LuReceipt },
@@ -414,7 +415,7 @@ function ContractViewer({ token, contract, defaultName, onClose }: { token: stri
           <LuCircleCheck size={16} /> Signée par {contract.signedByName} le {formatDateTime(contract.signedAt)}
         </div>
       )}
-      <div data-color-mode='light' className='prose prose-sm max-w-none'>
+      <div data-color-mode='light'>
         <MDEditor.Markdown source={withSignature(contract.content, contract.signedByName, contract.signedAt)} style={{ background: 'transparent' }} />
       </div>
     </Modal>
@@ -458,8 +459,7 @@ function MessagesPanel({ token, notes, companyName, defaultName }: { token: stri
   const [authorName, setAuthorName] = useState(defaultName);
   const [saving, setSaving] = useState(false);
 
-  const submit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const submit = async () => {
     if (!content.trim()) return;
     setSaving(true);
     try {
@@ -475,9 +475,9 @@ function MessagesPanel({ token, notes, companyName, defaultName }: { token: stri
 
   return (
     <div className='max-w-2xl space-y-5'>
-      <form onSubmit={submit} className='card p-4 space-y-3'>
+      <form onSubmit={(e) => { e.preventDefault(); submit(); }} className='card p-4 space-y-3'>
         <input className='input' placeholder='Votre nom' value={authorName} onChange={(e) => setAuthorName(e.target.value)} />
-        <textarea className='input' rows={3} required placeholder={`Votre message à ${companyName}…`} value={content} onChange={(e) => setContent(e.target.value)} />
+        <MessageComposer value={content} onChange={setContent} onSubmitShortcut={submit} placeholder={`Votre message à ${companyName}…`} />
         <button type='submit' className='btn-primary w-full sm:w-auto' disabled={saving || !content.trim()}><LuSend size={14} /> {saving ? 'Envoi…' : 'Envoyer'}</button>
       </form>
       {notes.length === 0 ? (
@@ -488,9 +488,9 @@ function MessagesPanel({ token, notes, companyName, defaultName }: { token: stri
             <li key={n.id} className={`card p-4 ${n.isFromSupplier ? 'ml-6 sm:ml-12 bg-sky-50 border-sky-100' : 'mr-6 sm:mr-12'}`}>
               <div className='flex items-center gap-2 mb-1.5 text-xs'>
                 <span className='font-medium text-ink'>{n.isFromSupplier ? n.authorName || 'Vous' : companyName}</span>
-                <span className='text-muted ml-auto'>{formatDateTime(n.createdAt)}</span>
+                <span className='text-muted ml-auto'>{formatDateTime(n.createdAt)}{n.editedAt && ' · modifié'}</span>
               </div>
-              <p className='text-sm text-ink whitespace-pre-wrap leading-relaxed'>{n.content}</p>
+              <MessageBody source={n.content} />
             </li>
           ))}
         </ul>
