@@ -590,7 +590,10 @@ function KanbanColumn({
 function groupByStatus(leads: any[], keys: string[]): Columns {
   const cols: Columns = {};
   for (const k of keys) cols[k] = [];
-  for (const l of leads) cols[l.status]?.push(l.id);
+  // Un statut sans colonne — écrit avant un renommage, ou repris d'un autre
+  // tableau — atterrit dans « Statut inconnu » : compté dans l'en-tête, la carte
+  // doit aussi se voir quelque part.
+  for (const l of leads) (cols[l.status] ?? cols[UNKNOWN_STATUS_KEY])?.push(l.id);
   return cols;
 }
 

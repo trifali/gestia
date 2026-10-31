@@ -279,6 +279,12 @@ export const searchLeads: SearchLeads<
   const statusMap = new Map<string, { placeId: string; status: string; notes: string | null }>(
     existingStatuses.map((s: any) => [s.placeId, s])
   );
+  // Le nouveau tableau suit les statuts de l'entreprise. Un statut retenu ailleurs
+  // — sur un tableau qui a les siens — n'y a pas forcément de colonne : la carte
+  // repart alors de la première colonne plutôt que de devenir invisible.
+  const companyStatuses = await effectiveStatusConfigs(context.entities, companyId, null);
+  const validStatuses = new Set<string>(companyStatuses.map((c: any) => c.key));
+  const intakeStatus = companyStatuses.find((c: any) => c.key !== UNKNOWN_STATUS_KEY)?.key ?? 'nouveau';
 
   // Persist results
   const savedSearch = await context.entities.LeadSearch.create({
@@ -309,7 +315,7 @@ export const searchLeads: SearchLeads<
             latitude: l.latitude ?? null,
             longitude: l.longitude ?? null,
             isOpen: l.isOpen ?? null,
-            status: saved?.status ?? 'nouveau',
+            status: saved && validStatuses.has(saved.status) ? saved.status : intakeStatus,
             notes: saved?.notes ?? null,
           };
         }),
@@ -1896,10 +1902,11 @@ export const fetchMoreLeads = async (
 
   if (rawLeads.length === 0) return { added: 0, exhausted: true, nextExpandedRadiusKm, located };
 
-  // Insert the batch on top of the Nouveau column — where they all land — while
-  // keeping the order Google returned them in.
+  // Insert the batch on top of the board's first column — where they all land —
+  // while keeping the order Google returned them in.
+  const intakeStatus = await resolveIntakeStatus(context.entities, companyId, searchId);
   const minOrder = await context.entities.Lead.aggregate({
-    where: { searchId, status: 'nouveau' },
+    where: { searchId, status: intakeStatus },
     _min: { order: true },
   });
   const orderBase = (minOrder._min.order ?? 0) - rawLeads.length;
@@ -1922,7 +1929,7 @@ export const fetchMoreLeads = async (
       latitude: l.latitude ?? null,
       longitude: l.longitude ?? null,
       isOpen: l.isOpen ?? null,
-      status: 'nouveau',
+      status: intakeStatus,
       notes: null,
     })),
   });
