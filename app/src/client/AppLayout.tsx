@@ -9,7 +9,7 @@ import { useState, type ReactNode } from 'react';
 import {
   LuLayoutDashboard, LuUsers, LuFolder, LuFileText,
   LuCreditCard, LuCalendar, LuSearch, LuSettings, LuMenu, LuX, LuShield,
-  LuLayoutList,
+  LuLayoutList, LuBriefcase,
 } from 'react-icons/lu';
 import Logo from './Logo';
 import { useSmsAlerts } from './sms/useSmsAlerts';
@@ -27,6 +27,7 @@ const NAV = [
   { to: '/suivi', label: 'Suivi', icon: LuLayoutList },
   { to: '/clients', label: 'Clients', icon: LuUsers },
   { to: '/projets', label: 'Projets', icon: LuFolder },
+  { to: '/fournisseurs', label: 'Fournisseurs', icon: LuBriefcase },
   { to: '/facturation', label: 'Facturation', icon: LuFileText },
   { to: '/paiements', label: 'Paiements', icon: LuCreditCard },
   { to: '/rencontres', label: 'Rencontres', icon: LuCalendar },

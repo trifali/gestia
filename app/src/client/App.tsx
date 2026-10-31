@@ -80,8 +80,8 @@ export default function App() {
     return <>{toaster}<Outlet /></>;
   }
 
-  // Project detail and client portal pages render without the sidebar
-  const isFullPage = /^\/projets\/[^/]+/.test(location.pathname) || /^\/portail\//.test(location.pathname);
+  // Project detail and the client / supplier portals render without the sidebar
+  const isFullPage = /^\/projets\/[^/]+/.test(location.pathname) || /^\/portail(-fournisseur)?\//.test(location.pathname);
 
   // Cancelled users are blocked from all protected pages
   if ((user as any).status === 'cancelled' && !isFullPage) {

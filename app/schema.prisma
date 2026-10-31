@@ -131,6 +131,7 @@ model Company {
   prospectTemplates   ProspectTemplate[]
   leadShareTokens     LeadSearchShareToken[]
   leadInboundWebhooks LeadInboundWebhook[]
+  suppliers           Supplier[]
 }
 
 model Client {
@@ -180,6 +181,207 @@ model ClientFile {
   sourceTemplate     DocumentTemplate? @relation(fields: [sourceTemplateId], references: [id], onDelete: SetNull)
 
   @@index([clientId])
+}
+
+// ─── Fournisseurs ─────────────────────────────────────────────────────────────
+// Ceux que l'entreprise paie : consultants, travailleurs autonomes, sous-traitants,
+// fournisseurs. Le pendant de Client, dans l'autre sens de l'argent — d'où des
+// tables à part plutôt qu'un `type` sur Client : une facture fournisseur n'a ni
+// numérotation, ni lignes, ni courriel d'envoi, et rien de ce qui lit les clients
+// (facturation, suivi, SMS) ne doit voir apparaître un consultant.
+model Supplier {
+  id        String   @id @default(uuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  companyId String
+
+  type        String  @default("consultant") // consultant | travailleur_autonome | sous_traitant | fournisseur | agence | autre
+  name        String // nom de la personne ou raison sociale
+  contactName String?
+  email       String?
+  phone       String?
+  address     String?
+  city        String?
+  province    String  @default("QC")
+  postalCode  String?
+  website     String?
+  specialty   String? // domaine d'expertise, ce qu'on lui achète
+  status      String  @default("actif") // actif | inactif
+
+  neq          String?
+  taxNumberGst String?
+  taxNumberQst String?
+
+  // Conditions convenues : reprises par défaut dans les ententes et les factures.
+  rateType         String? // horaire | journalier | forfait | mensuel
+  rate             Float?
+  paymentTermsDays Int?
+  paymentMethod    String? // une clé de PAYMENT_METHOD_OPTIONS
+  // Où envoyer l'argent : courriel Interac, transit / institution / compte…
+  // Texte libre, visible uniquement dans l'application, jamais dans le portail.
+  paymentDetails   String?
+
+  notes String?
+
+  // Prévenir l'entreprise (courriel de l'entreprise) quand le fournisseur dépose
+  // une facture ou écrit un message dans son portail.
+  notifyOnPortalActivity Boolean @default(true)
+
+  contracts SupplierContract[]
+  invoices  SupplierInvoice[]
+  files     SupplierFile[]
+  messages  SupplierNote[]
+  access    SupplierPortalAccess[]
+
+  @@index([companyId])
+}
+
+// Une entente de service rédigée pour un fournisseur. Le texte est du Markdown
+// dont les variables ont été résolues à la création — comme un ClientFile issu
+// d'un modèle — pour que ce qui a été signé ne change pas si la fiche change.
+model SupplierContract {
+  id        String   @id @default(uuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  supplier   Supplier @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+  supplierId String
+
+  title     String
+  content   String    @default("")
+  status    String    @default("brouillon") // brouillon | envoyee | signee | terminee | annulee
+  startDate DateTime?
+  endDate   DateTime?
+  rateType  String?
+  rate      Float?
+
+  // Pas de clé étrangère : le modèle peut être supprimé, l'entente reste.
+  sourceTemplateId String?
+
+  // Visible dans le portail du fournisseur. Une entente en rédaction ne l'est pas.
+  sharedWithSupplier Boolean @default(false)
+
+  // Acceptation depuis le portail : nom saisi + case cochée, horodatée. Une trace
+  // d'accord, pas une signature électronique certifiée.
+  signedAt     DateTime?
+  signedByName String?
+
+  @@index([supplierId])
+}
+
+// Une facture reçue d'un fournisseur. `status` ne porte que la décision de
+// l'entreprise (à approuver / approuvée / rejetée) ; l'état du paiement — à
+// payer, partiel, payé, en retard — se déduit de amountPaid et dueDate (voir
+// shared/supplier). Deux colonnes qu'il faudrait garder synchrones finiraient
+// par se contredire.
+model SupplierInvoice {
+  id        String   @id @default(uuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  supplier   Supplier @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+  supplierId String
+
+  number      String? // numéro du fournisseur, pas le nôtre
+  description String?
+  issueDate   DateTime  @default(now())
+  dueDate     DateTime?
+  subtotal    Float     @default(0)
+  taxGst      Float     @default(0)
+  taxQst      Float     @default(0)
+  total       Float     @default(0)
+  amountPaid  Float     @default(0)
+
+  status          String  @default("approuvee") // a_approuver | approuvee | rejetee
+  rejectionReason String?
+  source          String  @default("interne") // interne | portail
+
+  // La pièce jointe (PDF, photo) dans MinIO.
+  fileKey  String?
+  fileName String?
+  fileMime String?
+  fileSize Int     @default(0)
+
+  supplierNote String? // message joint par le fournisseur au dépôt
+  notes        String? // notes internes, jamais montrées dans le portail
+
+  payments SupplierPayment[]
+
+  @@index([supplierId])
+}
+
+model SupplierPayment {
+  id        String   @id @default(uuid())
+  createdAt DateTime @default(now())
+
+  invoice   SupplierInvoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  invoiceId String
+
+  amount    Float
+  method    String   @default("virement")
+  paidAt    DateTime @default(now())
+  reference String?
+  notes     String?
+
+  @@index([invoiceId])
+}
+
+// Drive du fournisseur. Le portail ne voit qu'un seul dossier de cet arbre, celui
+// marqué `isPortalRoot`, créé à la demande : ce qu'on y dépose est partagé, le
+// reste demeure interne.
+model SupplierFile {
+  id        String   @id @default(uuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  supplier   Supplier @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+  supplierId String
+
+  name         String
+  isFolder     Boolean @default(false)
+  parentId     String?
+  key          String?
+  mimeType     String?
+  size         Int     @default(0)
+  isPortalRoot Boolean @default(false)
+
+  @@index([supplierId])
+}
+
+// Fil de messages avec le fournisseur, dans les deux sens. Une note privée ne
+// quitte jamais l'application.
+model SupplierNote {
+  id        String   @id @default(uuid())
+  createdAt DateTime @default(now())
+
+  supplier   Supplier @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+  supplierId String
+
+  content        String
+  isPrivate      Boolean   @default(false)
+  isFromSupplier Boolean   @default(false)
+  authorName     String?
+  readAt         DateTime? // messages du fournisseur seulement : lu dans l'application
+
+  @@index([supplierId, createdAt])
+}
+
+model SupplierPortalAccess {
+  id        String   @id @default(uuid())
+  createdAt DateTime @default(now())
+
+  supplier   Supplier @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+  supplierId String
+
+  token      String    @unique
+  label      String?
+  isRevoked  Boolean   @default(false)
+  expiresAt  DateTime?
+  lastUsedAt DateTime?
+
+  @@index([supplierId])
 }
 
 model Project {

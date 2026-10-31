@@ -110,7 +110,8 @@ function parseInline(raw: string, t: Theme): Span[] {
     { re: /\{\{([^}]+)\}\}/, type: 'var' },
     { re: /\*\*([^*]+)\*\*/, type: 'bold' },
     { re: /\*([^*]+)\*/, type: 'italic' },
-    { re: /_([^_]+)_/, type: 'italic' },
+    // `_mot_`, mais pas les lignes à compléter « Nom : ______ Date : ______ ».
+    { re: /(?<![\w_])_(?![\s_])([^_]+?)(?<![\s_])_(?![\w_])/, type: 'italic' },
     { re: /`([^`]+)`/, type: 'code' },
   ];
 

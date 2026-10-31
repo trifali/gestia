@@ -114,6 +114,23 @@ page ClientDetailPage {
   component: import ClientDetailPage from "@src/app/clients/ClientDetailPage"
 }
 
+route SuppliersRoute { path: "/fournisseurs", to: SuppliersPage }
+page SuppliersPage {
+  authRequired: true,
+  component: import SuppliersPage from "@src/app/suppliers/SuppliersPage"
+}
+
+route SupplierDetailRoute { path: "/fournisseurs/:supplierId", to: SupplierDetailPage }
+page SupplierDetailPage {
+  authRequired: true,
+  component: import SupplierDetailPage from "@src/app/suppliers/SupplierDetailPage"
+}
+
+route SupplierPortalRoute { path: "/portail-fournisseur/:token", to: SupplierPortalPage }
+page SupplierPortalPage {
+  component: import SupplierPortalPage from "@src/app/suppliers/SupplierPortalPage"
+}
+
 route ProjectsRoute { path: "/projets", to: ProjectsPage }
 page ProjectsPage {
   authRequired: true,
@@ -307,6 +324,175 @@ action updateClientFileContent {
 action updateClientFileDynamicVars {
   fn: import { updateClientFileDynamicVars } from "@src/app/clients/clientFileOperations",
   entities: [User, Client, ClientFile]
+}
+
+// ─── Fournisseurs ─────────────────────────────────────────────────────────────
+// Consultants, travailleurs autonomes, sous-traitants : fiche, ententes de
+// service, factures reçues et leurs paiements, drive et portail sans compte.
+
+query getSuppliers {
+  fn: import { getSuppliers } from "@src/app/suppliers/operations",
+  entities: [User, Supplier, SupplierInvoice, SupplierContract, SupplierNote]
+}
+query getSupplierDetail {
+  fn: import { getSupplierDetail } from "@src/app/suppliers/operations",
+  entities: [User, Supplier, SupplierContract, SupplierInvoice, SupplierPayment, SupplierNote, SupplierPortalAccess]
+}
+action createSupplier {
+  fn: import { createSupplier } from "@src/app/suppliers/operations",
+  entities: [User, Supplier]
+}
+action updateSupplier {
+  fn: import { updateSupplier } from "@src/app/suppliers/operations",
+  entities: [User, Supplier]
+}
+action deleteSupplier {
+  fn: import { deleteSupplier } from "@src/app/suppliers/operations",
+  entities: [User, Supplier, SupplierFile, SupplierInvoice]
+}
+// `Company` et `DocumentTemplate` : les variables de l'entente sont résolues à la
+// création, à partir des deux fiches et du modèle choisi.
+action createSupplierContract {
+  fn: import { createSupplierContract } from "@src/app/suppliers/operations",
+  entities: [User, Company, Supplier, SupplierContract, DocumentTemplate]
+}
+action updateSupplierContract {
+  fn: import { updateSupplierContract } from "@src/app/suppliers/operations",
+  entities: [User, Supplier, SupplierContract]
+}
+// Rédaction assistée : renvoie une proposition, n'enregistre rien. L'éditeur la
+// fait relire (sections touchées, montants disparus) avant de l'appliquer.
+action draftSupplierContractWithAi {
+  fn: import { draftSupplierContractWithAi } from "@src/app/suppliers/contractAi",
+  entities: [User, Company, Supplier, SupplierContract]
+}
+action duplicateSupplierContract {
+  fn: import { duplicateSupplierContract } from "@src/app/suppliers/operations",
+  entities: [User, Supplier, SupplierContract]
+}
+action deleteSupplierContract {
+  fn: import { deleteSupplierContract } from "@src/app/suppliers/operations",
+  entities: [User, Supplier, SupplierContract]
+}
+query getSupplierInvoices {
+  fn: import { getSupplierInvoices } from "@src/app/suppliers/operations",
+  entities: [User, Supplier, SupplierInvoice, SupplierPayment]
+}
+action createSupplierInvoice {
+  fn: import { createSupplierInvoice } from "@src/app/suppliers/operations",
+  entities: [User, Supplier, SupplierInvoice]
+}
+action updateSupplierInvoice {
+  fn: import { updateSupplierInvoice } from "@src/app/suppliers/operations",
+  entities: [User, Supplier, SupplierInvoice]
+}
+action setSupplierInvoiceStatus {
+  fn: import { setSupplierInvoiceStatus } from "@src/app/suppliers/operations",
+  entities: [User, Supplier, SupplierInvoice]
+}
+action deleteSupplierInvoice {
+  fn: import { deleteSupplierInvoice } from "@src/app/suppliers/operations",
+  entities: [User, Supplier, SupplierInvoice]
+}
+action createSupplierPayment {
+  fn: import { createSupplierPayment } from "@src/app/suppliers/operations",
+  entities: [User, Supplier, SupplierInvoice, SupplierPayment]
+}
+action deleteSupplierPayment {
+  fn: import { deleteSupplierPayment } from "@src/app/suppliers/operations",
+  entities: [User, Supplier, SupplierInvoice, SupplierPayment]
+}
+action createSupplierNote {
+  fn: import { createSupplierNote } from "@src/app/suppliers/operations",
+  entities: [User, Supplier, SupplierNote]
+}
+action deleteSupplierNote {
+  fn: import { deleteSupplierNote } from "@src/app/suppliers/operations",
+  entities: [User, Supplier, SupplierNote]
+}
+action markSupplierNotesRead {
+  fn: import { markSupplierNotesRead } from "@src/app/suppliers/operations",
+  entities: [User, Supplier, SupplierNote]
+}
+action createSupplierPortalAccess {
+  fn: import { createSupplierPortalAccess } from "@src/app/suppliers/operations",
+  entities: [User, Supplier, SupplierPortalAccess]
+}
+action revokeSupplierPortalAccess {
+  fn: import { revokeSupplierPortalAccess } from "@src/app/suppliers/operations",
+  entities: [User, Supplier, SupplierPortalAccess]
+}
+
+query getSupplierFiles {
+  fn: import { getSupplierFiles } from "@src/app/suppliers/supplierFileOperations",
+  entities: [User, Supplier, SupplierFile]
+}
+action createSupplierFolder {
+  fn: import { createSupplierFolder } from "@src/app/suppliers/supplierFileOperations",
+  entities: [User, Supplier, SupplierFile]
+}
+action uploadSupplierFile {
+  fn: import { uploadSupplierFile } from "@src/app/suppliers/supplierFileOperations",
+  entities: [User, Supplier, SupplierFile]
+}
+action deleteSupplierFiles {
+  fn: import { deleteSupplierFiles } from "@src/app/suppliers/supplierFileOperations",
+  entities: [User, Supplier, SupplierFile]
+}
+action renameSupplierFile {
+  fn: import { renameSupplierFile } from "@src/app/suppliers/supplierFileOperations",
+  entities: [User, Supplier, SupplierFile]
+}
+action moveSupplierFiles {
+  fn: import { moveSupplierFiles } from "@src/app/suppliers/supplierFileOperations",
+  entities: [User, Supplier, SupplierFile]
+}
+
+// Portail fournisseur — public, le jeton fait office d'accès. `Company` : nom de
+// l'entreprise affiché, et courriel d'alerte quand le fournisseur agit.
+query getSupplierPortal {
+  fn: import { getSupplierPortal } from "@src/app/suppliers/portalOperations",
+  entities: [SupplierPortalAccess, Supplier, Company, SupplierContract, SupplierInvoice, SupplierPayment, SupplierNote]
+}
+query getSupplierPortalBrand {
+  fn: import { getSupplierPortalBrand } from "@src/app/suppliers/portalOperations",
+  entities: [SupplierPortalAccess, Supplier, Company]
+}
+action submitSupplierPortalInvoice {
+  fn: import { submitSupplierPortalInvoice } from "@src/app/suppliers/portalOperations",
+  entities: [SupplierPortalAccess, Supplier, SupplierInvoice, Company]
+}
+action submitSupplierPortalNote {
+  fn: import { submitSupplierPortalNote } from "@src/app/suppliers/portalOperations",
+  entities: [SupplierPortalAccess, Supplier, SupplierNote, Company]
+}
+action signSupplierContract {
+  fn: import { signSupplierContract } from "@src/app/suppliers/portalOperations",
+  entities: [SupplierPortalAccess, Supplier, SupplierContract, Company]
+}
+query getSupplierPortalFiles {
+  fn: import { getSupplierPortalFiles } from "@src/app/suppliers/supplierFileOperations",
+  entities: [SupplierPortalAccess, Supplier, SupplierFile]
+}
+action uploadSupplierPortalFile {
+  fn: import { uploadSupplierPortalFile } from "@src/app/suppliers/supplierFileOperations",
+  entities: [SupplierPortalAccess, Supplier, SupplierFile]
+}
+action createSupplierPortalFolder {
+  fn: import { createSupplierPortalFolder } from "@src/app/suppliers/supplierFileOperations",
+  entities: [SupplierPortalAccess, Supplier, SupplierFile]
+}
+action deleteSupplierPortalFiles {
+  fn: import { deleteSupplierPortalFiles } from "@src/app/suppliers/supplierFileOperations",
+  entities: [SupplierPortalAccess, Supplier, SupplierFile]
+}
+action renameSupplierPortalFile {
+  fn: import { renameSupplierPortalFile } from "@src/app/suppliers/supplierFileOperations",
+  entities: [SupplierPortalAccess, Supplier, SupplierFile]
+}
+action moveSupplierPortalFiles {
+  fn: import { moveSupplierPortalFiles } from "@src/app/suppliers/supplierFileOperations",
+  entities: [SupplierPortalAccess, Supplier, SupplierFile]
 }
 
 query getProjects {
