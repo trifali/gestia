@@ -818,7 +818,7 @@ query getLeadSearchDetail {
 }
 action searchLeads {
   fn: import { searchLeads } from "@src/app/leads/operations",
-  entities: [User, LeadSearch, Lead, ProspectStatus, ProspectArchive]
+  entities: [User, LeadSearch, Lead, ProspectStatus, ProspectArchive, LeadStatusConfig]
 }
 action updateLead {
   fn: import { updateLead } from "@src/app/leads/operations",
@@ -1073,7 +1073,7 @@ query getEmailCapability {
 }
 action fetchMoreLeads {
   fn: import { fetchMoreLeads } from "@src/app/leads/operations",
-  entities: [User, LeadSearch, Lead, ProspectArchive]
+  entities: [User, LeadSearch, Lead, ProspectArchive, LeadStatusConfig]
 }
 action createLead {
   fn: import { createLead } from "@src/app/leads/operations",
@@ -1303,7 +1303,7 @@ query getLeadSourceConfigsByToken {
 }
 action fetchMoreLeadsByToken {
   fn: import { fetchMoreLeadsByToken } from "@src/app/leads/operations",
-  entities: [LeadSearch, Lead, LeadSearchShareToken, ProspectArchive]
+  entities: [LeadSearch, Lead, LeadSearchShareToken, ProspectArchive, LeadStatusConfig]
 }
 query getLeadEmailLogsByToken {
   fn: import { getLeadEmailLogsByToken } from "@src/app/leads/operations",
